@@ -1,0 +1,16 @@
+/* Canvas chrome in the app's design tokens. Map each --canvas-* token to the
+   app's matching token so the chrome follows its themes; unmapped tokens fall
+   back to neutral grays. */
+.canvas-root,
+.canvas-frame-page,
+.canvas-frame-root,
+.canvas-frame-missing {
+  /* --canvas-bg: var(--app-page-background);
+     --canvas-surface: var(--app-surface);
+     --canvas-border: var(--app-border);
+     --canvas-text: var(--app-text);
+     --canvas-text-subtle: var(--app-text-muted);
+     --canvas-focus: var(--app-focus-ring);
+     --canvas-hover: var(--app-hover);
+     --canvas-radius: var(--app-radius); */
+}

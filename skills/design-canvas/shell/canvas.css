@@ -1,0 +1,357 @@
+/* A quiet workspace: plain background, subtle preview edges, fixed controls.
+   Kits map the --canvas-* tokens to the project's design tokens in theme.css. */
+html,
+body,
+#root {
+  block-size: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+.canvas-root,
+.canvas-frame-page,
+.canvas-frame-root,
+.canvas-frame-missing {
+  --canvas-bg-color: var(--canvas-bg, #eef0f2);
+  --canvas-surface-color: var(--canvas-surface, #ffffff);
+  --canvas-border-color: var(--canvas-border, #d5d9de);
+  --canvas-text-color: var(--canvas-text, #1f2328);
+  --canvas-subtle-color: var(--canvas-text-subtle, #5f6b76);
+  --canvas-focus-color: var(--canvas-focus, #2f6fed);
+  --canvas-hover-color: var(--canvas-hover, rgb(0 0 0 / 6%));
+  --canvas-radius-size: var(--canvas-radius, 8px);
+  color: var(--canvas-text-color);
+}
+/* Chrome text uses the app font when a kit maps --canvas-font, else the system font. */
+.canvas-item-head,
+.canvas-toolbar,
+.canvas-toast,
+.canvas-frame-missing {
+  font-family: var(--canvas-font, system-ui, -apple-system, "Segoe UI", sans-serif);
+}
+.canvas-root {
+  position: fixed;
+  inset: 0;
+  background: var(--canvas-bg-color);
+  font-size: 14px;
+}
+.canvas-viewport {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: none;
+  cursor: default;
+}
+.canvas-viewport:focus-visible {
+  outline: 2px solid var(--canvas-focus-color);
+  outline-offset: -2px;
+}
+.canvas-world {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  transform-origin: 0 0;
+}
+.canvas-item {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* The item last touched or focused rises above overlapping items, so its
+   handle and name stay reachable. */
+.canvas-item[data-front] {
+  z-index: 1;
+}
+.canvas-item-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* The grip and the name both drag the item, with mouse or touch. */
+.canvas-item-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  touch-action: none;
+  user-select: none;
+}
+.canvas-subtle {
+  color: var(--canvas-subtle-color);
+  font-size: 13px;
+}
+.canvas-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 24px;
+  block-size: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--canvas-subtle-color);
+  cursor: default;
+  touch-action: none;
+}
+.canvas-handle:hover,
+.canvas-name:hover,
+.canvas-button:hover,
+.canvas-open:hover {
+  background: var(--canvas-hover-color);
+}
+.canvas-handle:focus-visible,
+.canvas-name:focus-visible,
+.canvas-button:focus-visible,
+.canvas-open:focus-visible {
+  outline: 2px solid var(--canvas-focus-color);
+  outline-offset: 1px;
+}
+.canvas-name-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-inline-size: 0;
+}
+/* A name, not a button: no chrome at rest, a plain-button wash on hover. It
+   copies on click, Enter, or Space, and drags the item when pulled. */
+.canvas-name {
+  position: relative;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--canvas-text-color);
+  font: inherit;
+  font-weight: 600;
+  font-size: 15px;
+  text-align: start;
+  cursor: default;
+}
+/* Quiet until the title is hovered or the link has keyboard focus. */
+.canvas-open {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 24px;
+  block-size: 24px;
+  border-radius: 4px;
+  color: var(--canvas-subtle-color);
+  cursor: default;
+  opacity: 0;
+}
+.canvas-item-head:hover .canvas-open,
+.canvas-open:focus-visible {
+  opacity: 1;
+}
+.canvas-open:hover {
+  color: var(--canvas-text-color);
+}
+@media (hover: none) {
+  .canvas-open {
+    opacity: 1;
+  }
+}
+/* Hint on hover and keyboard focus; hovering never copies. */
+[data-tip]:hover::after,
+[data-tip]:focus-visible::after {
+  content: attr(data-tip);
+  position: absolute;
+  inset-block-end: calc(100% + 6px);
+  inset-inline-start: 0;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--canvas-text-color);
+  color: var(--canvas-surface-color);
+  font-size: 12px;
+  font-weight: 400;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.canvas-note {
+  margin: 0;
+  /* Lines up with the name text: grip, gap, and the name's own padding. */
+  padding-inline-start: 34px;
+}
+.canvas-copy-fallback {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.canvas-copy-fallback input,
+.canvas-toast input {
+  font: inherit;
+  user-select: all;
+}
+.canvas-preview {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--canvas-border-color);
+  border-radius: var(--canvas-radius-size);
+  background: var(--canvas-surface-color);
+  touch-action: pan-x pan-y;
+}
+.canvas-frame {
+  display: block;
+  border: 0;
+}
+/* While Space is held or a gesture runs, frames let the canvas take the pointer. */
+.canvas-viewport[data-space="true"] .canvas-frame,
+.canvas-viewport[data-gesture] .canvas-frame {
+  pointer-events: none;
+}
+.canvas-viewport[data-space="true"] .canvas-preview,
+.canvas-viewport[data-gesture] .canvas-preview {
+  user-select: none;
+}
+.canvas-pick {
+  position: fixed;
+  z-index: 2147483646;
+  box-sizing: border-box;
+  border: 2px solid var(--canvas-focus-color, #2f6fed);
+  border-radius: 3px;
+  background: rgb(47 111 237 / 8%);
+  pointer-events: none;
+}
+/* Minimal fixed controls, centered at the bottom; notices sit just above. */
+.canvas-toolbar,
+.canvas-toast {
+  position: fixed;
+  inset-inline-start: 50%;
+  translate: -50% 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--canvas-border-color);
+  border-radius: 12px;
+  background: var(--canvas-surface-color);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 8%);
+}
+.canvas-toolbar {
+  inset-block-end: 16px;
+}
+.canvas-toast {
+  inset-block-end: 68px;
+  gap: 8px;
+  padding: 6px 12px;
+  inline-size: max-content;
+  max-inline-size: calc(100vw - 32px);
+}
+.canvas-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-block-size: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--canvas-text-color);
+  font: inherit;
+  white-space: nowrap;
+  cursor: default;
+}
+.canvas-icon-button {
+  justify-content: center;
+  inline-size: 30px;
+  padding: 0;
+}
+.canvas-icon-button[data-tip]::after {
+  inset-block-end: calc(100% + 8px);
+}
+/* Theme choices read as one pressed group. */
+.canvas-themes {
+  display: inline-flex;
+  gap: 2px;
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.canvas-button[aria-pressed="true"] {
+  background: var(--canvas-hover-color);
+  box-shadow: inset 0 0 0 1px var(--canvas-border-color);
+}
+.canvas-separator {
+  inline-size: 1px;
+  block-size: 18px;
+  margin: 0 4px;
+  background: var(--canvas-border-color);
+}
+.canvas-help {
+  position: relative;
+  display: inline-flex;
+}
+/* Shown while the help button is hovered or keyboard-focused. */
+.canvas-help-popover {
+  position: absolute;
+  inset-block-end: calc(100% + 10px);
+  inset-inline-end: 0;
+  display: none;
+  flex-direction: column;
+  gap: 4px;
+  inline-size: max-content;
+  max-inline-size: 320px;
+  padding: 10px 12px;
+  border: 1px solid var(--canvas-border-color);
+  border-radius: var(--canvas-radius-size);
+  background: var(--canvas-surface-color);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 10%);
+  color: var(--canvas-text-color);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.canvas-help:hover .canvas-help-popover,
+.canvas-help:focus-within .canvas-help-popover {
+  display: flex;
+}
+.canvas-zoom {
+  min-inline-size: 44px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+}
+.canvas-live {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+/* Frame page: the item alone at its own size. Opened in a tab, it sits
+   centered on the canvas background and scrolls when larger than the tab;
+   auto margins keep every edge reachable. Viewport units, because the
+   project's providers may wrap it in a container without a height. */
+.canvas-frame-page {
+  display: flex;
+  box-sizing: border-box;
+  block-size: 100vh;
+  overflow: auto;
+  background: var(--canvas-bg-color);
+}
+.canvas-frame-page > * {
+  flex: none;
+  margin: auto;
+  box-shadow: 0 0 0 1px var(--canvas-border-color);
+}
+.canvas-frame-root {
+  position: relative;
+  overflow: hidden;
+  background: var(--canvas-surface-color);
+}
+.canvas-frame-missing {
+  margin: 16px;
+  font-size: 14px;
+}
+/* Narrow windows keep every control; the text labels go first. */
+@media (max-width: 480px) {
+  .canvas-toolbar .canvas-button:not(.canvas-icon-button) {
+    font-size: 0;
+    gap: 0;
+  }
+}

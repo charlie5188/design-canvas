@@ -1,0 +1,4 @@
+{
+  "extends": "__APP_DIR__/tsconfig.json",
+  "include": ["./**/*.ts", "./**/*.mts", "./**/*.tsx"]
+}
