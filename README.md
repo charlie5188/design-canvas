@@ -1,5 +1,7 @@
 # design-canvas
 
+English | [日本語](#日本語)
+
 An agent skill that puts your React app's real components on a pannable, zoomable canvas, so you can explore and compare UI directions side by side by talking to your coding agent.
 
 https://github.com/user-attachments/assets/56207fe0-f63e-459e-b0ce-bd546ada283b
@@ -56,3 +58,62 @@ The canvas rules are adapted from [`create-canvas`](https://github.com/ibelick/u
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+---
+
+## 日本語
+
+React アプリの実際のコンポーネントを、パン・ズームできるキャンバスに並べるエージェントスキルです。コーディングエージェントと会話しながら、UI の方向性を並べて検討・比較できます。
+
+プロジェクトごとにキャンバスをゼロから作らせる代わりに、このスキルはテスト済みのキャンバス本体をインストールし、アプリに合わせて設定します。エージェントが書くのは、比較したいアイテムだけです。
+
+### できること
+
+- **本物のコンポーネント、バックエンドなし。** アイテムはアプリ自身のコンポーネントを、合成データとアプリのスタイル・テーマで表示します。
+- **見ているものをそのまま会話に。** アイテム名をクリックすると名前をコピーできます。⌥/Alt を押しながら要素をクリックすると、`Pricing card · compact › button “Upgrade”` のような参照をコピーでき、そのまま会話に貼り付けられます。
+- **本物のビューポート。** アイテムに `viewport: true` を指定すると、そのアイテムの幅を持つフレーム内で表示されます。ブレークポイントやメディアクエリが、実際のスマートフォンやデスクトップと同じように動きます。
+- **アプリのテーマ。** ライト・ダーク（またはアプリが持つ任意のテーマ）をツールバーから切り替えられ、すべてのアイテムに反映されます。
+- **キャンバスから離れない。** プレビュー内のリンク、フォーム送信、ルーター呼び出しでページが遷移することはありません。遷移先は通知で表示されます。
+- **アイテム単体で開く。** どのアイテムも実寸のまま別タブで開けます。スクリーンショットやデザインツールへの取り込みにそのまま使えます。
+- **静かな作業スペース。** 名前をドラッグしてアイテムを移動し、パン、ズーム、全体表示ができます。再読み込みしてもレイアウトは保たれます。
+
+### 必要なもの
+
+- macOS（インストーラーは bash、rsync、perl を使います）
+- React アプリ。Next.js と Vite のアプリは、Tailwind や shadcn/ui も含めて自動で検出・設定されます。
+- アプリに Vite が入っていること。入っていない場合は、エージェントが開発依存として追加してよいか確認します。Turbopack で Tailwind をビルドしている Next.js アプリには、`@tailwindcss/vite` も必要です。
+
+### インストール
+
+```sh
+npx skills add charlie5188/design-canvas
+```
+
+あとはエージェントに、たとえばこう頼みます。
+
+- 「料金カードのレイアウトを 3 案比較するキャンバスを作って」
+- 「通知をグループ化した受信箱を、今のものの隣に追加して」
+- 「設定ページをスマートフォンとデスクトップで並べて見せて」
+
+### しくみ
+
+- `skills/design-canvas/shell/`：React で書かれたキャンバス本体です。各キャンバスにコピーされ、エージェントが作り直すことはありません。
+- `skills/design-canvas/kits/react-vite/`：アプリの隣に置かれる Vite のページです。アプリのエイリアス、スタイル、環境変数、Vite プラグインを再利用し、Next.js 専用のモジュールは代替品に置き換えます。
+- `skills/design-canvas/scripts/install.sh`：本体とキットを `<app>/design-canvas/<name>/` にコピーし、検出できるものを自動で設定します。
+- `skills/design-canvas/references/making-a-kit.md`：アプリへの設定を仕上げるためにエージェントが使うチェックリストです。仕上がった設定を `~/.agents/design-canvas-kits/` にプライベートキットとして保存し、次回からは設定なしでインストールする方法も書かれています。
+
+キャンバスはプロトタイプです。共有したいときだけコミットしてください。
+
+### 制限
+
+- 本体は React です。ほかのフレームワークでは、エージェントが `shell/TESTING.md` を受け入れ基準として移植します。
+- サーバーコンポーネント、サーバーアクション、サーバー側の秘密情報が必要なものは、キャンバス上で表示できません。代わりに、その下にあるクライアントコンポーネントをプレビューしてください。
+- `viewport` フレームの上では、中ボタンでのパンとタッチのピンチ操作がキャンバスに届きません。
+
+### クレジット
+
+キャンバスのルールは、Julien Thibeaut 氏の [`create-canvas`](https://github.com/ibelick/ui-skills)（MIT）をもとにしています。
+
+### ライセンス
+
+MIT。[LICENSE](LICENSE) を参照してください。
