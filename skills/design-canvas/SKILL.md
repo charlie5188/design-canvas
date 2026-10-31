@@ -11,7 +11,7 @@ Rules adapted from `create-canvas` in ibelick/ui-skills (MIT).
 
 ## 1. Find or install the canvas
 
-- Look for an existing canvas first: a folder with `canvas/Canvas.tsx` and `registry.tsx`, usually under `design-canvas/` in the app. Continue that one for follow-up requests.
+- Look for an existing canvas first: a folder with `canvas/Canvas.tsx` and `registry.tsx`, usually under `design-canvas/` in the app. Continue that one for follow-up requests. Before your first change to it in a conversation, bring it up to date with this skill: `bash ~/.agents/skills/design-canvas/scripts/update.sh <canvas-folder>`. It replaces only `canvas/` and lists what changed. If anything changed, tell the user in one line that the canvas was updated.
 - Choose a kit. First list the private kits, which are fitted to specific projects: `ls ~/.agents/design-canvas-kits` (or `$DESIGN_CANVAS_KITS`), and read each `kit.env` label. Use the one that matches this project. Otherwise use `react-vite`, which fits any React app, including Next.js; its canvas is a Vite page in `<app>/design-canvas/<name>/`.
 - Run the installer from inside the app:
 
@@ -88,4 +88,4 @@ End with: changed paths and new item names; checks run and results; what is not 
 
 ## Changing the shell
 
-The shell lives in `~/.agents/skills/design-canvas/shell/`. Fix bugs there, not in a canvas copy, then copy `shell/` into the canvases that need the fix. After any shell change, run the full checklist in `shell/TESTING.md` and say which parts you could not test.
+The shell lives in `~/.agents/skills/design-canvas/shell/`. Fix bugs there, not in a canvas copy, then run `scripts/update.sh` on the canvases that need the fix. After any shell change, run the full checklist in `shell/TESTING.md` and say which parts you could not test.
