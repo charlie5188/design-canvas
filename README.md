@@ -19,6 +19,15 @@ Instead of asking the agent to build a canvas from scratch for every project, th
 - **One item alone.** Open any item in its own tab at its real size, ready for a screenshot or a design-tool import.
 - **A quiet workspace.** Drag items by their name, pan, zoom, fit all, and reload without losing the layout.
 
+## Compared with Claude Design
+
+[Claude Design](https://www.anthropic.com/news/claude-design-anthropic-labs) makes new designs from a prompt, using your design system, and can hand them to Claude Code to build. design-canvas starts at the other end: it shows the components already in your code, and the agent changes that code directly.
+
+- **Claude Design** suits new ideas that have no code yet, decks and one-pagers, and people without a local dev setup.
+- **design-canvas** suits refining a product that already exists. What you see is your real CSS, states, themes, and breakpoints, and each change is already in the code, so there is no handoff step.
+
+You can use both: explore a new direction in Claude Design, then refine it as real code on the canvas.
+
 ## Requirements
 
 - macOS (the installer uses bash, rsync, and perl).
@@ -78,6 +87,15 @@ React アプリの実際のコンポーネントを、パン・ズームでき�
 - **キャンバスから離れない。** プレビュー内のリンク、フォーム送信、ルーター呼び出しでページが遷移することはありません。遷移先は通知で表示されます。
 - **アイテム単体で開く。** どのアイテムも実寸のまま別タブで開けます。スクリーンショットやデザインツールへの取り込みにそのまま使えます。
 - **静かな作業スペース。** 名前をドラッグしてアイテムを移動し、パン、ズーム、全体表示ができます。再読み込みしてもレイアウトは保たれます。
+
+### Claude Design との違い
+
+[Claude Design](https://www.anthropic.com/news/claude-design-anthropic-labs) は、プロンプトからデザインシステムに沿った新しいデザインを作り、実装のために Claude Code に渡せます。design-canvas は反対側から始めます。コードにすでにあるコンポーネントを表示し、エージェントがそのコードを直接変更します。
+
+- **Claude Design** が向いているのは、まだコードがない新しいアイデア、スライドや 1 枚ものの資料、ローカルの開発環境がない人です。
+- **design-canvas** が向いているのは、既存のプロダクトを磨き込むときです。表示されるのは実際の CSS、状態、テーマ、ブレークポイントで、変更は最初からコードに入っているため、受け渡しの手順がありません。
+
+両方を使うこともできます。Claude Design で新しい方向性を探り、キャンバス上で実際のコードとして仕上げます。
 
 ### 必要なもの
 
