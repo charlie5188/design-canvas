@@ -3,10 +3,15 @@
 # checks in skills/design-canvas/shell/TESTING.md stay manual.
 name: Smoke test
 
+# Docs and the license cannot change what installs, builds, or loads, so a change
+# that touches only them skips the run. If this check is ever made required for
+# merging, skip inside the job instead: a required check that never starts blocks the PR.
 on:
   pull_request:
+    paths-ignore: ['**.md', LICENSE]
   push:
     branches: [main]
+    paths-ignore: ['**.md', LICENSE]
 
 jobs:
   smoke:
