@@ -23,7 +23,11 @@ export type FrameMessage =
   /** A link the frame blocked; the canvas reveals or reports it. */
   | { type: "link"; href: string }
   /** A form submit the frame blocked. */
-  | { type: "form" };
+  | { type: "form" }
+  /** In annotate mode: the element clicked, at (x, y) in the frame. */
+  | { type: "annotate"; label: string; x: number; y: number }
+  /** Escape pressed inside the frame while annotating. */
+  | { type: "escape" };
 
 export function postToCanvas(message: FrameMessage) {
   window.parent.postMessage({ source: SOURCE, ...message }, window.location.origin);
@@ -46,6 +50,10 @@ export function readFrameMessage(data: unknown): FrameMessage | undefined {
     return { type: "link", href: m.href };
   }
   if (m.type === "form") return { type: "form" };
+  if (m.type === "annotate" && typeof m.label === "string" && m.label.length <= MAX_LABEL && finite(m.x) && finite(m.y)) {
+    return { type: "annotate", label: m.label, x: m.x, y: m.y };
+  }
+  if (m.type === "escape") return { type: "escape" };
   return undefined;
 }
 
@@ -53,7 +61,10 @@ export function readFrameMessage(data: unknown): FrameMessage | undefined {
 
 const MAX_THEME = 64;
 
-export type CanvasMessage = { type: "theme"; id: string };
+export type CanvasMessage =
+  | { type: "theme"; id: string }
+  /** Annotate mode: frames outline on hover and turn clicks into annotations. */
+  | { type: "annotate-mode"; on: boolean };
 
 export function postToFrame(frame: Window, message: CanvasMessage) {
   frame.postMessage({ source: SOURCE, ...message }, window.location.origin);
@@ -63,6 +74,7 @@ export function readCanvasMessage(data: unknown): CanvasMessage | undefined {
   const m = data as Record<string, unknown> | null;
   if (!m || typeof m !== "object" || m.source !== SOURCE) return undefined;
   if (m.type === "theme" && typeof m.id === "string" && m.id.length <= MAX_THEME) return { type: "theme", id: m.id };
+  if (m.type === "annotate-mode" && typeof m.on === "boolean") return { type: "annotate-mode", on: m.on };
   return undefined;
 }
 
