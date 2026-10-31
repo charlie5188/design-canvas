@@ -11,6 +11,15 @@ import {
 } from "react";
 import { frameUrl, NAVIGATE_EVENT, postToFrame, readFrameMessage } from "./bridge";
 import {
+  type Annotation,
+  fingerprintItem,
+  formatAnnotations,
+  limitText,
+  loadAnnotations,
+  newAnnotationId,
+  saveAnnotations,
+} from "./annotations";
+import {
   CHROME,
   describeElement,
   isEditable,
@@ -45,6 +54,7 @@ const DRAG_THRESHOLD = 3;
 const SAVE_DELAY = 400;
 const SAVE_MAX_WAIT = 2000;
 const TOAST_MS = 2500;
+const TOAST_ACTION_MS = 8000;
 const ADD_GAP = 96;
 const REVEAL_MARGIN = 48;
 const MIN_FIT_SIZE = 100;
@@ -148,6 +158,29 @@ const MoonIcon = () => (
 /** Light and dark get icons; other themes show their label. */
 const THEME_ICONS: Partial<Record<string, () => ReactNode>> = { light: SunIcon, dark: MoonIcon };
 
+const AnnotateIcon = () => (
+  <ToolIcon>
+    <path d="M3 3.5h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H7l-3 2.5v-2.5H3a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1Z" />
+  </ToolIcon>
+);
+const CopyIcon = () => (
+  <ToolIcon>
+    <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" />
+    <path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" />
+  </ToolIcon>
+);
+const TrashIcon = () => (
+  <ToolIcon>
+    <path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.1a1 1 0 0 0 1 .9h3.8a1 1 0 0 0 1-.9l.6-8.1" />
+  </ToolIcon>
+);
+
+const SentIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3.5 8.5 6.5 11.5 12.5 4.5" />
+  </svg>
+);
+
 const HelpIcon = () => (
   <ToolIcon>
     <circle cx="8" cy="8" r="5.75" />
@@ -213,6 +246,110 @@ function NameButton({
   );
 }
 
+type AnnotationHandlers = {
+  onOpen: (id: string) => void;
+  onText: (id: string, text: string) => void;
+  onSave: () => void;
+  onCancel: () => void;
+  onDelete: (id: string) => void;
+};
+
+/** The open annotation: the reference it points at, the note, delete and save. */
+function AnnotationCard({ annotation, handlers, done }: { annotation: Annotation; handlers: AnnotationHandlers; done: () => void }) {
+  const fieldRef = useRef<HTMLTextAreaElement>(null);
+  // Reopened annotations continue where they ended.
+  useEffect(() => {
+    const field = fieldRef.current;
+    if (!field) return;
+    field.focus({ preventScroll: true });
+    field.setSelectionRange(field.value.length, field.value.length);
+  }, []);
+  const save = () => {
+    handlers.onSave();
+    done();
+  };
+  return (
+    <div className="canvas-annotation-card" role="dialog" aria-label={labels.annotationField(annotation.ref)}>
+      <span className="canvas-annotation-ref">{annotation.ref}</span>
+      {annotation.sent && <span className="canvas-annotation-sent">{labels.sentNote}</span>}
+      <textarea
+        ref={fieldRef}
+        rows={3}
+        value={annotation.text}
+        placeholder={labels.annotationPlaceholder}
+        aria-label={labels.annotationField(annotation.ref)}
+        onChange={(event) => handlers.onText(annotation.id, event.currentTarget.value)}
+        onKeyDown={(event) => {
+          // Enter saves, Shift+Enter breaks the line; Enter that confirms an IME composition does neither.
+          if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+            event.preventDefault();
+            event.stopPropagation();
+            save();
+          } else if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            handlers.onCancel();
+            done();
+          }
+        }}
+      />
+      <span className="canvas-annotation-actions">
+        <button
+          type="button"
+          className="canvas-button canvas-icon-button"
+          aria-label={labels.deleteAnnotation}
+          data-tip={labels.deleteAnnotation}
+          onClick={() => {
+            handlers.onDelete(annotation.id);
+            done();
+          }}
+        >
+          <TrashIcon />
+        </button>
+        <button type="button" className="canvas-button canvas-button-primary" disabled={!annotation.text.trim()} onClick={save}>
+          {labels.saveAnnotation}
+        </button>
+      </span>
+    </div>
+  );
+}
+
+/**
+ * A numbered pin at the point the annotation was placed. It lives in the item, so
+ * it moves with it, and counter-scales so it stays the same size at any zoom.
+ */
+function AnnotationPin({
+  annotation,
+  number,
+  open,
+  handlers,
+}: {
+  annotation: Annotation;
+  /** Its place in the next message; absent once sent. */
+  number?: number;
+  open: boolean;
+  handlers: AnnotationHandlers;
+}) {
+  const bubbleRef = useRef<HTMLButtonElement>(null);
+  const text = annotation.text || labels.annotationPlaceholder;
+  return (
+    <div className="canvas-pin" style={{ left: annotation.x, top: annotation.y }} data-open={open || undefined}>
+      <button
+        ref={bubbleRef}
+        type="button"
+        className="canvas-pin-bubble"
+        data-sent={number === undefined || undefined}
+        aria-label={number === undefined ? labels.sentPin(text) : labels.annotationPin(number, text)}
+        aria-expanded={open}
+        onClick={() => (open ? handlers.onSave() : handlers.onOpen(annotation.id))}
+      >
+        {number ?? <SentIcon />}
+      </button>
+      {open && <AnnotationCard annotation={annotation} handlers={handlers} done={() => bubbleRef.current?.focus({ preventScroll: true })} />}
+    </div>
+  );
+}
+
 function CanvasItemView({
   item,
   position,
@@ -222,6 +359,9 @@ function CanvasItemView({
   onTitlePointerDown,
   onHandleKey,
   announce,
+  pins,
+  openAnnotation,
+  annotationHandlers,
 }: {
   item: CanvasItem;
   position: Position;
@@ -232,6 +372,10 @@ function CanvasItemView({
   onTitlePointerDown: (event: ReactPointerEvent<HTMLElement>, item: CanvasItem) => void;
   onHandleKey: (item: CanvasItem, dx: number, dy: number) => void;
   announce: (text: string) => void;
+  /** This item's annotations with their list numbers. */
+  pins: { annotation: Annotation; number?: number }[];
+  openAnnotation: string | null;
+  annotationHandlers: AnnotationHandlers;
 }) {
   const ref = useCallback((element: HTMLDivElement | null) => register(item.id, element), [item.id, register]);
   return (
@@ -283,18 +427,37 @@ function CanvasItemView({
         </span>
         {item.note && <p className="canvas-note canvas-subtle">{item.note}</p>}
       </div>
-      <div
-        className="canvas-preview"
-        data-canvas-preview={item.id}
-        style={{ inlineSize: item.width, blockSize: item.height }}
-      >
-        {item.viewport ? <ItemFrame item={item} /> : <Preview component={item.component} />}
+      <div className="canvas-preview-wrap">
+        <div
+          className="canvas-preview"
+          data-canvas-preview={item.id}
+          style={{ inlineSize: item.width, blockSize: item.height }}
+        >
+          {item.viewport ? <ItemFrame item={item} /> : <Preview component={item.component} />}
+        </div>
+        {pins.length > 0 && (
+          <div className="canvas-pins">
+            {pins.map(({ annotation, number }) => (
+              <AnnotationPin
+                key={annotation.id}
+                annotation={annotation}
+                number={number}
+                open={openAnnotation === annotation.id}
+                handlers={annotationHandlers}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-type Toast = { kind: "copied" | "failed" | "notice"; text: string };
+type Toast = { kind: "copied" | "failed" | "notice"; text: string; action?: { label: string; run: () => void } };
+/** The open annotation, and how it was before opening, for Escape. */
+type OpenAnnotation = { id: string; original: Annotation };
+/** The part of Vite's `import.meta.hot` the canvas uses; absent outside the dev server. */
+type HotUpdates = { on(event: string, listener: () => void): void; off?(event: string, listener: () => void): void };
 
 export function Canvas({
   items,
@@ -348,7 +511,14 @@ export function Canvas({
     frame.current = requestAnimationFrame(() => {
       frame.current = 0;
       const { x, y, z } = camera.current;
-      if (worldRef.current) worldRef.current.style.transform = `translate(${x}px, ${y}px) scale(${z})`;
+      if (worldRef.current) {
+        worldRef.current.style.transform = `translate(${x}px, ${y}px) scale(${z})`;
+        // Annotation pins counter-scale with this, so they keep one size on screen.
+        worldRef.current.style.setProperty("--canvas-unzoom", String(1 / z));
+      }
+      // The outline is drawn in screen space; after the camera moves it would
+      // point at the wrong place, so it waits for the next pointer move.
+      if (pickRef.current) pickRef.current.hidden = true;
       if (zoomLabelRef.current) zoomLabelRef.current.textContent = `${Math.round(z * 100)}%`;
     });
   }, []);
@@ -401,15 +571,212 @@ export function Canvas({
     [announce],
   );
   const notify = useCallback(
-    (text: string) => {
+    (text: string, action?: Toast["action"]) => {
       window.clearTimeout(toastTimer.current);
-      setToast({ kind: "notice", text });
+      setToast({ kind: "notice", text, action });
       announce(text);
-      toastTimer.current = window.setTimeout(() => setToast(null), TOAST_MS);
+      // A notice with an action stays long enough to reach the button.
+      toastTimer.current = window.setTimeout(() => setToast(null), action ? TOAST_ACTION_MS : TOAST_MS);
     },
     [announce],
   );
   useEffect(() => () => window.clearTimeout(toastTimer.current), []);
+
+  // Annotations. Annotate mode turns clicks in previews into numbered pins. The
+  // toolbar copies the unsent ones as one message and marks them sent; a sent
+  // one leaves once its item renders differently after a code update. The open
+  // annotation's text is live state, so switching elements never loses typing.
+  const [annotations, setAnnotations] = useState<Annotation[]>(() => loadAnnotations(storageKey, ids));
+  const annotationsRef = useRef(annotations);
+  annotationsRef.current = annotations;
+  const [openAnnotation, setOpenAnnotation] = useState<OpenAnnotation | null>(null);
+  const openRef = useRef(openAnnotation);
+  const [annotating, setAnnotating] = useState(false);
+  const annotatingRef = useRef(false);
+  useEffect(() => saveAnnotations(storageKey, annotations), [annotations, storageKey]);
+  const visibleAnnotations = useMemo(() => annotations.filter((a) => ids.has(a.itemId)), [annotations, ids]);
+  // Pins number the next message: unsent annotations in order. Sent ones show a check.
+  const pending = visibleAnnotations.filter((a) => !a.sent);
+  const unsentCount = pending.filter((a) => a.text.trim()).length;
+
+  /** What an item renders now, tagged with the theme so a theme switch never reads as an update. */
+  const printOf = useCallback(
+    (itemId: string) => {
+      const preview = worldRef.current?.querySelector(`[data-canvas-preview="${CSS.escape(itemId)}"]`) ?? null;
+      const print = fingerprintItem(preview);
+      return print && `${theme?.get() ?? ""}|${print}`;
+    },
+    [theme],
+  );
+
+  const setOpen = useCallback((next: OpenAnnotation | null) => {
+    openRef.current = next;
+    setOpenAnnotation(next);
+  }, []);
+  /** Closes the open annotation, keeping its text; an empty one is removed. */
+  const closeAnnotation = useCallback(() => {
+    const open = openRef.current;
+    if (!open) return;
+    setOpen(null);
+    setAnnotations((prev) => prev.filter((a) => a.id !== open.id || a.text.trim()));
+  }, [setOpen]);
+  /** Escape: a new annotation goes away, an edited one comes back as it was. */
+  const cancelAnnotation = useCallback(() => {
+    const open = openRef.current;
+    if (!open) return;
+    setOpen(null);
+    setAnnotations((prev) =>
+      open.original.text
+        ? prev.map((a) => (a.id === open.id ? open.original : a))
+        : prev.filter((a) => a.id !== open.id),
+    );
+  }, [setOpen]);
+  const openExisting = useCallback(
+    (id: string) => {
+      closeAnnotation();
+      const annotation = annotationsRef.current.find((a) => a.id === id);
+      if (!annotation) return;
+      setOpen({ id, original: annotation });
+      setFrontId(annotation.itemId);
+    },
+    [closeAnnotation, setOpen],
+  );
+  const startAnnotation = useCallback(
+    (itemId: string, x: number, y: number, ref: string) => {
+      closeAnnotation();
+      const annotation: Annotation = { id: newAnnotationId(), itemId, x: Math.round(x), y: Math.round(y), ref, text: "" };
+      setAnnotations((prev) => [...prev, annotation]);
+      setOpen({ id: annotation.id, original: annotation });
+      setFrontId(itemId);
+    },
+    [closeAnnotation, setOpen],
+  );
+  const annotationHandlers = useMemo<AnnotationHandlers>(
+    () => ({
+      onOpen: openExisting,
+      // Editing a sent annotation makes it a new request, so it goes out again.
+      onText: (id, text) =>
+        setAnnotations((prev) =>
+          prev.map((a) => (a.id === id ? { id: a.id, itemId: a.itemId, x: a.x, y: a.y, ref: a.ref, text: limitText(text) } : a)),
+        ),
+      onSave: closeAnnotation,
+      onCancel: cancelAnnotation,
+      onDelete: (id) => {
+        if (openRef.current?.id === id) setOpen(null);
+        setAnnotations((prev) => prev.filter((a) => a.id !== id));
+      },
+    }),
+    [cancelAnnotation, closeAnnotation, openExisting, setOpen],
+  );
+  const setAnnotateMode = useCallback(
+    (on: boolean) => {
+      annotatingRef.current = on;
+      setAnnotating(on);
+      if (!on) closeAnnotation();
+      announce(on ? labels.annotateModeOn : labels.annotateModeOff);
+    },
+    [announce, closeAnnotation],
+  );
+  const clearAnnotations = useCallback(() => {
+    const before = annotationsRef.current.filter((a) => a.text.trim());
+    setOpen(null);
+    setAnnotations([]);
+    notify(labels.clearedAnnotations(before.filter((a) => ids.has(a.itemId)).length), {
+      label: labels.undo,
+      run: () => setAnnotations((now) => [...before, ...now.filter((a) => !before.some((old) => old.id === a.id))]),
+    });
+  }, [ids, notify, setOpen]);
+  const copyAnnotations = useCallback(async () => {
+    closeAnnotation();
+    const list = annotationsRef.current.filter((a) => ids.has(a.itemId) && !a.sent && a.text.trim());
+    if (!list.length) return;
+    const text = formatAnnotations(list);
+    window.clearTimeout(toastTimer.current);
+    try {
+      await writeClipboard(text);
+    } catch {
+      // Not sent: the person copies from the fallback field, and the pins stay new.
+      setToast({ kind: "failed", text });
+      return;
+    }
+    const sentIds = new Set(list.map((a) => a.id));
+    // "?" when the item is not rendered yet (a loading frame); the first check sets it.
+    setAnnotations((prev) => prev.map((a) => (sentIds.has(a.id) ? { ...a, sent: printOf(a.itemId) ?? "?" } : a)));
+    notify(labels.copiedAnnotations(list.length));
+  }, [closeAnnotation, ids, notify, printOf]);
+
+  /**
+   * Removes sent annotations whose item now renders differently. Items that are
+   * not rendered yet, or were sent under another theme, are only re-read.
+   */
+  const checkSent = useCallback(() => {
+    const prints = new Map<string, string | undefined>();
+    const now = (itemId: string) => {
+      if (!prints.has(itemId)) prints.set(itemId, printOf(itemId));
+      return prints.get(itemId);
+    };
+    const gone: Annotation[] = [];
+    const reread = new Map<string, string>();
+    for (const a of annotationsRef.current) {
+      if (!a.sent || !ids.has(a.itemId)) continue;
+      const current = now(a.itemId);
+      if (!current || current === a.sent) continue;
+      const sameTheme = a.sent.split("|")[0] === current.split("|")[0];
+      if (a.sent === "?" || !sameTheme) reread.set(a.id, current);
+      else gone.push(a);
+    }
+    if (!gone.length && !reread.size) return;
+    const goneIds = new Set(gone.map((a) => a.id));
+    if (openRef.current && goneIds.has(openRef.current.id)) setOpen(null);
+    setAnnotations((prev) =>
+      prev.filter((a) => !goneIds.has(a.id)).map((a) => (reread.has(a.id) ? { ...a, sent: reread.get(a.id) } : a)),
+    );
+    if (!gone.length) return;
+    notify(labels.clearedSent(gone.length), {
+      label: labels.undo,
+      // Back as sent against how the items look now, so they stay until the next change.
+      run: () =>
+        setAnnotations((current) => [
+          ...current,
+          ...gone.filter((a) => !current.some((c) => c.id === a.id)).map((a) => ({ ...a, sent: printOf(a.itemId) ?? "?" })),
+        ]),
+    });
+  }, [ids, notify, printOf, setOpen]);
+  const checkSentRef = useRef(checkSent);
+  checkSentRef.current = checkSent;
+
+  // Checks run after each hot update (Vite), after a reload, and when a frame
+  // loads; twice, because React Refresh and frames re-render a moment later.
+  useEffect(() => {
+    const timers: number[] = [];
+    const soon = () => {
+      for (const ms of [400, 1500]) timers.push(window.setTimeout(() => checkSentRef.current(), ms));
+    };
+    const hot = (import.meta as ImportMeta & { hot?: HotUpdates }).hot;
+    hot?.on("vite:afterUpdate", soon);
+    void document.fonts.ready.then(soon);
+    const world = worldRef.current;
+    const onFrameLoad = (event: Event) => {
+      if (event.target instanceof HTMLIFrameElement) soon();
+    };
+    world?.addEventListener("load", onFrameLoad, true);
+    return () => {
+      for (const timer of timers) window.clearTimeout(timer);
+      hot?.off?.("vite:afterUpdate", soon);
+      world?.removeEventListener("load", onFrameLoad, true);
+    };
+  }, []);
+
+  // A press anywhere outside the open annotation closes it and keeps the text.
+  useEffect(() => {
+    if (!openAnnotation) return;
+    const onDown = (event: PointerEvent) => {
+      if (event.target instanceof Element && event.target.closest(".canvas-pin[data-open]")) return;
+      closeAnnotation();
+    };
+    window.addEventListener("pointerdown", onDown, true);
+    return () => window.removeEventListener("pointerdown", onDown, true);
+  }, [closeAnnotation, openAnnotation]);
 
   const register = useCallback((id: string, element: HTMLDivElement | null) => {
     if (element) elements.current.set(id, element);
@@ -603,6 +970,25 @@ export function Canvas({
     }
     queueSave();
   }, [queueSave, theme, themeId]);
+
+  // Annotate mode reaches the viewport (cursor) and every item frame, including
+  // frames that load or reload while it is on.
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    const world = worldRef.current;
+    if (!viewport || !world) return;
+    viewport.toggleAttribute("data-annotating", annotating);
+    if (!annotating && pickRef.current) pickRef.current.hidden = true;
+    const tell = (frameElement: HTMLIFrameElement) => {
+      if (frameElement.contentWindow) postToFrame(frameElement.contentWindow, { type: "annotate-mode", on: annotating });
+    };
+    for (const frameElement of world.querySelectorAll<HTMLIFrameElement>("iframe[data-canvas-frame]")) tell(frameElement);
+    const onLoad = (event: Event) => {
+      if (event.target instanceof HTMLIFrameElement && event.target.dataset.canvasFrame) tell(event.target);
+    };
+    world.addEventListener("load", onLoad, true);
+    return () => world.removeEventListener("load", onLoad, true);
+  }, [annotating]);
 
   // Gesture ownership. Only one gesture owns the pointer at a time.
   const gesture = useRef<
@@ -820,25 +1206,55 @@ export function Canvas({
     const onPickMove = (event: PointerEvent) => {
       pointer.x = event.clientX;
       pointer.y = event.clientY;
-      if (event.altKey && !gesture.current) showPick(event.target);
+      if ((event.altKey || annotatingRef.current) && !gesture.current) showPick(event.target);
       else hidePick();
     };
+    // In annotate mode previews stop reacting to presses, except the ones that
+    // pan (Space held, middle button).
     const blockPick = (event: MouseEvent) => {
-      if (!event.altKey || !pickTarget(event.target)) return;
+      const annotatePress = annotatingRef.current && event.button === 0 && !spaceArmed.current;
+      if ((!event.altKey && !annotatePress) || !pickTarget(event.target)) return;
       event.preventDefault();
       event.stopPropagation();
     };
     const onPickClick = (event: MouseEvent) => {
-      if (!event.altKey) return;
+      if ((!event.altKey && !annotatingRef.current) || clickSuppressed.current) return;
       const pick = pickTarget(event.target);
       if (!pick) return;
       event.preventDefault();
       event.stopPropagation();
-      void copyReference(`${pick.item.name} › ${describeElement(pick.element, pick.preview)}`);
+      const ref = `${pick.item.name} › ${describeElement(pick.element, pick.preview)}`;
+      if (event.altKey) {
+        void copyReference(ref);
+        return;
+      }
+      // Pin point in unscaled preview units, so it stays put at any zoom. The
+      // scale is read from the preview as drawn, not from the camera, which can
+      // be a frame ahead of the paint.
+      const rect = pick.preview.getBoundingClientRect();
+      const scale = rect.width / Math.max(1, pick.preview.offsetWidth);
+      startAnnotation(pick.item.id, (event.clientX - rect.left) / scale, (event.clientY - rect.top) / scale, ref);
     };
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Alt" && pointer.x >= 0) showPick(document.elementFromPoint(pointer.x, pointer.y));
+      // A toggles annotate mode, Escape leaves it, as long as nothing editable has focus.
+      const plain = !event.metaKey && !event.ctrlKey && !event.altKey;
+      // Previews keep their own keys; the canvas, its toolbar, and pins take these.
+      const canvasFocus =
+        event.target === viewport ||
+        event.target === document.body ||
+        (event.target instanceof Element && event.target.closest(".canvas-toolbar, .canvas-pin-bubble") !== null);
+      if (plain && canvasFocus && (event.key === "a" || event.key === "A") && !event.repeat) {
+        event.preventDefault();
+        setAnnotateMode(!annotatingRef.current);
+        if (annotatingRef.current && pointer.x >= 0) showPick(document.elementFromPoint(pointer.x, pointer.y));
+        return;
+      }
+      if (event.key === "Escape" && annotatingRef.current && !openRef.current && canvasFocus) {
+        setAnnotateMode(false);
+        return;
+      }
       if (event.code === "Space" && !event.repeat) {
         const active = document.activeElement;
         const idle = !active || active === document.body || active === viewport;
@@ -870,7 +1286,7 @@ export function Canvas({
 
     const onKeyUp = (event: KeyboardEvent) => {
       if (event.code === "Space") clearHeld();
-      if (event.key === "Alt") hidePick();
+      if (event.key === "Alt" && !annotatingRef.current) hidePick();
     };
     const onBlur = () => {
       clearHeld();
@@ -907,6 +1323,11 @@ export function Canvas({
         else clearHeld();
       } else if (message.type === "pick") {
         void copyReference(`${item.name} › ${message.label}`);
+      } else if (message.type === "annotate") {
+        // A frame fills its preview at item size, so frame pixels are preview units.
+        if (annotatingRef.current) startAnnotation(item.id, message.x, message.y, `${item.name} › ${message.label}`);
+      } else if (message.type === "escape") {
+        if (annotatingRef.current) setAnnotateMode(false);
       } else if (message.type === "link") {
         followLink(message.href);
       } else {
@@ -917,6 +1338,8 @@ export function Canvas({
     // Previews and their portals never navigate the canvas away. Their own
     // click handlers still run; only the browser's navigation is cancelled.
     const onLinkClick = (event: MouseEvent) => {
+      // A click that placed a annotation was already cancelled by the pick handler.
+      if (annotatingRef.current && event.defaultPrevented) return;
       const anchor = previewLink(event);
       if (!anchor) return;
       event.preventDefault();
@@ -992,7 +1415,20 @@ export function Canvas({
       frame.current = 0;
       if (saveTimer.current) flushSave();
     };
-  }, [copyReference, endGesture, fitAll, flushSave, followLink, items, notify, resetCamera, setCamera, zoomBy]);
+  }, [
+    copyReference,
+    endGesture,
+    fitAll,
+    flushSave,
+    followLink,
+    items,
+    notify,
+    resetCamera,
+    setCamera,
+    setAnnotateMode,
+    startAnnotation,
+    zoomBy,
+  ]);
 
   // The grip and the name both move an item. A press that never travels past
   // the drag threshold stays a click, so clicking the name still copies it.
@@ -1074,6 +1510,13 @@ export function Canvas({
               onTitlePointerDown={onTitlePointerDown}
               onHandleKey={onHandleKey}
               announce={announce}
+              pins={visibleAnnotations.flatMap((annotation) =>
+                annotation.itemId === item.id
+                  ? [{ annotation, number: annotation.sent ? undefined : pending.indexOf(annotation) + 1 }]
+                  : [],
+              )}
+              openAnnotation={openAnnotation?.id ?? null}
+              annotationHandlers={annotationHandlers}
             />
           ))}
         </div>
@@ -1084,18 +1527,45 @@ export function Canvas({
           {toast.kind === "copied" ? (
             <span>{labels.copiedText(toast.text)}</span>
           ) : toast.kind === "notice" ? (
-            <span>{toast.text}</span>
+            <>
+              <span>{toast.text}</span>
+              {toast.action && (
+                <button
+                  type="button"
+                  className="canvas-button"
+                  onClick={() => {
+                    toast.action?.run();
+                    setToast(null);
+                  }}
+                >
+                  {toast.action.label}
+                </button>
+              )}
+            </>
           ) : (
             <>
               <span className="canvas-subtle">{labels.copyFailed}</span>
-              <input
-                readOnly
-                value={toast.text}
-                aria-label={labels.copyFailed}
-                onFocus={(event) => event.currentTarget.select()}
-                // biome-ignore lint/a11y/noAutofocus: the fallback appears only after a copy attempt.
-                autoFocus
-              />
+              {/* A list of annotations keeps its lines; one reference fits a field. */}
+              {toast.text.includes("\n") ? (
+                <textarea
+                  readOnly
+                  rows={4}
+                  value={toast.text}
+                  aria-label={labels.copyFailed}
+                  onFocus={(event) => event.currentTarget.select()}
+                  // biome-ignore lint/a11y/noAutofocus: the fallback appears only after a copy attempt.
+                  autoFocus
+                />
+              ) : (
+                <input
+                  readOnly
+                  value={toast.text}
+                  aria-label={labels.copyFailed}
+                  onFocus={(event) => event.currentTarget.select()}
+                  // biome-ignore lint/a11y/noAutofocus: the fallback appears only after a copy attempt.
+                  autoFocus
+                />
+              )}
               <button type="button" className="canvas-button" onClick={() => setToast(null)}>
                 {labels.dismiss}
               </button>
@@ -1134,6 +1604,36 @@ export function Canvas({
           <ResetIcon />
           {labels.resetCamera}
         </button>
+        <span className="canvas-separator" aria-hidden="true" />
+        <button
+          type="button"
+          className="canvas-button"
+          aria-pressed={annotating}
+          data-tip={labels.annotateHint}
+          onClick={() => setAnnotateMode(!annotatingRef.current)}
+        >
+          <AnnotateIcon />
+          {labels.annotate}
+        </button>
+        {unsentCount > 0 && (
+          <button type="button" className="canvas-button canvas-button-primary" onClick={() => void copyAnnotations()}>
+            <CopyIcon />
+            {labels.copyAnnotations(unsentCount)}
+          </button>
+        )}
+        {visibleAnnotations.some((a) => a.text.trim()) && (
+          <>
+            <button
+              type="button"
+              className="canvas-button canvas-icon-button"
+              aria-label={labels.clearAnnotations}
+              data-tip={labels.clearAnnotations}
+              onClick={clearAnnotations}
+            >
+              <TrashIcon />
+            </button>
+          </>
+        )}
         <span className="canvas-separator" aria-hidden="true" />
         {theme && theme.options.length > 1 && (
           <>

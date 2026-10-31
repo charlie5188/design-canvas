@@ -12,6 +12,7 @@ Instead of asking the agent to build a canvas from scratch for every project, th
 
 - **Real components, no backend.** Items render your app's own components with synthetic data, styles, and themes.
 - **Talk about what you see.** Click an item's name to copy it. Hold ⌥/Alt and click any element to copy a reference such as `Pricing card · compact › button “Upgrade”`, then paste it into the conversation.
+- **Annotate many things, paste once.** Press A or the Annotate button, click elements, and write a note on each. Copy them all as one numbered message for the agent; each pin clears itself once the agent has changed its item.
 - **Real viewports.** Mark an item `viewport: true` and it renders in a frame of its own width, so breakpoints and media queries behave as on a real phone or desktop.
 - **Your themes.** Light and dark (or any themes the app has) switch from the toolbar, across every item.
 - **Stays on the canvas.** Links, form submits, and router calls inside previews never navigate away; they show where they would have gone.
@@ -71,6 +72,7 @@ React アプリの実際のコンポーネントを、パン・ズームでき�
 
 - **本物のコンポーネント、バックエンドなし。** アイテムはアプリ自身のコンポーネントを、合成データとアプリのスタイル・テーマで表示します。
 - **見ているものをそのまま会話に。** アイテム名をクリックすると名前をコピーできます。⌥/Alt を押しながら要素をクリックすると、`Pricing card · compact › button “Upgrade”` のような参照をコピーでき、そのまま会話に貼り付けられます。
+- **まとめて注釈して、一度で貼り付け。** A キーか Annotate ボタンで注釈モードにし、要素をクリックしてそれぞれにメモを書きます。すべてを番号付きの 1 つのメッセージとしてコピーしてエージェントに渡せます。エージェントがそのアイテムを変更すると、ピンは自動で消えます。
 - **本物のビューポート。** アイテムに `viewport: true` を指定すると、そのアイテムの幅を持つフレーム内で表示されます。ブレークポイントやメディアクエリが、実際のスマートフォンやデスクトップと同じように動きます。
 - **アプリのテーマ。** ライト・ダーク（またはアプリが持つ任意のテーマ）をツールバーから切り替えられ、すべてのアイテムに反映されます。
 - **キャンバスから離れない。** プレビュー内のリンク、フォーム送信、ルーター呼び出しでページが遷移することはありません。遷移先は通知で表示されます。

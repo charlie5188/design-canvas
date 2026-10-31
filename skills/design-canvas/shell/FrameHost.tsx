@@ -64,6 +64,8 @@ export function FrameHost({
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Alt" && pointer.x >= 0) showPick(document.elementFromPoint(pointer.x, pointer.y));
+      // Keys inside a frame never reach the canvas page, so Escape is handed over.
+      if (event.key === "Escape" && annotating) postToCanvas({ type: "escape" });
       if (event.code !== "Space" || event.repeat) return;
       const active = document.activeElement;
       if (active && active !== document.body && isEditable(active)) return;
@@ -72,14 +74,16 @@ export function FrameHost({
     };
     const onKeyUp = (event: KeyboardEvent) => {
       if (event.code === "Space") postToCanvas({ type: "space", down: false });
-      if (event.key === "Alt") hidePick();
+      if (event.key === "Alt" && !annotating) hidePick();
     };
     const onBlur = () => {
       postToCanvas({ type: "space", down: false });
       hidePick();
     };
 
-    // Element references, same as on the canvas page.
+    // Element references and annotations, same as on the canvas page. The canvas
+    // tells each frame when annotate mode turns on or off.
+    let annotating = false;
     const pointer = { x: -1, y: -1 };
     const hidePick = () => {
       if (pickRef.current) pickRef.current.hidden = true;
@@ -100,25 +104,38 @@ export function FrameHost({
     const onPickMove = (event: PointerEvent) => {
       pointer.x = event.clientX;
       pointer.y = event.clientY;
-      if (event.altKey) showPick(event.target);
+      if (event.altKey || annotating) showPick(event.target);
       else hidePick();
     };
     const blockPick = (event: MouseEvent) => {
-      if (!event.altKey || !(event.target instanceof Element) || !root.contains(event.target)) return;
+      if ((!event.altKey && !annotating) || !(event.target instanceof Element) || !root.contains(event.target)) return;
       event.preventDefault();
       event.stopPropagation();
     };
     const onPickClick = (event: MouseEvent) => {
-      if (!event.altKey || !(event.target instanceof Element)) return;
+      if ((!event.altKey && !annotating) || !(event.target instanceof Element)) return;
       const element = pickElement(event.target, root);
       if (!element) return;
       event.preventDefault();
       event.stopPropagation();
-      postToCanvas({ type: "pick", label: describeElement(element, root) });
+      const label = describeElement(element, root);
+      if (event.altKey) postToCanvas({ type: "pick", label });
+      else postToCanvas({ type: "annotate", label, x: event.clientX, y: event.clientY });
+    };
+    const onCanvasMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin || event.source !== window.parent) return;
+      const message = readCanvasMessage(event.data);
+      if (message?.type !== "annotate-mode") return;
+      annotating = message.on;
+      document.documentElement.toggleAttribute("data-canvas-annotating", annotating);
+      if (annotating && pointer.x >= 0) showPick(document.elementFromPoint(pointer.x, pointer.y));
+      else hidePick();
     };
 
     // Navigation never leaves the frame; the canvas reveals or reports it.
     const onLinkClick = (event: MouseEvent) => {
+      // A click in annotate mode places an annotation; the pick handler cancels it.
+      if (annotating) return;
       const anchor = previewLink(event);
       if (!anchor) return;
       event.preventDefault();
@@ -145,7 +162,9 @@ export function FrameHost({
     window.addEventListener("pointerdown", blockPick, { capture: true });
     window.addEventListener("mousedown", blockPick, { capture: true });
     window.addEventListener("click", onPickClick, { capture: true });
+    window.addEventListener("message", onCanvasMessage);
     return () => {
+      window.removeEventListener("message", onCanvasMessage);
       window.removeEventListener("wheel", onWheel);
       window.removeEventListener(NAVIGATE_EVENT, onNavigate);
       window.removeEventListener("click", onLinkClick, { capture: true });

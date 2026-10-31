@@ -34,8 +34,8 @@ a device or input you do not have.
 
 ## Toolbar
 
-- Zoom out, zoom level, zoom in, show all, reset, and help sit centered at the bottom. The help list opens on hover or keyboard focus and describes the canvas region for screen readers.
-- At narrow widths the text labels drop and every control stays.
+- Zoom out, zoom level, zoom in, show all, reset, annotate, and help sit centered at the bottom; copy appears only while there are unsent annotations, and clear while there are any. The help list opens on hover or keyboard focus and describes the canvas region for screen readers.
+- At narrow widths (375 px) the text labels and separators drop and every control stays on screen, with annotations present.
 
 ## Themes
 
@@ -48,6 +48,22 @@ a device or input you do not have.
 - Holding Alt/Option outlines the element under the pointer in plain items and in frames; releasing hides it.
 - Alt/Option-click copies `Item › role “label”`, never activates the control, and numbers look-alikes.
 - Alt-click on empty canvas or on chrome does nothing.
+
+## Annotations
+
+- The Annotate button and A (with the canvas, toolbar, or a pin focused) toggle annotate mode; Escape leaves it. A typed inside a preview or a field reaches that field.
+- In annotate mode, hovering outlines elements in plain items and in frames without holding Alt; the outline hides when the camera moves.
+- Clicking an element in a plain item or in a frame places a numbered pin at the click, also right after a zoom, and opens a note showing `Item › role “label”`. The control is not activated, and a link shows no notice and leaves the URL unchanged.
+- Enter saves, Shift+Enter adds a line, and Enter that confirms an IME composition (Japanese, Chinese) does neither. Escape removes a new annotation and restores an edited one. Saving or cancelling returns focus to the pin.
+- Clicking elsewhere, or another element, keeps the typed text; an empty annotation is removed. Clicking a pin reopens it with the caret at the end; delete removes it.
+- Space + drag and middle-button drag still pan over previews in annotate mode, and the pan places no annotation.
+- Pins move with their item, keep one size from 10% to 300%, and follow the theme.
+- Copy N annotations writes one message with the unsent annotations, numbered like their pins, and shows "Copied N annotations". Those pins turn into sent pins (check mark) and the next copy leaves them out. When the clipboard fails, the whole list appears in a selectable field and nothing is marked sent.
+- Editing a sent annotation makes it unsent again; opening and cancelling keeps it sent.
+- After a hot update, and after a reload, sent annotations on items that now render differently are removed with "Cleared N sent annotations on updated items" and Undo. Unsent annotations, and sent ones on unchanged items (including other items from the same source file), stay. A theme switch never clears anything.
+- Clear removes every annotation and offers Undo.
+- Alt-click still copies a single reference, in and out of annotate mode, and places no pin.
+- Annotations survive reload and hot reload, including one being typed; annotations on removed items are dropped. Corrupt saved annotations fall back to none without errors.
 
 ## Viewport items
 
