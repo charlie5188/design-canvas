@@ -19,14 +19,27 @@ Instead of asking the agent to build a canvas from scratch for every project, th
 - **One item alone.** Open any item in its own tab at its real size, ready for a screenshot or a design-tool import.
 - **A quiet workspace.** Drag items by their name, pan, zoom, fit all, and reload without losing the layout.
 
-## Compared with Claude Design
+## Compared with Claude Design, Paper, and Figma
 
-[Claude Design](https://www.anthropic.com/news/claude-design-anthropic-labs) makes new designs from a prompt, using your design system, and can hand them to Claude Code to build. design-canvas starts at the other end: it shows the components already in your code, and the agent changes that code directly.
+[Claude Design](https://www.anthropic.com/news/claude-design-anthropic-labs), [Paper](https://paper.design), and [Figma's code layers](https://www.figma.com/blog/code-on-the-figma-canvas/) also bring AI and code onto a design canvas. They are design tools: the work lives in their files, you can edit it by hand, and changes reach your code through a handoff, a sync, or a push.
 
-- **Claude Design** suits new ideas that have no code yet, decks and one-pagers, and people without a local dev setup.
-- **design-canvas** suits refining a product that already exists. What you see is your real CSS, states, themes, and breakpoints, and each change is already in the code, so there is no handoff step.
+design-canvas has no design file. The canvas renders your app's real components from your repo, your coding agent writes each direction as code there, and the direction you keep is already in place.
 
-You can use both: explore a new direction in Claude Design, then refine it as real code on the canvas.
+| | design-canvas | Claude Design | Paper | Figma code layers (beta) |
+|---|---|---|---|---|
+| The work lives in | Your repo | Claude Design | Paper | Figma |
+| The canvas shows | Your app's components, run by your dev server | Designs generated with your design system | HTML/CSS designs | React code that runs in Figma |
+| Changes reach your code | Already there | Handoff to Claude Code | Your agent syncs through Paper's MCP server | Push to your repo |
+| Edit by hand | No: describe changes to your agent | Yes | Yes | Yes |
+| Edit together live | No: it runs on your machine | Yes | Yes | Yes |
+| What you pay | Nothing extra: open source, uses your coding agent | Included in paid Claude plans (Pro, Max, Team, Enterprise), within a usage limit; extra usage is paid | [Free plan; Pro is $16 per editor per month billed yearly, $20 monthly](https://paper.design/pricing) | [Per-seat plans](https://www.figma.com/pricing/); code layers use [Figma AI credits](https://help.figma.com/hc/en-us/articles/33459875669015-How-Figma-AI-credits-work) |
+| Limits on agent access | None: your agent edits your repo directly | The usage limit applies; work moves to Claude Code by handoff | MCP: 100 tool calls a week on Free, 1M a week on Pro | [MCP](https://developers.figma.com/docs/figma-mcp-server/rate-limits-access/): 20 tool calls a month on Starter or with a View or Collab seat; 200 a day with a Full or Dev seat (600 on Enterprise) |
+
+Prices and limits are as of November 2026 and change often. Check each link for current terms.
+
+**Use design-canvas** to compare clearly different directions for a product you already have, side by side with real components, real data, real screen widths, and your themes. The one you choose is already code.
+
+**Use a design tool** to adjust details by hand, to start an idea that has no code yet, or to work in one file with your team.
 
 ## Requirements
 
@@ -89,14 +102,27 @@ React アプリの実際のコンポーネントを、パン・ズームでき�
 - **アイテム単体で開く。** どのアイテムも実寸のまま別タブで開けます。スクリーンショットやデザインツールへの取り込みにそのまま使えます。
 - **静かな作業スペース。** 名前をドラッグしてアイテムを移動し、パン、ズーム、全体表示ができます。再読み込みしてもレイアウトは保たれます。
 
-### Claude Design との違い
+### Claude Design、Paper、Figma との違い
 
-[Claude Design](https://www.anthropic.com/news/claude-design-anthropic-labs) は、プロンプトからデザインシステムに沿った新しいデザインを作り、実装のために Claude Code に渡せます。design-canvas は反対側から始めます。コードにすでにあるコンポーネントを表示し、エージェントがそのコードを直接変更します。
+[Claude Design](https://www.anthropic.com/news/claude-design-anthropic-labs)、[Paper](https://paper.design)、[Figma のコードレイヤー](https://www.figma.com/blog/code-on-the-figma-canvas/)も、AI とコードをデザインキャンバスに取り込んでいます。これらはデザインツールです。作業はそれぞれのファイルの中にあり、手で編集でき、変更は受け渡し、同期、プッシュのいずれかでコードに届きます。
 
-- **Claude Design** が向いているのは、まだコードがない新しいアイデア、スライドや 1 枚ものの資料、ローカルの開発環境がない人です。
-- **design-canvas** が向いているのは、既存のプロダクトを磨き込むときです。表示されるのは実際の CSS、状態、テーマ、ブレークポイントで、変更は最初からコードに入っているため、受け渡しの手順がありません。
+design-canvas にはデザインファイルがありません。キャンバスはリポジトリにあるアプリの実際のコンポーネントを表示し、コーディングエージェントが各方向性をそこにコードとして書きます。選んだ方向性は、最初からコードとして入っています。
 
-両方を使うこともできます。Claude Design で新しい方向性を探り、キャンバス上で実際のコードとして仕上げます。
+| | design-canvas | Claude Design | Paper | Figma のコードレイヤー（ベータ） |
+|---|---|---|---|---|
+| 作業の置き場所 | あなたのリポジトリ | Claude Design | Paper | Figma |
+| キャンバスに表示されるもの | 自分の開発サーバーで動く、アプリのコンポーネント | デザインシステムに沿って生成されたデザイン | HTML/CSS のデザイン | Figma の中で動く React のコード |
+| 変更がコードに届く方法 | 最初からコードにある | Claude Code への受け渡し | エージェントが Paper の MCP サーバーで同期 | リポジトリへのプッシュ |
+| 手で編集 | できない（エージェントに変更を伝える） | できる | できる | できる |
+| チームで同時に編集 | できない（自分のマシンで動く） | できる | できる | できる |
+| 費用 | 追加費用なし（オープンソース、今使っているコーディングエージェントを使う） | 有料の Claude プラン（Pro、Max、Team、Enterprise）に含まれ、利用量の上限あり。超える分は有料 | [無料プランあり。Pro は編集者 1 人あたり月 16 ドル（年払い）、月払いは 20 ドル](https://paper.design/pricing) | [席ごとの料金プラン](https://www.figma.com/pricing/)。コードレイヤーは [Figma AI クレジット](https://help.figma.com/hc/en-us/articles/33459875669015-How-Figma-AI-credits-work)を消費 |
+| エージェントからのアクセス制限 | なし（エージェントがリポジトリを直接編集） | 利用量の上限が適用。作業は受け渡しで Claude Code へ | MCP：Free は週 100 回、Pro は週 100 万回のツール呼び出し | [MCP](https://developers.figma.com/docs/figma-mcp-server/rate-limits-access/)：Starter プラン、または View・Collab 席は月 20 回。Full・Dev 席は 1 日 200 回（Enterprise は 600 回） |
+
+料金と制限は 2026 年 11 月時点のもので、よく変わります。最新の条件は各リンク先で確認してください。
+
+**design-canvas が向いているのは**、すでにあるプロダクトで、はっきり異なる方向性を比べるときです。実際のコンポーネント、実際のデータ、実際の画面幅、アプリのテーマで並べて比べられます。選んだものは、そのままコードとして残ります。
+
+**デザインツールが向いているのは**、細部を手で調整するとき、まだコードがないアイデアを始めるとき、チームで 1 つのファイルを使って作業するときです。
 
 ### 必要なもの
 
