@@ -1,0 +1,5 @@
+# Made by each smoke run.
+design-canvas/
+install.log
+test-results/
+playwright-report/

@@ -1,0 +1,41 @@
+# Installs the skill into a small React + Vite app the way users do, then checks
+# that the canvas typechecks, builds, and loads in a browser. The interactive
+# checks in skills/design-canvas/shell/TESTING.md stay manual.
+name: Smoke test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  smoke:
+    # macOS, the platform the README supports. The installer's bash, sed, and
+    # rsync differ on Linux, so a Linux pass would not prove it works on a Mac.
+    runs-on: macos-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        # An explicit bash shell adds pipefail, so `install.sh | tee` fails when install.sh fails.
+        shell: bash
+        working-directory: test/fixture-app
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: test/fixture-app/package-lock.json
+      - run: npm ci
+      - name: Install the canvas
+        run: |
+          bash ../../skills/design-canvas/scripts/install.sh react-vite smoke "Smoke" | tee install.log
+          echo "CANVAS_URL=$(grep -o 'http://127.0.0.1:[0-9]*/' install.log)" >> "$GITHUB_ENV"
+      - name: Typecheck the canvas
+        run: npx tsc --noEmit -p design-canvas/smoke/tsconfig.json
+      - name: Build the canvas
+        run: npx vite build --config design-canvas/smoke/vite.config.mts
+      - name: Install Chromium
+        run: npx playwright install --only-shell chromium
+      - name: Load the canvas in a browser
+        run: npx playwright test
