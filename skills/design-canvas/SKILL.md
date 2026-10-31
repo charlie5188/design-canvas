@@ -47,11 +47,23 @@ Each registry entry has a stable `id`, a unique readable `name` such as `Pricing
 
 Set `viewport: true` when an item's layout depends on screen width: mobile or desktop previews, breakpoints, media queries, `window.innerWidth`, or responsive hooks. Those items render in their own frame, so breakpoints see the item's width. Without it, a 375px item on a desktop window still gets the desktop layout and nothing warns you.
 
-Frames load a full page each, so use them only where width matters. Over a frame, wheel, trackpad pinch, Space + drag, and Alt-click work; middle-button pan and touch pinch do not reach the canvas. Menus and dialogs stay inside their frame.
+Frames load a full page each, so use them only where width matters. Over a frame, wheel, trackpad pinch, Space + drag, Alt-click, and annotations work; middle-button pan and touch pinch do not reach the canvas. Menus and dialogs stay inside their frame.
 
 ### References from the user
 
 Alt/Option-click inside a preview copies `Item name › role “label”`, numbered when the item has look-alikes, for example `B · tabs › button “Mark as done” (2/3)`. Treat a pasted reference as that element in that item. If it no longer matches the source, ask. Portaled content such as an open menu is outside the preview and cannot be referenced this way.
+
+For several changes at once, people use annotate mode (the toolbar's Annotate button, or A): they click elements, write a note on each, and copy them all as one message:
+
+```text
+Annotations from the design canvas (2):
+1. Pricing card · compact › button “Upgrade”
+   Make it full width
+2. Checkout · phone › heading “Summary”
+   Move it above Payment
+```
+
+Treat each numbered entry as a change to that element, and handle every entry; say which ones you could not apply and why. Copied annotations stay on the canvas as sent pins and disappear on their own once their item renders differently after your edit, so you never need to clear them. A sent pin that stays means its item did not change.
 
 ## 4. Check
 

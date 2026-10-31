@@ -351,7 +351,157 @@ body,
 /* Narrow windows keep every control; the text labels go first. */
 @media (max-width: 480px) {
   .canvas-toolbar .canvas-button:not(.canvas-icon-button) {
+    justify-content: center;
+    inline-size: 30px;
+    padding: 0;
     font-size: 0;
     gap: 0;
   }
+  .canvas-toolbar .canvas-separator {
+    display: none;
+  }
+  .canvas-toolbar .canvas-zoom {
+    min-inline-size: 36px;
+  }
+}
+/* Annotations. In annotate mode previews take a crosshair and stop reacting;
+   pins and the open annotation use the chrome tokens and font. */
+.canvas-viewport[data-annotating] .canvas-preview,
+.canvas-viewport[data-annotating] .canvas-preview * {
+  cursor: crosshair !important;
+}
+html[data-canvas-annotating] .canvas-frame-root,
+html[data-canvas-annotating] .canvas-frame-root * {
+  cursor: crosshair !important;
+}
+.canvas-preview-wrap {
+  position: relative;
+}
+.canvas-pins {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+/* Anchored at the point that was clicked; --canvas-unzoom (set with the
+   camera) keeps pins and the open annotation one size on screen. */
+.canvas-pin {
+  position: absolute;
+  inline-size: 0;
+  block-size: 0;
+  transform: scale(var(--canvas-unzoom, 1));
+  transform-origin: 0 0;
+  font-family: var(--canvas-font, system-ui, -apple-system, "Segoe UI", sans-serif);
+  pointer-events: auto;
+}
+.canvas-pin[data-open] {
+  z-index: 1;
+}
+.canvas-pin-bubble {
+  position: absolute;
+  inset-inline-start: 0;
+  inset-block-end: 0;
+  display: grid;
+  place-items: center;
+  min-inline-size: 28px;
+  block-size: 28px;
+  padding: 0 8px;
+  box-sizing: border-box;
+  border: 2px solid var(--canvas-surface-color);
+  /* The sharp corner sits on the point the annotation refers to. */
+  border-radius: 14px 14px 14px 3px;
+  background: var(--canvas-focus-color);
+  color: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 18%);
+  cursor: default;
+}
+/* Sent: copied to the conversation, waiting for its item to change. */
+.canvas-pin-bubble[data-sent] {
+  border-color: var(--canvas-focus-color);
+  background: var(--canvas-surface-color);
+  color: var(--canvas-focus-color);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 12%);
+}
+.canvas-pin-bubble:focus-visible {
+  outline: 2px solid var(--canvas-focus-color);
+  outline-offset: 2px;
+}
+.canvas-annotation-card {
+  position: absolute;
+  inset-inline-start: 36px;
+  inset-block-end: -4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  inline-size: 300px;
+  padding: 12px;
+  box-sizing: border-box;
+  border: 1px solid var(--canvas-border-color);
+  border-radius: var(--canvas-radius-size);
+  background: var(--canvas-surface-color);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 14%);
+  color: var(--canvas-text-color);
+  font-size: 13px;
+  cursor: default;
+}
+.canvas-annotation-ref {
+  color: var(--canvas-subtle-color);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+/* Not enough room right of the pin, or above it: open left, or below. */
+.canvas-annotation-card[data-flip-x] {
+  inset-inline-start: auto;
+  inset-inline-end: 8px;
+}
+.canvas-annotation-card[data-flip-y] {
+  inset-block-start: 8px;
+  inset-block-end: auto;
+}
+.canvas-annotation-sent {
+  color: var(--canvas-subtle-color);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.canvas-annotation-card textarea {
+  box-sizing: border-box;
+  inline-size: 100%;
+  min-block-size: 64px;
+  padding: 8px 10px;
+  border: 1px solid var(--canvas-border-color);
+  border-radius: 6px;
+  background: var(--canvas-surface-color);
+  color: var(--canvas-text-color);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.4;
+  resize: none;
+}
+.canvas-annotation-card textarea:focus-visible {
+  outline: 2px solid var(--canvas-focus-color);
+  outline-offset: -1px;
+}
+.canvas-annotation-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.canvas-button-primary,
+.canvas-button-primary:hover {
+  background: var(--canvas-focus-color);
+  color: #fff;
+}
+.canvas-button-primary:disabled {
+  opacity: 0.45;
+}
+.canvas-toast textarea {
+  font: inherit;
+  font-size: 12px;
+  inline-size: 360px;
+  user-select: all;
 }
