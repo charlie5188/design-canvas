@@ -18,4 +18,10 @@ export type CanvasItem = {
    * mobile or desktop previews and anything responsive.
    */
   viewport?: boolean;
+  /**
+   * The id of the item this one is a new version of. The canvas places it
+   * beside that item, and its arrival clears that item's sent "new version"
+   * annotations.
+   */
+  from?: string;
 };

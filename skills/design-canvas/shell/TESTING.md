@@ -19,7 +19,7 @@ a device or input you do not have.
 
 - Dragging the grip or the name moves an item at every zoom level, with mouse and touch; arrow keys on the focused grip move it, Shift for larger steps. Moving never remounts a preview or clears its input.
 - Clicking, Enter, or Space on a name copies the exact name and shows "Copied"; a press that drags never copies. Hover alone never copies. When the clipboard fails, a selectable field appears.
-- The open icon appears when the title is hovered or the icon has keyboard focus, is always visible on touch devices, and opens `frame.html?item=<id>` in a new tab without changing the canvas.
+- The open and trash icons appear when the title is hovered or the icon has keyboard focus, and are always visible on touch devices. The open icon opens `frame.html?item=<id>` in a new tab without changing the canvas. Pressing either never starts a move.
 - A pan or move that ends over a control does not click it.
 - Previews keep clicking, typing, text selection, focus, and their own keyboard shortcuts. Space inside an input types a space.
 - Menus, popovers, and dialogs open in the right place at 50%, 100%, and 200% zoom.
@@ -34,8 +34,8 @@ a device or input you do not have.
 
 ## Toolbar
 
-- Zoom out, zoom level, zoom in, show all, reset, annotate, and help sit centered at the bottom; copy appears only while there are unsent annotations, and clear while there are any. The help list opens on hover or keyboard focus and describes the canvas region for screen readers.
-- At narrow widths (375 px) the text labels and separators drop and every control stays on screen, with annotations present.
+- Zoom out, zoom level, zoom in, show all, reset, annotate, and help sit centered at the bottom; copy appears only while there are unsent annotations, clear (eraser) while there are any, and trash while it holds items. The help list opens on hover or keyboard focus and describes the canvas region for screen readers.
+- At narrow widths (375 px) the text labels and separators drop and every control stays on screen, with annotations and trashed items present.
 
 ## Themes
 
@@ -54,17 +54,31 @@ a device or input you do not have.
 - The Annotate button and A (with the canvas, toolbar, or a pin focused) toggle annotate mode; Escape leaves it. A typed inside a preview or a field reaches that field.
 - In annotate mode, hovering outlines elements in plain items and in frames without holding Alt; the outline hides when the camera moves.
 - Clicking an element in a plain item or in a frame places a numbered pin at the click, also right after a zoom, and opens a note showing `Item › role “label”`. The control is not activated, and a link shows no notice and leaves the URL unchanged.
-- Enter saves, Shift+Enter adds a line, and Enter that confirms an IME composition (Japanese, Chinese) does neither. Escape removes a new annotation and restores an edited one. Saving or cancelling returns focus to the pin.
+- Enter saves, Shift+Enter adds a line, and Enter that confirms an IME composition (Japanese, Chinese) does neither. Escape, in the note or on the checkbox, removes a new annotation and restores an edited one. Saving or cancelling returns focus to the pin.
+- "Apply to a new version" is checked on an item's first annotation; later ones on that item start with the item's current choice. Changing it changes every unsent annotation on that item, and Escape undoes that too. Changing it on a sent annotation makes it unsent.
 - Clicking elsewhere, or another element, keeps the typed text; an empty annotation is removed. Clicking a pin reopens it with the caret at the end; delete removes it.
 - A note opened near the right or top edge of the window opens on the other side of its pin, so opening or typing in a note never pans the canvas.
 - Space + drag and middle-button drag still pan over previews in annotate mode, and the pan places no annotation.
 - Pins move with their item, keep one size from 10% to 300%, and follow the theme.
-- Copy N annotations writes one message with the unsent annotations, numbered like their pins, and shows "Copied N annotations". Those pins turn into sent pins (check mark) and the next copy leaves them out. When the clipboard fails, the whole list appears in a selectable field and nothing is marked sent.
+- Copy N annotations writes one message with the unsent annotations, numbered like their pins, and shows "Copied N annotations". When any are checked, the last line reads "Keep the original and add a new version:" with those items and their numbers; with none checked there is no last line. Those pins turn into sent pins (check mark) and the next copy leaves them out. When the clipboard fails, the whole list appears in a selectable field and nothing is marked sent.
 - Editing a sent annotation makes it unsent again; opening and cancelling keeps it sent.
 - After a hot update, and after a reload, sent annotations on items that now render differently are removed with "Cleared N sent annotations on updated items" and Undo. Unsent annotations, and sent ones on unchanged items (including other items from the same source file), stay. A theme switch never clears anything.
+- A sent new-version annotation stays while its item changes, and is removed with "Cleared N sent annotations: new version added" and Undo once a new item with `from` set to its item appears. Removing such an item clears nothing.
 - Clear removes every annotation and offers Undo.
 - Alt-click still copies a single reference, in and out of annotate mode, and places no pin.
 - Annotations survive reload and hot reload, including one being typed; annotations on removed items are dropped. Corrupt saved annotations fall back to none without errors.
+
+## Trash
+
+- Moving an item to the trash hides it at once with "Moved <name> to the trash" and Undo, keeps focus on the canvas, and leaves other items in place. Its unsent annotations are hidden, not copied, and not cleared; they return with it.
+- The trash button shows the count. It opens above the toolbar with the most recently trashed item first; each entry shows a live, scaled-down preview (a `viewport` item at its own width) and its name, and takes no clicks, focus, or Alt-picks inside the preview.
+- Opening the trash focuses its first entry; Escape closes it and returns focus to the button, and pressing outside it closes it. At 375 px it shows two columns inside the window.
+- Picking an entry closes the trash and puts the item back where it was, or beside its row if that spot is now taken, then brings it into view and to the front. The trash button goes away when the trash is empty.
+- Show all and links to `#<item-id>` ignore trashed items. The trash survives reload; ids no longer in the registry drop out.
+
+## New versions
+
+- A new registry item with `from` set appears right of that item, else below it, else at the nearer end of that item's row or column; no other item moves. The camera shows both, fully above the toolbar and the notice that announces the new version.
 
 ## Viewport items
 

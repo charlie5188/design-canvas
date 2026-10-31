@@ -1,5 +1,6 @@
-// Camera math and the saved layout. Only the camera and positions keyed by
-// registry ID are stored; names, sizes, and membership always come from source.
+// Camera math and the saved layout. Only the camera, positions keyed by
+// registry ID, and the trash are stored; names, sizes, and membership always
+// come from source.
 
 export type Camera = { x: number; y: number; z: number };
 export type Position = { x: number; y: number };
@@ -64,12 +65,18 @@ export function loadLayout(
   storageKey: string,
   ids: ReadonlySet<string>,
   themes: ReadonlySet<string> = new Set(),
-): { camera?: Camera; positions: Record<string, Position>; theme?: string } {
+): { camera?: Camera; positions: Record<string, Position>; theme?: string; trash: string[] } {
   try {
     const raw = window.localStorage.getItem(storageKey);
-    if (!raw || raw.length > MAX_DOCUMENT) return { positions: {} };
-    const doc = JSON.parse(raw) as { version?: unknown; camera?: unknown; positions?: unknown; theme?: unknown };
-    if (doc?.version !== VERSION) return { positions: {} };
+    if (!raw || raw.length > MAX_DOCUMENT) return { positions: {}, trash: [] };
+    const doc = JSON.parse(raw) as {
+      version?: unknown;
+      camera?: unknown;
+      positions?: unknown;
+      theme?: unknown;
+      trash?: unknown;
+    };
+    if (doc?.version !== VERSION) return { positions: {}, trash: [] };
     const positions: Record<string, Position> = {};
     if (doc.positions && typeof doc.positions === "object") {
       const entries = Object.entries(doc.positions as Record<string, unknown>).slice(0, MAX_POSITIONS);
@@ -79,9 +86,13 @@ export function loadLayout(
       }
     }
     const theme = typeof doc.theme === "string" && themes.has(doc.theme) ? doc.theme : undefined;
-    return { camera: validCamera(doc.camera), positions, theme };
+    // Trashed item IDs, most recent first. IDs no longer in the registry drop out.
+    const trash = Array.isArray(doc.trash)
+      ? [...new Set(doc.trash.slice(0, MAX_POSITIONS).filter((id): id is string => typeof id === "string" && ids.has(id)))]
+      : [];
+    return { camera: validCamera(doc.camera), positions, theme, trash };
   } catch {
-    return { positions: {} };
+    return { positions: {}, trash: [] };
   }
 }
 
@@ -95,9 +106,10 @@ export function saveLayout(
   camera: Camera,
   positions: Record<string, Position>,
   theme?: string,
+  trash: string[] = [],
 ) {
   try {
-    const doc = JSON.stringify({ version: VERSION, camera, positions, theme });
+    const doc = JSON.stringify({ version: VERSION, camera, positions, theme, trash: trash.length ? trash : undefined });
     if (doc.length <= MAX_DOCUMENT) window.localStorage.setItem(storageKey, doc);
   } catch {
     // Storage may be unavailable or full; the canvas keeps working without it.

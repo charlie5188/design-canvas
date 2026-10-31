@@ -7,6 +7,10 @@
 // which usually means the agent applied it. Only sent annotations are ever
 // removed automatically, and only per item, so an agent that edits in several
 // steps, or an unrelated update, never takes unsent work or other items' notes.
+//
+// A "new version" annotation asks for a new item beside the original instead
+// of a change to it. The original never changes then, so it is sent with the
+// number of items that name it as `from`, and leaves once that number grows.
 
 import { labels } from "./labels";
 
@@ -19,7 +23,15 @@ export type Annotation = {
   /** "Item › role “label”", frozen when the annotation was placed. */
   ref: string;
   text: string;
-  /** Fingerprint of the item's rendered content when this was copied; absent until sent. */
+  /**
+   * Apply to a new item beside the original rather than change it. One choice
+   * per item: every unsent annotation on an item shares it.
+   */
+  version?: boolean;
+  /**
+   * Absent until sent. Then a fingerprint of the item's rendered content, or
+   * for a `version` annotation `v|<count of items made from it>`.
+   */
   sent?: string;
 };
 
@@ -43,7 +55,8 @@ const valid = (value: unknown, ids: ReadonlySet<string>): Annotation | undefined
   if (typeof c.ref !== "string" || c.ref.length > MAX_REF) return undefined;
   if (typeof c.text !== "string" || !c.text.trim() || c.text.length > MAX_TEXT) return undefined;
   const sent = typeof c.sent === "string" && c.sent.length <= 16 ? { sent: c.sent } : {};
-  return { id: c.id, itemId: c.itemId, x: c.x, y: c.y, ref: c.ref, text: c.text, ...sent };
+  const version = c.version === true ? { version: true } : {};
+  return { id: c.id, itemId: c.itemId, x: c.x, y: c.y, ref: c.ref, text: c.text, ...version, ...sent };
 };
 
 /** Saved annotations for items that still exist; anything invalid is dropped. */
@@ -104,12 +117,23 @@ export function fingerprintItem(preview: Element | null): string | undefined {
 
 /**
  * One message for the conversation: a heading, then each reference with its
- * note indented under it, numbered like the unsent pins.
+ * note indented under it, numbered like the unsent pins. When some items
+ * should get a new version, a last line names them with their numbers; the
+ * rest change in place.
  */
-export function formatAnnotations(annotations: Annotation[]) {
+export function formatAnnotations(annotations: Annotation[], nameOf: (itemId: string) => string) {
   const entries = annotations.map((annotation, index) => {
     const body = annotation.text.trim().split(/\r?\n/).join("\n   ");
     return `${index + 1}. ${annotation.ref}\n   ${body}`;
   });
-  return [labels.annotationsHeading(annotations.length), ...entries].join("\n");
+  const versioned = new Map<string, number[]>();
+  annotations.forEach((annotation, index) => {
+    if (annotation.version) versioned.set(annotation.itemId, [...(versioned.get(annotation.itemId) ?? []), index + 1]);
+  });
+  const lines = [labels.annotationsHeading(annotations.length), ...entries];
+  if (versioned.size) {
+    const items = [...versioned].map(([itemId, numbers]) => `${nameOf(itemId)} (${numbers.join(", ")})`);
+    lines.push("", labels.newVersionLine(items.join("; ")));
+  }
+  return lines.join("\n");
 }

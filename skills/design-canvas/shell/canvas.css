@@ -25,6 +25,7 @@ body,
 .canvas-item-head,
 .canvas-toolbar,
 .canvas-toast,
+.canvas-trash-popover,
 .canvas-frame-missing {
   font-family: var(--canvas-font, system-ui, -apple-system, "Segoe UI", sans-serif);
 }
@@ -99,13 +100,13 @@ body,
 .canvas-handle:hover,
 .canvas-name:hover,
 .canvas-button:hover,
-.canvas-open:hover {
+.canvas-item-action:hover {
   background: var(--canvas-hover-color);
 }
 .canvas-handle:focus-visible,
 .canvas-name:focus-visible,
 .canvas-button:focus-visible,
-.canvas-open:focus-visible {
+.canvas-item-action:focus-visible {
   outline: 2px solid var(--canvas-focus-color);
   outline-offset: 1px;
 }
@@ -130,28 +131,33 @@ body,
   text-align: start;
   cursor: default;
 }
-/* Quiet until the title is hovered or the link has keyboard focus. */
-.canvas-open {
+/* Open alone and move to trash: quiet until the title is hovered or one has
+   keyboard focus. */
+.canvas-item-action {
   position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   inline-size: 24px;
   block-size: 24px;
+  padding: 0;
+  border: 0;
   border-radius: 4px;
+  background: transparent;
   color: var(--canvas-subtle-color);
+  font: inherit;
   cursor: default;
   opacity: 0;
 }
-.canvas-item-head:hover .canvas-open,
-.canvas-open:focus-visible {
+.canvas-item-head:hover .canvas-item-action,
+.canvas-item-action:focus-visible {
   opacity: 1;
 }
-.canvas-open:hover {
+.canvas-item-action:hover {
   color: var(--canvas-text-color);
 }
 @media (hover: none) {
-  .canvas-open {
+  .canvas-item-action {
     opacity: 1;
   }
 }
@@ -486,6 +492,17 @@ html[data-canvas-annotating] .canvas-frame-root * {
   outline: 2px solid var(--canvas-focus-color);
   outline-offset: -1px;
 }
+.canvas-annotation-version {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  user-select: none;
+}
+.canvas-annotation-version input {
+  margin: 0;
+  accent-color: var(--canvas-focus-color);
+}
 .canvas-annotation-actions {
   display: flex;
   align-items: center;
@@ -504,4 +521,123 @@ html[data-canvas-annotating] .canvas-frame-root * {
   font-size: 12px;
   inline-size: 360px;
   user-select: all;
+}
+/* Trash: opens above the toolbar like a Dock stack. Each entry is a live,
+   scaled-down preview of the trashed item with its name; the whole entry puts
+   it back. */
+/* Its hint would sit on the open trash. */
+.canvas-trash-button[aria-expanded="true"]::after {
+  content: none;
+}
+.canvas-trash-popover {
+  position: fixed;
+  inset-block-end: 64px;
+  inset-inline-start: 50%;
+  translate: -50% 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-sizing: border-box;
+  max-inline-size: calc(100vw - 32px);
+  max-block-size: min(480px, calc(100vh - 96px));
+  padding: 10px;
+  border: 1px solid var(--canvas-border-color);
+  border-radius: 12px;
+  background: var(--canvas-surface-color);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 14%);
+  color: var(--canvas-text-color);
+  font-size: 13px;
+}
+.canvas-trash-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0 6px;
+}
+.canvas-trash-title {
+  font-weight: 600;
+}
+.canvas-trash-list {
+  display: grid;
+  grid-template-columns: repeat(var(--canvas-trash-columns, 3), 168px);
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+.canvas-trash-entry {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 8px;
+}
+.canvas-trash-entry:hover {
+  background: var(--canvas-hover-color);
+}
+.canvas-trash-thumb {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  block-size: 100px;
+  overflow: hidden;
+  border: 1px solid var(--canvas-border-color);
+  border-radius: 6px;
+  background: var(--canvas-bg-color);
+  pointer-events: none;
+}
+.canvas-trash-scaled {
+  position: relative;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--canvas-surface-color);
+  box-shadow: 0 0 0 1px var(--canvas-border-color);
+}
+.canvas-trash-real {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  overflow: hidden;
+  transform-origin: 0 0;
+}
+.canvas-trash-name {
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--canvas-text-color);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: start;
+  cursor: default;
+}
+.canvas-trash-name > span {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+.canvas-trash-name::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+}
+.canvas-trash-name:focus-visible {
+  outline: none;
+}
+.canvas-trash-name:focus-visible::after {
+  outline: 2px solid var(--canvas-focus-color);
+  outline-offset: -2px;
+}
+@media (max-width: 480px) {
+  .canvas-trash-popover {
+    inline-size: calc(100vw - 32px);
+  }
+  .canvas-trash-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
