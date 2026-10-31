@@ -56,6 +56,7 @@ a device or input you do not have.
 - Clicking an element in a plain item or in a frame places a numbered pin at the click, also right after a zoom, and opens a note showing `Item › role “label”`. The control is not activated, and a link shows no notice and leaves the URL unchanged.
 - Enter saves, Shift+Enter adds a line, and Enter that confirms an IME composition (Japanese, Chinese) does neither. Escape removes a new annotation and restores an edited one. Saving or cancelling returns focus to the pin.
 - Clicking elsewhere, or another element, keeps the typed text; an empty annotation is removed. Clicking a pin reopens it with the caret at the end; delete removes it.
+- A note opened near the right or top edge of the window opens on the other side of its pin, so opening or typing in a note never pans the canvas.
 - Space + drag and middle-button drag still pan over previews in annotate mode, and the pan places no annotation.
 - Pins move with their item, keep one size from 10% to 300%, and follow the theme.
 - Copy N annotations writes one message with the unsent annotations, numbered like their pins, and shows "Copied N annotations". Those pins turn into sent pins (check mark) and the next copy leaves them out. When the clipboard fails, the whole list appears in a selectable field and nothing is marked sent.

@@ -454,6 +454,15 @@ html[data-canvas-annotating] .canvas-frame-root * {
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
+/* Not enough room right of the pin, or above it: open left, or below. */
+.canvas-annotation-card[data-flip-x] {
+  inset-inline-start: auto;
+  inset-inline-end: 8px;
+}
+.canvas-annotation-card[data-flip-y] {
+  inset-block-start: 8px;
+  inset-block-end: auto;
+}
 .canvas-annotation-sent {
   color: var(--canvas-subtle-color);
   font-size: 12px;

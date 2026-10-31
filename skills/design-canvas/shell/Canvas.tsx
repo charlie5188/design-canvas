@@ -5,6 +5,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -55,6 +56,8 @@ const SAVE_DELAY = 400;
 const SAVE_MAX_WAIT = 2000;
 const TOAST_MS = 2500;
 const TOAST_ACTION_MS = 8000;
+/** Space a note keeps from the viewport edge before it opens on the other side. */
+const FLIP_MARGIN = 16;
 const ADD_GAP = 96;
 const REVEAL_MARGIN = 48;
 const MIN_FIT_SIZE = 100;
@@ -257,10 +260,19 @@ type AnnotationHandlers = {
 /** The open annotation: the reference it points at, the note, delete and save. */
 function AnnotationCard({ annotation, handlers, done }: { annotation: Annotation; handlers: AnnotationHandlers; done: () => void }) {
   const fieldRef = useRef<HTMLTextAreaElement>(null);
-  // Reopened annotations continue where they ended.
-  useEffect(() => {
+  const cardRef = useRef<HTMLDivElement>(null);
+  // The note opens on the side of the pin that has room, like a menu, so focusing
+  // it never pans the canvas under the person. Then the caret goes to the end.
+  useLayoutEffect(() => {
+    const card = cardRef.current;
     const field = fieldRef.current;
-    if (!field) return;
+    if (!card || !field) return;
+    const view = card.closest(".canvas-viewport")?.getBoundingClientRect();
+    const box = card.getBoundingClientRect();
+    if (view) {
+      card.toggleAttribute("data-flip-x", box.right > view.right - FLIP_MARGIN);
+      card.toggleAttribute("data-flip-y", box.top < view.top + FLIP_MARGIN);
+    }
     field.focus({ preventScroll: true });
     field.setSelectionRange(field.value.length, field.value.length);
   }, []);
@@ -269,7 +281,7 @@ function AnnotationCard({ annotation, handlers, done }: { annotation: Annotation
     done();
   };
   return (
-    <div className="canvas-annotation-card" role="dialog" aria-label={labels.annotationField(annotation.ref)}>
+    <div ref={cardRef} className="canvas-annotation-card" role="dialog" aria-label={labels.annotationField(annotation.ref)}>
       <span className="canvas-annotation-ref">{annotation.ref}</span>
       {annotation.sent && <span className="canvas-annotation-sent">{labels.sentNote}</span>}
       <textarea
