@@ -10,11 +10,9 @@ on:
 
 jobs:
   smoke:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+    # macOS, the platform the README supports. The installer's bash, sed, and
+    # rsync differ on Linux, so a Linux pass would not prove it works on a Mac.
+    runs-on: macos-latest
     timeout-minutes: 10
     defaults:
       run:
@@ -38,6 +36,6 @@ jobs:
       - name: Build the canvas
         run: npx vite build --config design-canvas/smoke/vite.config.mts
       - name: Install Chromium
-        run: npx playwright install ${{ runner.os == 'Linux' && '--with-deps' || '' }} --only-shell chromium
+        run: npx playwright install --only-shell chromium
       - name: Load the canvas in a browser
         run: npx playwright test
