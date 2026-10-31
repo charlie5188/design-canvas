@@ -36,6 +36,18 @@ jobs:
         run: |
           bash ../../skills/design-canvas/scripts/install.sh react-vite smoke "Smoke" | tee install.log
           echo "CANVAS_URL=$(grep -o 'http://127.0.0.1:[0-9]*/' install.log)" >> "$GITHUB_ENV"
+      - name: Update an older canvas
+        # Makes the canvas look like one installed before later shell changes:
+        # a missing file, an edited file, and a file the shell no longer has.
+        # The update must restore the shell exactly, and a second run must find nothing to do.
+        run: |
+          canvas=design-canvas/smoke/canvas
+          rm "$canvas/annotations.ts"
+          echo '// older' >> "$canvas/Canvas.tsx"
+          touch "$canvas/dropped.ts"
+          bash ../../skills/design-canvas/scripts/update.sh design-canvas/smoke
+          diff -r -x TESTING.md ../../skills/design-canvas/shell "$canvas"
+          bash ../../skills/design-canvas/scripts/update.sh design-canvas/smoke | grep -q 'already up to date'
       - name: Typecheck the canvas
         run: npx tsc --noEmit -p design-canvas/smoke/tsconfig.json
       - name: Build the canvas

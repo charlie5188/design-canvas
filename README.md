@@ -51,6 +51,7 @@ Then ask your agent, for example:
 - `skills/design-canvas/shell/`: the canvas itself, in React. It is copied into each canvas and never rebuilt by the agent.
 - `skills/design-canvas/kits/react-vite/`: a Vite page that sits beside your app, reuses its aliases, styles, environment, and Vite plugins, and swaps Next.js-only modules for stand-ins.
 - `skills/design-canvas/scripts/install.sh`: copies the shell and kit into `<app>/design-canvas/<name>/` and detects what it can.
+- `skills/design-canvas/scripts/update.sh`: brings an existing canvas's shell up to date with the skill. The agent runs it when it picks up a canvas, so older canvases get new features. Your items and kit settings stay as they are.
 - `skills/design-canvas/references/making-a-kit.md`: the checklist the agent follows to finish fitting your app, and how to save that fit as a private kit in `~/.agents/design-canvas-kits/` so the next install needs none.
 
 Canvases are prototypes. Commit one only when you want to share it.
@@ -120,6 +121,7 @@ npx skills add charlie5188/design-canvas
 - `skills/design-canvas/shell/`：React で書かれたキャンバス本体です。各キャンバスにコピーされ、エージェントが作り直すことはありません。
 - `skills/design-canvas/kits/react-vite/`：アプリの隣に置かれる Vite のページです。アプリのエイリアス、スタイル、環境変数、Vite プラグインを再利用し、Next.js 専用のモジュールは代替品に置き換えます。
 - `skills/design-canvas/scripts/install.sh`：本体とキットを `<app>/design-canvas/<name>/` にコピーし、検出できるものを自動で設定します。
+- `skills/design-canvas/scripts/update.sh`：既存のキャンバスの本体を、スキルの最新版に更新します。エージェントが既存のキャンバスを使うときに実行するので、古いキャンバスにも新しい機能が入ります。アイテムとキットの設定はそのまま残ります。
 - `skills/design-canvas/references/making-a-kit.md`：アプリへの設定を仕上げるためにエージェントが使うチェックリストです。仕上がった設定を `~/.agents/design-canvas-kits/` にプライベートキットとして保存し、次回からは設定なしでインストールする方法も書かれています。
 
 キャンバスはプロトタイプです。共有したいときだけコミットしてください。

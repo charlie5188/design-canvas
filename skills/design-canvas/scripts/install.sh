@@ -39,7 +39,7 @@ fi
 [[ -d "$app" ]] || die "$app does not exist"
 
 dest="$app/$KIT_PARENT/$name"
-[[ -e "$dest" ]] && die "$dest already exists; reuse that canvas instead of installing another"
+[[ -e "$dest" ]] && die "$dest already exists; reuse that canvas instead of installing another (update.sh brings it up to date)"
 if [[ -n "${KIT_CHECK:-}" && ! -e "$app/$KIT_CHECK" ]]; then
   hint="${KIT_CHECK_HINT:-install the app dependencies first}"
   warn "$KIT_CHECK is missing in $app; $hint"
