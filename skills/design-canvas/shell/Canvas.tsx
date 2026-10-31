@@ -1,5 +1,6 @@
 import {
   type ComponentType,
+  type CSSProperties,
   memo,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
@@ -60,6 +61,8 @@ const TOAST_ACTION_MS = 8000;
 const FLIP_MARGIN = 16;
 const ADD_GAP = 96;
 const REVEAL_MARGIN = 48;
+/** The notice row that opens just above the toolbar. */
+const TOAST_ROW = 64;
 const MIN_FIT_SIZE = 100;
 
 /** Previews never rerender because of the camera, a move, or a copy. */
@@ -178,6 +181,14 @@ const TrashIcon = () => (
   </ToolIcon>
 );
 
+const EraserIcon = () => (
+  <ToolIcon>
+    <path d="M9.5 2.5 13.5 6.5 7 13 3 9Z" />
+    <path d="M5.9 6.1 9.9 10.1" />
+    <path d="M7.5 13.5h6" />
+  </ToolIcon>
+);
+
 const SentIcon = () => (
   <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M3.5 8.5 6.5 11.5 12.5 4.5" />
@@ -255,6 +266,7 @@ type AnnotationHandlers = {
   onSave: () => void;
   onCancel: () => void;
   onDelete: (id: string) => void;
+  onVersion: (id: string, version: boolean) => void;
 };
 
 /** The open annotation: the reference it points at, the note, delete and save. */
@@ -281,9 +293,24 @@ function AnnotationCard({ annotation, handlers, done }: { annotation: Annotation
     done();
   };
   return (
-    <div ref={cardRef} className="canvas-annotation-card" role="dialog" aria-label={labels.annotationField(annotation.ref)}>
+    <div
+      ref={cardRef}
+      className="canvas-annotation-card"
+      role="dialog"
+      aria-label={labels.annotationField(annotation.ref)}
+      onKeyDown={(event) => {
+        // Escape from the note or the checkbox undoes this card's changes.
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        event.stopPropagation();
+        handlers.onCancel();
+        done();
+      }}
+    >
       <span className="canvas-annotation-ref">{annotation.ref}</span>
-      {annotation.sent && <span className="canvas-annotation-sent">{labels.sentNote}</span>}
+      {annotation.sent && (
+        <span className="canvas-annotation-sent">{annotation.version ? labels.sentNoteVersion : labels.sentNote}</span>
+      )}
       <textarea
         ref={fieldRef}
         rows={3}
@@ -297,14 +324,18 @@ function AnnotationCard({ annotation, handlers, done }: { annotation: Annotation
             event.preventDefault();
             event.stopPropagation();
             save();
-          } else if (event.key === "Escape") {
-            event.preventDefault();
-            event.stopPropagation();
-            handlers.onCancel();
-            done();
           }
         }}
       />
+      {/* Checked: the agent keeps this item and adds a new version beside it. */}
+      <label className="canvas-annotation-version">
+        <input
+          type="checkbox"
+          checked={!!annotation.version}
+          onChange={(event) => handlers.onVersion(annotation.id, event.currentTarget.checked)}
+        />
+        {labels.newVersion}
+      </label>
       <span className="canvas-annotation-actions">
         <button
           type="button"
@@ -374,6 +405,7 @@ function CanvasItemView({
   pins,
   openAnnotation,
   annotationHandlers,
+  onTrash,
 }: {
   item: CanvasItem;
   position: Position;
@@ -388,6 +420,7 @@ function CanvasItemView({
   pins: { annotation: Annotation; number?: number }[];
   openAnnotation: string | null;
   annotationHandlers: AnnotationHandlers;
+  onTrash: (item: CanvasItem) => void;
 }) {
   const ref = useCallback((element: HTMLDivElement | null) => register(item.id, element), [item.id, register]);
   return (
@@ -426,7 +459,7 @@ function CanvasItemView({
           <NameButton name={item.name} announce={announce}>
             {/* A new tab keeps the canvas, its camera, and preview state intact. */}
             <a
-              className="canvas-open"
+              className="canvas-item-action canvas-open"
               href={frameUrl(item.id)}
               target="_blank"
               rel="noopener noreferrer"
@@ -435,6 +468,15 @@ function CanvasItemView({
             >
               <OpenIcon />
             </a>
+            <button
+              type="button"
+              className="canvas-item-action"
+              aria-label={labels.moveToTrash(item.name)}
+              data-tip={labels.moveToTrashHint}
+              onClick={() => onTrash(item)}
+            >
+              <TrashIcon />
+            </button>
           </NameButton>
         </span>
         {item.note && <p className="canvas-note canvas-subtle">{item.note}</p>}
@@ -465,9 +507,106 @@ function CanvasItemView({
   );
 }
 
+/** Room for a thumbnail inside its border. */
+const THUMB_WIDTH = 154;
+const THUMB_HEIGHT = 98;
+
+/**
+ * A trashed item drawn small but live: its component (or its frame page, for
+ * `viewport` items) at real size, scaled down, so versions that share a name
+ * pattern stay easy to tell apart. Inert, so it never takes focus or clicks;
+ * it exists only while the trash is open.
+ */
+function TrashThumb({ item }: { item: CanvasItem }) {
+  const scale = Math.min(THUMB_WIDTH / item.width, THUMB_HEIGHT / item.height, 1);
+  // An attribute, not a prop: React 18 and 19 write the `inert` prop differently.
+  const inert = useCallback((element: HTMLElement | null) => element?.setAttribute("inert", ""), []);
+  return (
+    <div className="canvas-trash-thumb" aria-hidden="true">
+      <div className="canvas-trash-scaled" style={{ inlineSize: item.width * scale, blockSize: item.height * scale }}>
+        <div
+          ref={inert}
+          className="canvas-trash-real"
+          style={{ inlineSize: item.width, blockSize: item.height, transform: `scale(${scale})` }}
+        >
+          {item.viewport ? (
+            <iframe
+              className="canvas-frame"
+              src={frameUrl(item.id, "page")}
+              title={item.name}
+              width={item.width}
+              height={item.height}
+              tabIndex={-1}
+            />
+          ) : (
+            <Preview component={item.component} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Opens above the toolbar, like a Dock stack: the most recently trashed item
+ * first. Picking one puts it back where it was.
+ */
+function TrashPopover({
+  items,
+  onPutBack,
+  onClose,
+}: {
+  items: CanvasItem[];
+  onPutBack: (item: CanvasItem) => void;
+  onClose: () => void;
+}) {
+  const firstRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => firstRef.current?.focus({ preventScroll: true }), []);
+  return (
+    <div
+      id="canvas-trash"
+      className="canvas-trash-popover"
+      role="dialog"
+      aria-label={labels.trashHeading}
+      style={{ "--canvas-trash-columns": Math.min(items.length, 3) } as CSSProperties}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+      }}
+    >
+      <div className="canvas-trash-head">
+        <span className="canvas-trash-title">{labels.trashHeading}</span>
+        <span className="canvas-subtle">{labels.trashHint}</span>
+      </div>
+      <ul className="canvas-trash-list">
+        {items.map((item, index) => (
+          <li key={item.id} className="canvas-trash-entry">
+            <TrashThumb item={item} />
+            {/* The name is the button; its hit area covers the whole entry. */}
+            <button
+              ref={index === 0 ? firstRef : undefined}
+              type="button"
+              className="canvas-trash-name"
+              aria-label={labels.putBack(item.name)}
+              onClick={() => onPutBack(item)}
+            >
+              <span>{item.name}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 type Toast = { kind: "copied" | "failed" | "notice"; text: string; action?: { label: string; run: () => void } };
-/** The open annotation, and how it was before opening, for Escape. */
-type OpenAnnotation = { id: string; original: Annotation };
+/**
+ * The open annotation, and how it and its item's other annotations were before
+ * opening, for Escape: the "new version" choice is shared across the item.
+ */
+type OpenAnnotation = { id: string; original: Annotation; versions: Map<string, boolean | undefined> };
 /** The part of Vite's `import.meta.hot` the canvas uses; absent outside the dev server. */
 type HotUpdates = { on(event: string, listener: () => void): void; off?(event: string, listener: () => void): void };
 
@@ -505,6 +644,18 @@ export function Canvas({
   positionsRef.current = positions;
   // New registry entries appear at their source position until placed.
   const resolved = (item: CanvasItem) => positions[item.id] ?? { x: item.x, y: item.y };
+  // The trash hides items on the canvas only; their code stays in the registry,
+  // so any of them can be put back. Most recently trashed first.
+  const [trash, setTrashState] = useState<string[]>(() => saved.trash);
+  const trashRef = useRef(trash);
+  const shown = useMemo(() => items.filter((item) => !trash.includes(item.id)), [items, trash]);
+  const shownIds = useMemo(() => new Set(shown.map((item) => item.id)), [shown]);
+  const trashedItems = useMemo(
+    () => trash.flatMap((id) => items.find((item) => item.id === id) ?? []),
+    [items, trash],
+  );
+  const [trashOpen, setTrashOpen] = useState(false);
+  const trashButtonRef = useRef<HTMLButtonElement>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const toastTimer = useRef(0);
   const [frontId, setFrontId] = useState<string | null>(null);
@@ -541,7 +692,7 @@ export function Canvas({
     window.clearTimeout(saveTimer.current);
     saveTimer.current = 0;
     firstQueued.current = 0;
-    saveLayout(storageKey, camera.current, positionsRef.current, theme?.get());
+    saveLayout(storageKey, camera.current, positionsRef.current, theme?.get(), trashRef.current);
   }, [storageKey, theme]);
   const queueSave = useCallback(() => {
     const now = performance.now();
@@ -558,6 +709,15 @@ export function Canvas({
       queueSave();
     },
     [render, queueSave],
+  );
+
+  const setTrash = useCallback(
+    (next: string[]) => {
+      trashRef.current = next;
+      setTrashState(next);
+      queueSave();
+    },
+    [queueSave],
   );
 
   const announce = useCallback((text: string) => {
@@ -606,7 +766,8 @@ export function Canvas({
   const [annotating, setAnnotating] = useState(false);
   const annotatingRef = useRef(false);
   useEffect(() => saveAnnotations(storageKey, annotations), [annotations, storageKey]);
-  const visibleAnnotations = useMemo(() => annotations.filter((a) => ids.has(a.itemId)), [annotations, ids]);
+  // Annotations on trashed items wait, unseen and unsent, until it is put back.
+  const visibleAnnotations = useMemo(() => annotations.filter((a) => shownIds.has(a.itemId)), [annotations, shownIds]);
   // Pins number the next message: unsent annotations in order. Sent ones show a check.
   const pending = visibleAnnotations.filter((a) => !a.sent);
   const unsentCount = pending.filter((a) => a.text.trim()).length;
@@ -619,6 +780,22 @@ export function Canvas({
       return print && `${theme?.get() ?? ""}|${print}`;
     },
     [theme],
+  );
+  /** How many items name this one as `from`; a new version of it raises the count. */
+  const versionsOf = useCallback(
+    (itemId: string) => `v|${items.filter((item) => item.from === itemId).length}`,
+    [items],
+  );
+  /** What a sent annotation waits on: its item's content, or its item's count of versions. */
+  const sentPrint = useCallback(
+    (a: Annotation) => (a.version ? versionsOf(a.itemId) : printOf(a.itemId)),
+    [printOf, versionsOf],
+  );
+  /** Each annotation on the item and its "new version" choice, for Escape. */
+  const versionsBefore = useCallback(
+    (itemId: string) =>
+      new Map(annotationsRef.current.filter((a) => a.itemId === itemId).map((a) => [a.id, a.version] as const)),
+    [],
   );
 
   const setOpen = useCallback((next: OpenAnnotation | null) => {
@@ -638,9 +815,15 @@ export function Canvas({
     if (!open) return;
     setOpen(null);
     setAnnotations((prev) =>
-      open.original.text
+      (open.original.text
         ? prev.map((a) => (a.id === open.id ? open.original : a))
-        : prev.filter((a) => a.id !== open.id),
+        : prev.filter((a) => a.id !== open.id)
+      ).map((a) =>
+        // The checkbox may also have changed the item's other annotations.
+        a.id !== open.id && open.versions.has(a.id) && a.version !== open.versions.get(a.id)
+          ? { ...a, version: open.versions.get(a.id) }
+          : a,
+      ),
     );
   }, [setOpen]);
   const openExisting = useCallback(
@@ -648,20 +831,32 @@ export function Canvas({
       closeAnnotation();
       const annotation = annotationsRef.current.find((a) => a.id === id);
       if (!annotation) return;
-      setOpen({ id, original: annotation });
+      setOpen({ id, original: annotation, versions: versionsBefore(annotation.itemId) });
       setFrontId(annotation.itemId);
     },
-    [closeAnnotation, setOpen],
+    [closeAnnotation, setOpen, versionsBefore],
   );
   const startAnnotation = useCallback(
     (itemId: string, x: number, y: number, ref: string) => {
       closeAnnotation();
-      const annotation: Annotation = { id: newAnnotationId(), itemId, x: Math.round(x), y: Math.round(y), ref, text: "" };
+      // The item's choice so far, or a new version by default: exploring keeps what was there.
+      const unsent = annotationsRef.current.filter((a) => a.itemId === itemId && !a.sent && a.text.trim());
+      const version = unsent.length ? !!unsent[unsent.length - 1]!.version : true;
+      const annotation: Annotation = {
+        id: newAnnotationId(),
+        itemId,
+        x: Math.round(x),
+        y: Math.round(y),
+        ref,
+        text: "",
+        version,
+      };
+      const versions = versionsBefore(itemId);
       setAnnotations((prev) => [...prev, annotation]);
-      setOpen({ id: annotation.id, original: annotation });
+      setOpen({ id: annotation.id, original: annotation, versions });
       setFrontId(itemId);
     },
-    [closeAnnotation, setOpen],
+    [closeAnnotation, setOpen, versionsBefore],
   );
   const annotationHandlers = useMemo<AnnotationHandlers>(
     () => ({
@@ -669,8 +864,23 @@ export function Canvas({
       // Editing a sent annotation makes it a new request, so it goes out again.
       onText: (id, text) =>
         setAnnotations((prev) =>
-          prev.map((a) => (a.id === id ? { id: a.id, itemId: a.itemId, x: a.x, y: a.y, ref: a.ref, text: limitText(text) } : a)),
+          prev.map((a) =>
+            a.id === id
+              ? { id: a.id, itemId: a.itemId, x: a.x, y: a.y, ref: a.ref, text: limitText(text), version: a.version }
+              : a,
+          ),
         ),
+      // One choice per item: its other unsent annotations follow. Changing a
+      // sent one makes it a new request, like editing its text.
+      onVersion: (id, version) =>
+        setAnnotations((prev) => {
+          const itemId = prev.find((a) => a.id === id)?.itemId;
+          return prev.map((a) =>
+            a.id === id || (a.itemId === itemId && !a.sent)
+              ? { id: a.id, itemId: a.itemId, x: a.x, y: a.y, ref: a.ref, text: a.text, version }
+              : a,
+          );
+        }),
       onSave: closeAnnotation,
       onCancel: cancelAnnotation,
       onDelete: (id) => {
@@ -689,20 +899,21 @@ export function Canvas({
     },
     [announce, closeAnnotation],
   );
+  // Clears what is on the canvas; annotations on trashed items wait for them.
   const clearAnnotations = useCallback(() => {
-    const before = annotationsRef.current.filter((a) => a.text.trim());
+    const before = annotationsRef.current.filter((a) => shownIds.has(a.itemId) && a.text.trim());
     setOpen(null);
-    setAnnotations([]);
-    notify(labels.clearedAnnotations(before.filter((a) => ids.has(a.itemId)).length), {
+    setAnnotations((prev) => prev.filter((a) => !shownIds.has(a.itemId)));
+    notify(labels.clearedAnnotations(before.length), {
       label: labels.undo,
       run: () => setAnnotations((now) => [...before, ...now.filter((a) => !before.some((old) => old.id === a.id))]),
     });
-  }, [ids, notify, setOpen]);
+  }, [notify, setOpen, shownIds]);
   const copyAnnotations = useCallback(async () => {
     closeAnnotation();
-    const list = annotationsRef.current.filter((a) => ids.has(a.itemId) && !a.sent && a.text.trim());
+    const list = annotationsRef.current.filter((a) => shownIds.has(a.itemId) && !a.sent && a.text.trim());
     if (!list.length) return;
-    const text = formatAnnotations(list);
+    const text = formatAnnotations(list, (itemId) => items.find((item) => item.id === itemId)?.name ?? itemId);
     window.clearTimeout(toastTimer.current);
     try {
       await writeClipboard(text);
@@ -713,13 +924,14 @@ export function Canvas({
     }
     const sentIds = new Set(list.map((a) => a.id));
     // "?" when the item is not rendered yet (a loading frame); the first check sets it.
-    setAnnotations((prev) => prev.map((a) => (sentIds.has(a.id) ? { ...a, sent: printOf(a.itemId) ?? "?" } : a)));
+    setAnnotations((prev) => prev.map((a) => (sentIds.has(a.id) ? { ...a, sent: sentPrint(a) ?? "?" } : a)));
     notify(labels.copiedAnnotations(list.length));
-  }, [closeAnnotation, ids, notify, printOf]);
+  }, [closeAnnotation, items, notify, sentPrint, shownIds]);
 
   /**
-   * Removes sent annotations whose item now renders differently. Items that are
-   * not rendered yet, or were sent under another theme, are only re-read.
+   * Removes sent annotations whose item now renders differently, or, for "new
+   * version" ones, whose item has a new version. Items that are not rendered
+   * yet, or were sent under another theme, are only re-read.
    */
   const checkSent = useCallback(() => {
     const prints = new Map<string, string | undefined>();
@@ -731,6 +943,13 @@ export function Canvas({
     const reread = new Map<string, string>();
     for (const a of annotationsRef.current) {
       if (!a.sent || !ids.has(a.itemId)) continue;
+      if (a.version) {
+        // Only a new item made from this one counts; the original stays as it was.
+        const versions = versionsOf(a.itemId);
+        if (!a.sent.startsWith("v|")) reread.set(a.id, versions);
+        else if (Number(versions.slice(2)) > Number(a.sent.slice(2))) gone.push(a);
+        continue;
+      }
       const current = now(a.itemId);
       if (!current || current === a.sent) continue;
       const sameTheme = a.sent.split("|")[0] === current.split("|")[0];
@@ -744,16 +963,17 @@ export function Canvas({
       prev.filter((a) => !goneIds.has(a.id)).map((a) => (reread.has(a.id) ? { ...a, sent: reread.get(a.id) } : a)),
     );
     if (!gone.length) return;
-    notify(labels.clearedSent(gone.length), {
+    const text = gone.every((a) => a.version) ? labels.clearedVersioned(gone.length) : labels.clearedSent(gone.length);
+    notify(text, {
       label: labels.undo,
       // Back as sent against how the items look now, so they stay until the next change.
       run: () =>
         setAnnotations((current) => [
           ...current,
-          ...gone.filter((a) => !current.some((c) => c.id === a.id)).map((a) => ({ ...a, sent: printOf(a.itemId) ?? "?" })),
+          ...gone.filter((a) => !current.some((c) => c.id === a.id)).map((a) => ({ ...a, sent: sentPrint(a) ?? "?" })),
         ]),
     });
-  }, [ids, notify, printOf, setOpen]);
+  }, [ids, notify, printOf, sentPrint, setOpen, versionsOf]);
   const checkSentRef = useRef(checkSent);
   checkSentRef.current = checkSent;
 
@@ -827,9 +1047,11 @@ export function Canvas({
 
   const fitAll = useCallback(() => {
     const viewport = viewportRef.current;
-    const bounds = boundsOf(items);
+    const bounds = boundsOf(shown);
     if (viewport && bounds) setCamera(fitBounds(bounds, viewport.clientWidth, viewport.clientHeight));
-  }, [boundsOf, items, setCamera]);
+  }, [boundsOf, setCamera, shown]);
+  const fitAllRef = useRef(fitAll);
+  fitAllRef.current = fitAll;
 
   /** Moves the camera only as far as needed to show `targets`, keeping the zoom when they fit. */
   const reveal = useCallback(
@@ -841,19 +1063,27 @@ export function Canvas({
       const w = viewport.clientWidth;
       const h = viewport.clientHeight;
       const m = REVEAL_MARGIN;
+      // Revealed items stop above the toolbar and its notices, which would
+      // otherwise cover a new version just as it arrives.
+      const toolbar = viewport.parentElement?.querySelector(".canvas-toolbar")?.getBoundingClientRect();
+      const bottom = toolbar ? Math.max(m, viewport.getBoundingClientRect().bottom - toolbar.top + TOAST_ROW) : m;
       const visible =
         bounds.minX * z + x >= m &&
         bounds.minY * z + y >= m &&
         bounds.maxX * z + x <= w - m &&
-        bounds.maxY * z + y <= h - m;
+        bounds.maxY * z + y <= h - bottom;
       if (visible) return;
       // Zoom out only as far as the targets need; never zoom in.
       const next = clampZoom(
-        Math.min(z, (w - m * 2) / Math.max(1, bounds.maxX - bounds.minX), (h - m * 2) / Math.max(1, bounds.maxY - bounds.minY)),
+        Math.min(
+          z,
+          (w - m * 2) / Math.max(1, bounds.maxX - bounds.minX),
+          (h - m - bottom) / Math.max(1, bounds.maxY - bounds.minY),
+        ),
       );
       setCamera({
         x: w / 2 - ((bounds.minX + bounds.maxX) / 2) * next,
-        y: h / 2 - ((bounds.minY + bounds.maxY) / 2) * next,
+        y: (m + h - bottom) / 2 - ((bounds.minY + bounds.maxY) / 2) * next,
         z: next,
       });
     },
@@ -861,25 +1091,43 @@ export function Canvas({
   );
 
   /**
-   * Gives each new item a saved position: its source position when that is
-   * free, otherwise just right of the items beside it. Existing items never move.
+   * Gives items a free saved position; other items never move. A new item
+   * starts at its source position and an item put back from the trash where it
+   * was; when that spot is taken, it goes just right of the items beside it.
+   * A new version goes right of its original, else below it, else to the end
+   * of the original's row or column, whichever is nearer.
    */
-  const placeAdded = useCallback(
-    (added: CanvasItem[]) => {
-      const addedIds = new Set(added.map((item) => item.id));
-      const taken = items.filter((item) => !addedIds.has(item.id)).flatMap((item) => rectOf(item) ?? []);
+  const placeFree = useCallback(
+    (targets: CanvasItem[], { besideOrigin }: { besideOrigin: boolean }) => {
+      const targetIds = new Set(targets.map((item) => item.id));
+      const taken = shown.filter((item) => !targetIds.has(item.id)).flatMap((item) => rectOf(item) ?? []);
       const overlaps = (a: { x: number; y: number; w: number; h: number }, b: typeof a) =>
         a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
       const placed: Record<string, Position> = {};
-      for (const item of added) {
+      for (const item of targets) {
         const r = rectOf(item);
         if (!r) continue;
-        let next = { x: r.x, y: r.y };
-        if (taken.some((other) => overlaps(r, other))) {
-          const row = taken.filter((other) => other.y < r.y + r.h && r.y < other.y + other.h);
+        const origin = besideOrigin && item.from ? shown.find((other) => other.id === item.from) : undefined;
+        const o = origin && rectOf(origin);
+        const spots = o
+          ? [
+              { x: o.x + o.w + ADD_GAP, y: o.y },
+              { x: o.x, y: o.y + o.h + ADD_GAP },
+            ]
+          : [{ x: r.x, y: r.y }];
+        let next = spots.find((spot) => !taken.some((other) => overlaps({ ...r, ...spot }, other)));
+        if (!next) {
+          const start = o ?? spots[0]!;
+          const row = taken.filter((other) => other.y < start.y + r.h && start.y < other.y + other.h);
           const right = Math.max(...(row.length ? row : taken).map((other) => other.x + other.w));
-          next = sanitizePosition({ x: right + ADD_GAP, y: r.y });
+          next = { x: right + ADD_GAP, y: start.y };
+          if (o) {
+            const column = taken.filter((other) => other.x < o.x + r.w && o.x < other.x + other.w);
+            const below = { x: o.x, y: Math.max(...column.map((other) => other.y + other.h)) + ADD_GAP };
+            if (below.y - o.y < next.x - o.x) next = below;
+          }
         }
+        next = sanitizePosition(next);
         placed[item.id] = next;
         taken.push({ ...r, ...next });
       }
@@ -887,7 +1135,7 @@ export function Canvas({
       setPositions(positionsRef.current);
       queueSave();
     },
-    [items, queueSave, rectOf],
+    [queueSave, rectOf, shown],
   );
 
   // New items, on reload or hot update, land in free space and come into view.
@@ -899,18 +1147,65 @@ export function Canvas({
     void document.fonts.ready.then(() =>
       requestAnimationFrame(() =>
         requestAnimationFrame(() => {
-          placeAdded(added);
-          reveal(added);
+          placeFree(added, { besideOrigin: true });
+          // A new version comes into view with its original, ready to compare.
+          const origins = shown.filter((item) => added.some((other) => other.from === item.id));
+          reveal([...origins, ...added]);
         }),
       ),
     );
-  }, [items, placeAdded, reveal]);
+  }, [items, placeFree, reveal, shown]);
+
+  /** Back on the canvas where it was, or beside its row if that spot was taken meanwhile. */
+  const putBack = useCallback(
+    (item: CanvasItem) => {
+      setTrash(trashRef.current.filter((id) => id !== item.id));
+      setFrontId(item.id);
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          placeFree([item], { besideOrigin: false });
+          reveal([item]);
+        }),
+      );
+    },
+    [placeFree, reveal, setTrash],
+  );
+  const moveToTrash = useCallback(
+    (item: CanvasItem) => {
+      const open = openRef.current && annotationsRef.current.find((a) => a.id === openRef.current?.id);
+      if (open && open.itemId === item.id) closeAnnotation();
+      setTrash([item.id, ...trashRef.current.filter((id) => id !== item.id)]);
+      setFrontId((front) => (front === item.id ? null : front));
+      // The button that had focus is gone with its item.
+      viewportRef.current?.focus({ preventScroll: true });
+      notify(labels.movedToTrash(item.name), { label: labels.undo, run: () => putBack(item) });
+    },
+    [closeAnnotation, notify, putBack, setTrash],
+  );
+  const closeTrash = useCallback(() => {
+    setTrashOpen(false);
+    trashButtonRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  // The trash closes on a press outside it, and when it has nothing left.
+  useEffect(() => {
+    if (!trashOpen) return;
+    const onDown = (event: PointerEvent) => {
+      if (event.target instanceof Element && event.target.closest(".canvas-trash-popover, .canvas-trash-button")) return;
+      setTrashOpen(false);
+    };
+    window.addEventListener("pointerdown", onDown, true);
+    return () => window.removeEventListener("pointerdown", onDown, true);
+  }, [trashOpen]);
+  useEffect(() => {
+    if (!trashedItems.length) setTrashOpen(false);
+  }, [trashedItems.length]);
 
   /** Canvas-item links (`#<id>`) reveal their item; anything else stays on the canvas. */
   const followLink = useCallback(
     (href: string) => {
       if (href.startsWith("#")) {
-        const target = items.find((item) => item.id === decodeURIComponent(href.slice(1)));
+        const target = shown.find((item) => item.id === decodeURIComponent(href.slice(1)));
         if (target) {
           setFrontId(target.id);
           reveal([target]);
@@ -927,7 +1222,7 @@ export function Canvas({
       if (url.origin === here.origin && url.pathname === here.pathname && url.search === here.search) return;
       notify(labels.linkBlocked(url.origin === here.origin ? `${url.pathname}${url.search}` : url.href));
     },
-    [items, notify, reveal],
+    [notify, reveal, shown],
   );
 
   const resetCamera = useCallback(() => setCamera(DEFAULT_CAMERA), [setCamera]);
@@ -954,7 +1249,7 @@ export function Canvas({
       if (fitted || !settled || viewport.clientWidth < MIN_FIT_SIZE || viewport.clientHeight < MIN_FIT_SIZE) return;
       fitted = true;
       observer.disconnect();
-      fitAll();
+      fitAllRef.current();
     };
     const observer = new ResizeObserver(tryFit);
     observer.observe(viewport);
@@ -970,7 +1265,7 @@ export function Canvas({
       fitted = true;
       observer.disconnect();
     };
-  }, [fitAll, render, saved.camera]);
+  }, [render, saved.camera]);
 
   // A theme change reaches every item frame and is saved with the layout.
   const lastTheme = useRef(themeId);
@@ -1447,7 +1742,7 @@ export function Canvas({
   const onTitlePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLElement>, item: CanvasItem) => {
       const target = event.target as Element;
-      if (event.button !== 0 || gesture.current || target.closest(".canvas-open, input")) return;
+      if (event.button !== 0 || gesture.current || target.closest(".canvas-item-action, input")) return;
       // Stops text selection while dragging; the click still fires.
       event.preventDefault();
       const pointerId = event.pointerId;
@@ -1511,7 +1806,7 @@ export function Canvas({
         aria-describedby="canvas-help"
       >
         <div ref={worldRef} className="canvas-world">
-          {items.map((item) => (
+          {shown.map((item) => (
             <CanvasItemView
               key={item.id}
               item={item}
@@ -1529,6 +1824,7 @@ export function Canvas({
               )}
               openAnnotation={openAnnotation?.id ?? null}
               annotationHandlers={annotationHandlers}
+              onTrash={moveToTrash}
             />
           ))}
         </div>
@@ -1642,11 +1938,33 @@ export function Canvas({
               data-tip={labels.clearAnnotations}
               onClick={clearAnnotations}
             >
-              <TrashIcon />
+              <EraserIcon />
             </button>
           </>
         )}
         <span className="canvas-separator" aria-hidden="true" />
+        {trashedItems.length > 0 && (
+          <>
+            <button
+              ref={trashButtonRef}
+              type="button"
+              className="canvas-button canvas-trash-button"
+              aria-label={labels.trash(trashedItems.length)}
+              aria-expanded={trashOpen}
+              aria-controls={trashOpen ? "canvas-trash" : undefined}
+              data-tip={labels.trashHeading}
+              onClick={() => {
+                // The trash opens where notices show.
+                setToast(null);
+                setTrashOpen((open) => !open);
+              }}
+            >
+              <TrashIcon />
+              {trashedItems.length}
+            </button>
+            <span className="canvas-separator" aria-hidden="true" />
+          </>
+        )}
         {theme && theme.options.length > 1 && (
           <>
             <fieldset className="canvas-themes" aria-label={labels.theme}>
@@ -1687,6 +2005,17 @@ export function Canvas({
           </span>
         </span>
       </div>
+      {trashOpen && (
+        <TrashPopover
+          items={trashedItems}
+          onClose={closeTrash}
+          onPutBack={(item) => {
+            setTrashOpen(false);
+            viewportRef.current?.focus({ preventScroll: true });
+            putBack(item);
+          }}
+        />
+      )}
       <span id="canvas-move-help" hidden>
         {labels.moveHelp}
       </span>

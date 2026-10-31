@@ -5,7 +5,7 @@ description: Build or update a local design canvas of live, real product compone
 
 # Design canvas
 
-A freeform canvas of live previews: the app's real components, synthetic data, no backend. People pan, zoom, drag items by their name or grip, click a name to copy it, open an item alone in a new tab, switch the app's themes, and Alt/Option-click any element to copy a reference for the conversation. You change content in source files. The canvas shell is already built and tested, so never rebuild it.
+A freeform canvas of live previews: the app's real components, synthetic data, no backend. People pan, zoom, drag items by their name or grip, click a name to copy it, open an item alone in a new tab, move items to the trash and put them back, switch the app's themes, and Alt/Option-click any element to copy a reference for the conversation. You change content in source files. The canvas shell is already built and tested, so never rebuild it.
 
 Rules adapted from `create-canvas` in ibelick/ui-skills (MIT).
 
@@ -33,11 +33,12 @@ Before adding items, make one real app component render. Work through `reference
 
 Edit `registry.tsx` and `items/`. Leave `canvas/` as installed; shell fixes belong in the skill (see "Changing the shell").
 
-Each registry entry has a stable `id`, a unique readable `name` such as `Pricing card · compact`, an optional one-line `note`, `component`, `x`, `y`, `width`, `height`, and optional `viewport`.
+Each registry entry has a stable `id`, a unique readable `name` such as `Pricing card · compact`, an optional one-line `note`, `component`, `x`, `y`, `width`, `height`, and optional `viewport` and `from`.
 
 - Reuse production components through their public APIs. Do not change their source, exports, hooks, or styles for the canvas. Experiments stay in `items/`; move them into product code only when asked.
 - Use synthetic data, mock services, and safe providers. No personal data, credentials, real requests, or writes. If a preview cannot be isolated safely, leave it out and say why.
-- "Try another version": keep the original and add an item with a new id and name. "Change this version": edit that item in place. Removal: remove only that entry and keep shared code.
+- "Try another version": keep the original and add an item with a new id, `from: "<original id>"`, and a name that says what changed, such as `Pricing card · full-width button`, not `Pricing card · 2`. The canvas places it beside the original and shows both. "Change this version": edit that item in place. Removal: remove only that entry and keep shared code.
+- People can move items to the canvas trash and put them back. The trash only hides an item; its code stays in the registry. Never remove an item's code because it is in the trash unless the user asks. The trash is saved in the browser with the layout: `localStorage["design-canvas:<canvas-name>"].trash`, item ids, most recent first.
 - When comparing one feature, keep data, content, size, and theme the same across items. For broader alternatives, name the layout differences. No full variant matrix unless asked.
 - Add the states that matter for the decision, such as empty, long content, or error, as separate items when they are relevant.
 - Give a new item a source position in empty space near related ones. If that spot overlaps the user's saved layout, the canvas moves only the new item to free space beside its row and brings it into view; existing items never move.
@@ -53,17 +54,23 @@ Frames load a full page each, so use them only where width matters. Over a frame
 
 Alt/Option-click inside a preview copies `Item name › role “label”`, numbered when the item has look-alikes, for example `B · tabs › button “Mark as done” (2/3)`. Treat a pasted reference as that element in that item. If it no longer matches the source, ask. Portaled content such as an open menu is outside the preview and cannot be referenced this way.
 
-For several changes at once, people use annotate mode (the toolbar's Annotate button, or A): they click elements, write a note on each, and copy them all as one message:
+For several changes at once, people use annotate mode (the toolbar's Annotate button, or A): they click elements, write a note on each, and copy them all as one message. Each note has an "Apply to a new version" checkbox, checked by default and shared by all notes on the same item. Checked items are listed on the last line:
 
 ```text
-Annotations from the design canvas (2):
+Annotations from the design canvas (3):
 1. Pricing card · compact › button “Upgrade”
    Make it full width
-2. Checkout · phone › heading “Summary”
+2. Pricing card · compact › heading “Pro”
+   Make it bigger
+3. Checkout · phone › heading “Summary”
    Move it above Payment
+
+Keep the original and add a new version: Pricing card · compact (1, 2)
 ```
 
-Treat each numbered entry as a change to that element, and handle every entry; say which ones you could not apply and why. Copied annotations stay on the canvas as sent pins and disappear on their own once their item renders differently after your edit, so you never need to clear them. A sent pin that stays means its item did not change.
+Treat each numbered entry as a change to that element, and handle every entry; say which ones you could not apply and why. For each item on the last line, leave the original unchanged and add one new item that applies all of its listed notes, following "Try another version" above. Change the other items in place. Without a last line, change every item in place.
+
+Copied annotations stay on the canvas as sent pins and disappear on their own, so you never need to clear them: in-place ones once their item renders differently after your edit, new-version ones once an item with `from` set to their item appears. A sent pin that stays means its item did not change, or its new version has no `from`.
 
 ## 4. Check
 
