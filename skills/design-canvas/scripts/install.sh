@@ -15,7 +15,8 @@ warn() { echo "design-canvas: warning: $*" >&2; }
 kit="${1:-}"
 name="${2:-}"
 title="${3:-$name}"
-kits="$( (ls "$skill_dir/kits"; ls "$private_kits" 2>/dev/null) | sort -u | tr '\n' ' ')"
+# Most machines have no private kits folder; a failing ls would end the script under pipefail.
+kits="$( (ls "$skill_dir/kits"; ls "$private_kits" 2>/dev/null || true) | sort -u | tr '\n' ' ')"
 [[ -n "$kit" && -n "$name" ]] || die "usage: install.sh <kit> <canvas-name> [title]  (kits: $kits)"
 [[ "$name" =~ ^[a-z0-9][a-z0-9-]{0,47}$ ]] || die "canvas name must be lowercase kebab-case, up to 48 characters"
 
