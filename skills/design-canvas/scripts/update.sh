@@ -36,9 +36,17 @@ while IFS= read -r -d '' f; do
   [[ -f "$shell/$rel" ]] || changes+="  $rel (removed)"$'\n'
 done < <(find "$dir/canvas" -type f -print0 | sort -z)
 
+# Canvases installed before the agent channel need it added to their vite config, a kit file.
+channel_note() {
+  grep -qs "agentChannel" "$dir"/vite.config.* ||
+    echo "This canvas cannot send annotations to the agent yet: add agentChannel() from ./canvas/agent-channel.ts to the plugins in its vite config, and allowImportingTsExtensions and noEmit to its tsconfig, as kits/react-vite does."
+}
+
 if [[ -z "$changes" ]]; then
   echo "The canvas is already up to date: $dir"
+  channel_note
   exit 0
 fi
 rsync -a --delete --exclude TESTING.md --exclude .DS_Store "$shell/" "$dir/canvas/"
 printf 'Updated the canvas shell in %s:\n%s' "$dir" "$changes"
+channel_note

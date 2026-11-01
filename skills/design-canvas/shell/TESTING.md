@@ -34,7 +34,7 @@ a device or input you do not have.
 
 ## Toolbar
 
-- Zoom out, zoom level, zoom in, show all, reset, annotate, and help sit centered at the bottom; copy appears only while there are unsent annotations, clear (eraser) while there are any, and trash while it holds items. The help list opens on hover or keyboard focus and describes the canvas region for screen readers.
+- Zoom out, zoom level, zoom in, show all, reset, annotate, and help sit centered at the bottom; copy (send, while an agent listens) appears only while there are unsent annotations, clear (eraser) while there are any, and trash while it holds items. The help list opens on hover or keyboard focus and describes the canvas region for screen readers.
 - At narrow widths (375 px) the text labels and separators drop and every control stays on screen, with annotations and trashed items present.
 
 ## Themes
@@ -66,6 +66,18 @@ a device or input you do not have.
 - A sent new-version annotation stays while its item changes, and is removed with "Cleared N sent annotations: new version added" and Undo once a new item with `from` set to its item appears. Removing such an item clears nothing.
 - Clear removes every annotation and offers Undo.
 - Alt-click still copies a single reference, in and out of annotate mode, and places no pin.
+
+## Sending to the agent
+
+Run `scripts/listen.sh <canvas-url>` in a terminal as the agent would.
+
+- While it waits, the copy button reads "Send N to agent". Pressing it makes `listen.sh` print the same message Copy writes, plus a line telling the agent to listen again, and exit. The pins turn into sent pins and "Sent N annotations to the agent" shows.
+- Without a listener, after a listener is stopped, or on a canvas whose vite config lacks `agentChannel()`, the button reads "Copy N annotations" and copies. `listen.sh` on such a canvas says it cannot send, and on a stopped dev server says it is not running.
+- After a delivery, until `listen.sh` runs again, Send queues: the pins show a clock, "Queued N annotations" shows, and the next `listen.sh` receives them at once as one message, numbered from 1. Editing a queued annotation makes it unsent.
+- Stopping `listen.sh` or the dev server while annotations are queued turns them back into numbered unsent ones with "The agent stopped listening, so N annotations weren't sent"; so does a reload while no agent listens. 15 minutes without a new listener after a delivery or timeout count as stopped.
+- A second `listen.sh` replaces the first, which prints that another session is listening and exits.
+- Stopping the dev server switches the button back to Copy; `listen.sh` reconnects by itself after a dev server restart.
+- Requests to `/__design-canvas/agent/listen` with an `Origin` or `Sec-Fetch-Site` header, and sends to `/__design-canvas/agent/send` from another origin or host, get 403.
 - Annotations survive reload and hot reload, including one being typed; annotations on removed items are dropped. Corrupt saved annotations fall back to none without errors.
 
 ## Trash
