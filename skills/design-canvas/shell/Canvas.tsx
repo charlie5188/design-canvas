@@ -11,6 +11,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { sendToAgent, useAgentState } from "./agent";
 import { frameUrl, NAVIGATE_EVENT, postToFrame, readFrameMessage } from "./bridge";
 import {
   type Annotation,
@@ -175,6 +176,11 @@ const CopyIcon = () => (
     <path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" />
   </ToolIcon>
 );
+const SendIcon = () => (
+  <ToolIcon>
+    <path d="M8 13V3.5M4 7.5l4-4 4 4" />
+  </ToolIcon>
+);
 const TrashIcon = () => (
   <ToolIcon>
     <path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.1a1 1 0 0 0 1 .9h3.8a1 1 0 0 0 1-.9l.6-8.1" />
@@ -192,6 +198,12 @@ const EraserIcon = () => (
 const SentIcon = () => (
   <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M3.5 8.5 6.5 11.5 12.5 4.5" />
+  </svg>
+);
+const QueuedIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="8" cy="8" r="5.5" />
+    <path d="M8 5v3l2 1.5" />
   </svg>
 );
 
@@ -311,6 +323,7 @@ function AnnotationCard({ annotation, handlers, done }: { annotation: Annotation
       {annotation.sent && (
         <span className="canvas-annotation-sent">{annotation.version ? labels.sentNoteVersion : labels.sentNote}</span>
       )}
+      {annotation.queued && <span className="canvas-annotation-sent">{labels.queuedNote}</span>}
       <textarea
         ref={fieldRef}
         rows={3}
@@ -368,7 +381,7 @@ function AnnotationPin({
   handlers,
 }: {
   annotation: Annotation;
-  /** Its place in the next message; absent once sent. */
+  /** Its place in the next message; absent once sent or queued. */
   number?: number;
   open: boolean;
   handlers: AnnotationHandlers;
@@ -382,11 +395,17 @@ function AnnotationPin({
         type="button"
         className="canvas-pin-bubble"
         data-sent={number === undefined || undefined}
-        aria-label={number === undefined ? labels.sentPin(text) : labels.annotationPin(number, text)}
+        aria-label={
+          number !== undefined
+            ? labels.annotationPin(number, text)
+            : annotation.queued
+              ? labels.queuedPin(text)
+              : labels.sentPin(text)
+        }
         aria-expanded={open}
         onClick={() => (open ? handlers.onSave() : handlers.onOpen(annotation.id))}
       >
-        {number ?? <SentIcon />}
+        {number ?? (annotation.queued ? <QueuedIcon /> : <SentIcon />)}
       </button>
       {open && <AnnotationCard annotation={annotation} handlers={handlers} done={() => bubbleRef.current?.focus({ preventScroll: true })} />}
     </div>
@@ -755,9 +774,10 @@ export function Canvas({
   useEffect(() => () => window.clearTimeout(toastTimer.current), []);
 
   // Annotations. Annotate mode turns clicks in previews into numbered pins. The
-  // toolbar copies the unsent ones as one message and marks them sent; a sent
-  // one leaves once its item renders differently after a code update. The open
-  // annotation's text is live state, so switching elements never loses typing.
+  // toolbar sends the unsent ones to a listening agent, or copies them, as one
+  // message and marks them sent; a sent one leaves once its item renders
+  // differently after a code update. The open annotation's text is live state,
+  // so switching elements never loses typing.
   const [annotations, setAnnotations] = useState<Annotation[]>(() => loadAnnotations(storageKey, ids));
   const annotationsRef = useRef(annotations);
   annotationsRef.current = annotations;
@@ -768,9 +788,16 @@ export function Canvas({
   useEffect(() => saveAnnotations(storageKey, annotations), [annotations, storageKey]);
   // Annotations on trashed items wait, unseen and unsent, until it is put back.
   const visibleAnnotations = useMemo(() => annotations.filter((a) => shownIds.has(a.itemId)), [annotations, shownIds]);
-  // Pins number the next message: unsent annotations in order. Sent ones show a check.
-  const pending = visibleAnnotations.filter((a) => !a.sent);
+  // Pins number the next message: unsent annotations in order. Sent ones show a
+  // check, queued ones a clock.
+  const pending = visibleAnnotations.filter((a) => !a.sent && !a.queued);
   const unsentCount = pending.filter((a) => a.text.trim()).length;
+  // Listening, or busy with the last message and expected back: either way the
+  // toolbar sends instead of copying.
+  const agent = useAgentState();
+  const agentRef = useRef(agent);
+  agentRef.current = agent;
+  const agentOn = agent === "listening" || agent === "working";
 
   /** What an item renders now, tagged with the theme so a theme switch never reads as an update. */
   const printOf = useCallback(
@@ -840,7 +867,7 @@ export function Canvas({
     (itemId: string, x: number, y: number, ref: string) => {
       closeAnnotation();
       // The item's choice so far, or a new version by default: exploring keeps what was there.
-      const unsent = annotationsRef.current.filter((a) => a.itemId === itemId && !a.sent && a.text.trim());
+      const unsent = annotationsRef.current.filter((a) => a.itemId === itemId && !a.sent && !a.queued && a.text.trim());
       const version = unsent.length ? !!unsent[unsent.length - 1]!.version : true;
       const annotation: Annotation = {
         id: newAnnotationId(),
@@ -861,7 +888,7 @@ export function Canvas({
   const annotationHandlers = useMemo<AnnotationHandlers>(
     () => ({
       onOpen: openExisting,
-      // Editing a sent annotation makes it a new request, so it goes out again.
+      // Editing a sent or queued annotation makes it a new request, so it goes out again.
       onText: (id, text) =>
         setAnnotations((prev) =>
           prev.map((a) =>
@@ -876,7 +903,7 @@ export function Canvas({
         setAnnotations((prev) => {
           const itemId = prev.find((a) => a.id === id)?.itemId;
           return prev.map((a) =>
-            a.id === id || (a.itemId === itemId && !a.sent)
+            a.id === id || (a.itemId === itemId && !a.sent && !a.queued)
               ? { id: a.id, itemId: a.itemId, x: a.x, y: a.y, ref: a.ref, text: a.text, version }
               : a,
           );
@@ -909,24 +936,88 @@ export function Canvas({
       run: () => setAnnotations((now) => [...before, ...now.filter((a) => !before.some((old) => old.id === a.id))]),
     });
   }, [notify, setOpen, shownIds]);
-  const copyAnnotations = useCallback(async () => {
+  const message = useCallback(
+    (list: Annotation[]) => formatAnnotations(list, (itemId) => items.find((item) => item.id === itemId)?.name ?? itemId),
+    [items],
+  );
+  const markSent = useCallback(
+    (list: Annotation[]) => {
+      const sentIds = new Set(list.map((a) => a.id));
+      // "?" when the item is not rendered yet (a loading frame); the first check sets it.
+      setAnnotations((prev) =>
+        prev.map((a) => (sentIds.has(a.id) ? { ...a, queued: undefined, sent: sentPrint(a) ?? "?" } : a)),
+      );
+    },
+    [sentPrint],
+  );
+  const copyAnnotations = useCallback(
+    async (list: Annotation[], done: (n: number) => string) => {
+      const text = message(list);
+      window.clearTimeout(toastTimer.current);
+      try {
+        await writeClipboard(text);
+      } catch {
+        // Not sent: the person copies from the fallback field, and the pins stay new.
+        setToast({ kind: "failed", text });
+        return;
+      }
+      markSent(list);
+      notify(done(list.length));
+    },
+    [markSent, message, notify],
+  );
+  /**
+   * The toolbar's main action. With a listening agent it sends; while the agent
+   * is busy with the last message it queues on this page; without one, or if
+   * the agent left in the meantime, it copies.
+   */
+  const sendAnnotations = useCallback(async () => {
     closeAnnotation();
-    const list = annotationsRef.current.filter((a) => shownIds.has(a.itemId) && !a.sent && a.text.trim());
+    const list = annotationsRef.current.filter((a) => shownIds.has(a.itemId) && !a.sent && !a.queued && a.text.trim());
     if (!list.length) return;
-    const text = formatAnnotations(list, (itemId) => items.find((item) => item.id === itemId)?.name ?? itemId);
-    window.clearTimeout(toastTimer.current);
-    try {
-      await writeClipboard(text);
-    } catch {
-      // Not sent: the person copies from the fallback field, and the pins stay new.
-      setToast({ kind: "failed", text });
+    const offered = agentRef.current === "listening" || agentRef.current === "working";
+    let state = agentRef.current;
+    if (state === "listening") {
+      const result = await sendToAgent(message(list));
+      if (result.delivered) {
+        markSent(list);
+        notify(labels.sentToAgent(list.length));
+        return;
+      }
+      state = result.state;
+    }
+    if (state === "working") {
+      const queuedIds = new Set(list.map((a) => a.id));
+      setAnnotations((prev) => prev.map((a) => (queuedIds.has(a.id) ? { ...a, queued: true } : a)));
+      notify(labels.queuedForAgent(list.length));
       return;
     }
-    const sentIds = new Set(list.map((a) => a.id));
-    // "?" when the item is not rendered yet (a loading frame); the first check sets it.
-    setAnnotations((prev) => prev.map((a) => (sentIds.has(a.id) ? { ...a, sent: sentPrint(a) ?? "?" } : a)));
-    notify(labels.copiedAnnotations(list.length));
-  }, [closeAnnotation, items, notify, sentPrint, shownIds]);
+    await copyAnnotations(list, offered ? labels.agentGoneCopied : labels.copiedAnnotations);
+  }, [closeAnnotation, copyAnnotations, markSent, message, notify, shownIds]);
+
+  // Queued annotations go out as one message once the agent listens again, and
+  // turn back into unsent ones if it stops listening, so nothing waits for an
+  // agent that is gone.
+  const flushing = useRef(false);
+  useEffect(() => {
+    if (agent === undefined || agent === "working") return;
+    if (agent === "off") {
+      const queued = annotationsRef.current.filter((a) => a.queued);
+      if (!queued.length) return;
+      setAnnotations((prev) => prev.map((a) => (a.queued ? { ...a, queued: undefined } : a)));
+      notify(labels.agentGoneQueued(queued.length));
+      return;
+    }
+    const queued = annotationsRef.current.filter((a) => a.queued && shownIds.has(a.itemId));
+    if (!queued.length || flushing.current) return;
+    flushing.current = true;
+    void sendToAgent(message(queued)).then((result) => {
+      flushing.current = false;
+      if (!result.delivered) return;
+      markSent(queued);
+      notify(labels.sentToAgent(queued.length));
+    });
+  }, [agent, markSent, message, notify, shownIds]);
 
   /**
    * Removes sent annotations whose item now renders differently, or, for "new
@@ -1819,7 +1910,7 @@ export function Canvas({
               announce={announce}
               pins={visibleAnnotations.flatMap((annotation) =>
                 annotation.itemId === item.id
-                  ? [{ annotation, number: annotation.sent ? undefined : pending.indexOf(annotation) + 1 }]
+                  ? [{ annotation, number: annotation.sent || annotation.queued ? undefined : pending.indexOf(annotation) + 1 }]
                   : [],
               )}
               openAnnotation={openAnnotation?.id ?? null}
@@ -1924,9 +2015,9 @@ export function Canvas({
           {labels.annotate}
         </button>
         {unsentCount > 0 && (
-          <button type="button" className="canvas-button canvas-button-primary" onClick={() => void copyAnnotations()}>
-            <CopyIcon />
-            {labels.copyAnnotations(unsentCount)}
+          <button type="button" className="canvas-button canvas-button-primary" onClick={() => void sendAnnotations()}>
+            {agentOn ? <SendIcon /> : <CopyIcon />}
+            {agentOn ? labels.sendAnnotations(unsentCount) : labels.copyAnnotations(unsentCount)}
           </button>
         )}
         {visibleAnnotations.some((a) => a.text.trim()) && (

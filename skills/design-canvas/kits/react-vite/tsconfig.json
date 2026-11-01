@@ -1,4 +1,9 @@
 {
   "extends": "__APP_DIR__/tsconfig.json",
+  "compilerOptions": {
+    // vite.config.mts imports the shell's agent channel by its file name, as Node's own loader needs.
+    "allowImportingTsExtensions": true,
+    "noEmit": true
+  },
   "include": ["./**/*.ts", "./**/*.mts", "./**/*.tsx"]
 }

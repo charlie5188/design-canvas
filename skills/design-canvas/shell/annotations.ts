@@ -1,12 +1,14 @@
-// Annotations: notes pinned to elements in previews, copied to the conversation
-// as one numbered list. Saved beside the layout so a hot reload, which the
-// agent's own edits often cause, never loses unsent annotations.
+// Annotations: notes pinned to elements in previews, sent to a listening agent
+// or copied to the conversation as one numbered list. Saved beside the layout
+// so a hot reload, which the agent's own edits often cause, never loses unsent
+// annotations.
 //
-// Lifecycle: new → copied ("sent", with a fingerprint of its item's rendered
-// content) → removed once that item renders differently after a code update,
-// which usually means the agent applied it. Only sent annotations are ever
-// removed automatically, and only per item, so an agent that edits in several
-// steps, or an unrelated update, never takes unsent work or other items' notes.
+// Lifecycle: new → (queued while the agent is busy →) sent or copied ("sent",
+// with a fingerprint of its item's rendered content) → removed once that item
+// renders differently after a code update, which usually means the agent
+// applied it. Only sent annotations are ever removed automatically, and only
+// per item, so an agent that edits in several steps, or an unrelated update,
+// never takes unsent work or other items' notes.
 //
 // A "new version" annotation asks for a new item beside the original instead
 // of a change to it. The original never changes then, so it is sent with the
@@ -33,6 +35,11 @@ export type Annotation = {
    * for a `version` annotation `v|<count of items made from it>`.
    */
   sent?: string;
+  /**
+   * Sent while the agent was busy: it waits on the page and goes out once the
+   * agent listens again. Never together with `sent`.
+   */
+  queued?: boolean;
 };
 
 const VERSION = 1;
@@ -56,7 +63,8 @@ const valid = (value: unknown, ids: ReadonlySet<string>): Annotation | undefined
   if (typeof c.text !== "string" || !c.text.trim() || c.text.length > MAX_TEXT) return undefined;
   const sent = typeof c.sent === "string" && c.sent.length <= 16 ? { sent: c.sent } : {};
   const version = c.version === true ? { version: true } : {};
-  return { id: c.id, itemId: c.itemId, x: c.x, y: c.y, ref: c.ref, text: c.text, ...version, ...sent };
+  const queued = c.queued === true && !("sent" in sent) ? { queued: true } : {};
+  return { id: c.id, itemId: c.itemId, x: c.x, y: c.y, ref: c.ref, text: c.text, ...version, ...sent, ...queued };
 };
 
 /** Saved annotations for items that still exist; anything invalid is dropped. */

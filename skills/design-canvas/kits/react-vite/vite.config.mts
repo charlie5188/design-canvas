@@ -11,6 +11,7 @@ import {
   type UserConfig,
   version as viteVersion,
 } from "vite";
+import { agentChannel } from "./canvas/agent-channel.ts";
 
 // A standalone Vite page beside the app. It renders the app's own components
 // without touching the app's build, routes, or server.
@@ -185,7 +186,8 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => {
     envDir: appDir,
     // Root-relative assets such as "/logo.svg" come from the app's public folder.
     publicDir: existsSync(resolve(appDir, "public")) ? resolve(appDir, "public") : false,
-    plugins: [nextFont, tailwindSources, ...reused, ...(await tailwindPlugins(reused))],
+    // agentChannel: the page sends annotations straight to an agent running scripts/listen.sh.
+    plugins: [agentChannel(), nextFont, tailwindSources, ...reused, ...(await tailwindPlugins(reused))],
     // The app's PostCSS setup, such as Tailwind; Vite would otherwise search from the canvas folder.
     css: { postcss: appDir },
     define: { "process.env": JSON.stringify({ NODE_ENV: "development", ...env }) },

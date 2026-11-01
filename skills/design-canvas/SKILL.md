@@ -5,13 +5,13 @@ description: Build or update a local design canvas of live, real product compone
 
 # Design canvas
 
-A freeform canvas of live previews: the app's real components, synthetic data, no backend. People pan, zoom, drag items by their name or grip, click a name to copy it, open an item alone in a new tab, move items to the trash and put them back, switch the app's themes, and Alt/Option-click any element to copy a reference for the conversation. You change content in source files. The canvas shell is already built and tested, so never rebuild it.
+A freeform canvas of live previews: the app's real components, synthetic data, no backend. People pan, zoom, drag items by their name or grip, click a name to copy it, open an item alone in a new tab, move items to the trash and put them back, switch the app's themes, Alt/Option-click any element to copy a reference for the conversation, and send you annotations straight from the canvas. You change content in source files. The canvas shell is already built and tested, so never rebuild it.
 
 Rules adapted from `create-canvas` in ibelick/ui-skills (MIT).
 
 ## 1. Find or install the canvas
 
-- Look for an existing canvas first: a folder with `canvas/Canvas.tsx` and `registry.tsx`, usually under `design-canvas/` in the app. Continue that one for follow-up requests. Before your first change to it in a conversation, bring it up to date with this skill: `bash ~/.agents/skills/design-canvas/scripts/update.sh <canvas-folder>`. It replaces only `canvas/` and lists what changed. If anything changed, tell the user in one line that the canvas was updated.
+- Look for an existing canvas first: a folder with `canvas/Canvas.tsx` and `registry.tsx`, usually under `design-canvas/` in the app. Continue that one for follow-up requests. Before your first change to it in a conversation, bring it up to date with this skill: `bash ~/.agents/skills/design-canvas/scripts/update.sh <canvas-folder>`. It replaces only `canvas/` and lists what changed. If anything changed, tell the user in one line that the canvas was updated. If it says the canvas cannot send annotations to the agent, add `agentChannel()` to the plugins in the canvas's vite config, imported from `./canvas/agent-channel.ts`, and `allowImportingTsExtensions` and `noEmit` to its tsconfig, as `kits/react-vite/` does.
 - Choose a kit. First list the private kits, which are fitted to specific projects: `ls ~/.agents/design-canvas-kits` (or `$DESIGN_CANVAS_KITS`), and read each `kit.env` label. Use the one that matches this project. Otherwise use `react-vite`, which fits any React app, including Next.js; its canvas is a Vite page in `<app>/design-canvas/<name>/`.
 - Run the installer from inside the app:
 
@@ -24,6 +24,23 @@ Rules adapted from `create-canvas` in ibelick/ui-skills (MIT).
 - Not React: the shell is React. Port `shell/` to the app's framework with `shell/TESTING.md` as the acceptance list, or ask the user before rendering the app's components another way.
 
 Run the dev server in the background with the printed command, then open the printed `http://127.0.0.1:<port>/`. Each canvas has its own fixed port, picked from its folder path, so its URL and saved layout never mix with another canvas. If Vite reports the port in use, the canvas is probably running already; open it instead of starting another. Use `127.0.0.1`, not `localhost`: the server listens on 127.0.0.1 only, so hot reload fails on `localhost`.
+
+### Listen for annotations
+
+If you can run a background command that tells you when it exits (Claude Code can), listen whenever the canvas is open and you are working on it. Start right after opening it, and again after each time it exits:
+
+```sh
+bash ~/.agents/skills/design-canvas/scripts/listen.sh http://127.0.0.1:<port>/
+```
+
+While it waits, the canvas's annotation button reads "Send N to agent" instead of "Copy N annotations", so people send notes without switching to the chat. When it exits, act on what it printed:
+
+- Annotations: the person wrote them on the canvas, so they are the person's request. Handle them like pasted annotations (see "References from the user"). The chat does not show them, so start your reply with a short list of what you got. Then listen again.
+- Nothing sent for a while: listen again, unless the person has moved on to other work.
+- Another session is listening: stop. Never listen from two sessions at once.
+- Not running, or cannot send: say so in one line. People copy and paste instead.
+
+While you work on one message, people can send the next. The canvas holds it and sends it when you listen again. If you can't run background commands, skip this section: the button copies, and people paste.
 
 ## 2. Fit the kit to the app
 
@@ -54,7 +71,7 @@ Frames load a full page each, so use them only where width matters. Over a frame
 
 Alt/Option-click inside a preview copies `Item name › role “label”`, numbered when the item has look-alikes, for example `B · tabs › button “Mark as done” (2/3)`. Treat a pasted reference as that element in that item. If it no longer matches the source, ask. Portaled content such as an open menu is outside the preview and cannot be referenced this way.
 
-For several changes at once, people use annotate mode (the toolbar's Annotate button, or A): they click elements, write a note on each, and copy them all as one message. Each note has an "Apply to a new version" checkbox, checked by default and shared by all notes on the same item. Checked items are listed on the last line:
+For several changes at once, people use annotate mode (the toolbar's Annotate button, or A): they click elements, write a note on each, and send them all as one message, through `listen.sh` or by copy and paste. Each note has an "Apply to a new version" checkbox, checked by default and shared by all notes on the same item. Checked items are listed on the last line:
 
 ```text
 Annotations from the design canvas (3):
@@ -70,7 +87,7 @@ Keep the original and add a new version: Pricing card · compact (1, 2)
 
 Treat each numbered entry as a change to that element, and handle every entry; say which ones you could not apply and why. For each item on the last line, leave the original unchanged and add one new item that applies all of its listed notes, following "Try another version" above. Change the other items in place. Without a last line, change every item in place.
 
-Copied annotations stay on the canvas as sent pins and disappear on their own, so you never need to clear them: in-place ones once their item renders differently after your edit, new-version ones once an item with `from` set to their item appears. A sent pin that stays means its item did not change, or its new version has no `from`.
+Sent and copied annotations stay on the canvas as sent pins and disappear on their own, so you never need to clear them: in-place ones once their item renders differently after your edit, new-version ones once an item with `from` set to their item appears. A sent pin that stays means its item did not change, or its new version has no `from`.
 
 ## 4. Check
 
