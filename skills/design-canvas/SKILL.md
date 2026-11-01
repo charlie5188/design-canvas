@@ -52,7 +52,11 @@ Edit `registry.tsx` and `items/`. Leave `canvas/` as installed; shell fixes belo
 
 Each registry entry has a stable `id`, a unique readable `name` such as `Pricing card · compact`, an optional one-line `note`, `component`, `x`, `y`, `width`, `height`, and optional `viewport` and `from`.
 
-- Reuse production components through their public APIs. Do not change their source, exports, hooks, or styles for the canvas. Experiments stay in `items/`; move them into product code only when asked.
+- Build each version from the app's components, in this order:
+  1. An existing component with different props, such as `<PricingCard variant="compact" />`. The canvas renders product code, so a chosen version moves into the product as it is.
+  2. When props are not enough, existing components composed in `items/`.
+  3. When neither can express the version, for example a new direction, a new component in `items/`. It is a copy: it does not follow changes to the product component and can miss accessibility attributes or edge cases, so a chosen one must be rebuilt in the real component. Start its `note` with `New component`.
+- Use production components through their public APIs. Do not change their source, exports, hooks, or styles for the canvas. Experiments stay in `items/`; move them into product code only when asked (see "Move a version into the product").
 - Use synthetic data, mock services, and safe providers. No personal data, credentials, real requests, or writes. If a preview cannot be isolated safely, leave it out and say why.
 - "Try another version": keep the original and add an item with a new id, `from: "<original id>"`, and a name that says what changed, such as `Pricing card · full-width button`, not `Pricing card · 2`. The canvas places it beside the original and shows both. "Change this version": edit that item in place. Removal: remove only that entry and keep shared code.
 - People can move items to the canvas trash and put them back. The trash only hides an item; its code stays in the registry. Never remove an item's code because it is in the trash unless the user asks. The trash is saved in the browser with the layout: `localStorage["design-canvas:<canvas-name>"].trash`, item ids, most recent first.
@@ -106,9 +110,19 @@ The canvas runs only on this machine.
 - To put an item in a design tool, point that tool's capture or import at the item's frame page. Say which items you sent.
 - A canvas is deleted with its worktree or folder. Before cleanup, offer to record what was compared and what was chosen, with screenshots, where the team will look.
 
+## 6. Move a version into the product
+
+Only when the user asks.
+
+- Props: set the same props where the product renders the component.
+- Composition: move it into product code and connect it to real data.
+- New component: do not copy it in. Rebuild it as production code, usually as a new prop on the real component, so the product keeps one component.
+- Then open the real app and check what the canvas cannot simulate: real data with its loading and error states, routes, page layout and parent styles, and responsive behavior.
+- End with one sentence that says what you checked and what you did not.
+
 ## Report
 
-End with: changed paths and new item names; checks run and results; what is not working or not tested; defaults you chose without asking.
+End with: changed paths and new item names, marking those built on a new component as needing engineering before they ship; checks run and results; what is not working or not tested; defaults you chose without asking.
 
 ## Changing the shell
 

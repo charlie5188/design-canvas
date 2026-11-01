@@ -11,6 +11,7 @@ Instead of asking the agent to build a canvas from scratch for every project, th
 ## What you get
 
 - **Real components, no backend.** Items render your app's own components with synthetic data, styles, and themes.
+- **Know what can ship.** The agent builds versions from your components' props first, so they are product code already. A version that needs a new component says so on the canvas. When you ask to ship one, the agent moves it into the product and checks it in your running app.
 - **Talk about what you see.** Click an item's name to copy it. Hold ⌥/Alt and click any element to copy a reference such as `Pricing card · compact › button “Upgrade”`, then paste it into the conversation.
 - **Annotate many things, send once.** Press A or the Annotate button, click elements, and write a note on each. Send them all to the agent as one numbered message, straight from the canvas; each pin clears itself once the agent has changed its item. Agents that can't listen in the background, such as ones without background commands, get the same message by copy and paste.
 - **New versions beside the original.** Each note asks for a new version by default, so the agent keeps the original and adds the change next to it, and you compare both. Uncheck it to change the item in place.
@@ -96,6 +97,7 @@ React アプリの実際のコンポーネントを、パン・ズームでき�
 ### できること
 
 - **本物のコンポーネント、バックエンドなし。** アイテムはアプリ自身のコンポーネントを、合成データとアプリのスタイル・テーマで表示します。
+- **そのままリリースできる案がわかる。** エージェントはまず既存コンポーネントの props で案を作るので、その案はそのままプロダクトのコードです。新しいコンポーネントが必要な案は、キャンバス上にそう表示されます。案をプロダクトに入れるよう頼むと、エージェントが組み込み、実際のアプリで確認します。
 - **見ているものをそのまま会話に。** アイテム名をクリックすると名前をコピーできます。⌥/Alt を押しながら要素をクリックすると、`Pricing card · compact › button “Upgrade”` のような参照をコピーでき、そのまま会話に貼り付けられます。
 - **まとめて注釈して、一度で送信。** A キーか Annotate ボタンで注釈モードにし、要素をクリックしてそれぞれにメモを書きます。すべてを番号付きの 1 つのメッセージとして、キャンバスから直接エージェントに送れます。エージェントがそのアイテムを変更すると、ピンは自動で消えます。バックグラウンドで待機できないエージェント（バックグラウンドコマンドがないものなど）には、同じメッセージをコピーして貼り付けます。
 - **新しい案は元の案の隣に。** 注釈は初期設定で新しい案を求めます。エージェントは元の案を残したまま変更を隣に追加するので、2 つを見比べられます。チェックを外すと、そのアイテム自体を変更します。
