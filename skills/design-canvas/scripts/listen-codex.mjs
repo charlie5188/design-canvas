@@ -9,6 +9,10 @@ import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 
 const exec = promisify(execFile);
+// Node's fetch drops a request that gets no response headers for 300 s. A
+// longer poll would drop and reconnect every 5 minutes, and ten drops in a row
+// read as "canvas not running". A shorter one ends with the canvas's own 204.
+const MAX_POLL_S = 240;
 const shutdown = new AbortController();
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.once(signal, () => shutdown.abort());
@@ -27,10 +31,11 @@ async function main() {
   if (!thread || !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(thread) || !cli || !isAbsolute(cli)) {
     throw new Error("Start this listener from the intended Codex Desktop chat; CODEX_THREAD_ID and CODEX_APP_RUNTIME_CLI_PATH are required.");
   }
-  const wait = Number(process.env.DESIGN_CANVAS_LISTEN_SECONDS ?? 3600);
-  if (!Number.isInteger(wait) || wait < 1 || wait > 3600) {
+  const seconds = Number(process.env.DESIGN_CANVAS_LISTEN_SECONDS ?? MAX_POLL_S);
+  if (!Number.isInteger(seconds) || seconds < 1 || seconds > 3600) {
     throw new Error("DESIGN_CANVAS_LISTEN_SECONDS must be between 1 and 3600.");
   }
+  const wait = Math.min(seconds, MAX_POLL_S);
   const help = await exec(cli, ["queue", "--help"], { timeout: 10_000 });
   if (!help.stdout.includes("--thread") || !help.stdout.includes("--message")) {
     throw new Error("This Codex CLI does not support queue --thread --message. Use Copy annotations instead.");
@@ -41,8 +46,9 @@ async function main() {
     redirect: "error",
     signal: AbortSignal.any([shutdown.signal, AbortSignal.timeout(timeout)]),
   });
-  // Do not replace a Claude listener (or a listener started on an earlier turn).
-  // The channel's 409 response still settles simultaneous connection attempts.
+  // Like listen.sh, take over from any older listener, Claude or Codex: the
+  // person's most recent chat should get the notes, not one they left. The
+  // older listener gets 409 and stops.
   async function listen() {
     for (let attempt = 0; attempt < 10; attempt++) {
       try {
@@ -51,10 +57,7 @@ async function main() {
           throw new Error("Canvas cannot send annotations. Add agentChannel() to its vite.config first.");
         }
         if (!status.ok) throw new Error(`Canvas status returned HTTP ${status.status}.`);
-        if ((await status.json()).state === "listening") {
-          log("Another listener is already connected; leaving it in place.");
-          return null;
-        }
+        await status.body?.cancel();
         return await get(`/listen?timeout=${wait}`, (wait + 60) * 1000);
       } catch (error) {
         if (shutdown.signal.aborted) return null;
@@ -70,12 +73,12 @@ async function main() {
   let pending;
   let received;
   try {
-    log(`Listening at ${url.origin}/ for Codex chat ${thread}. Keep Codex Desktop open; start only one listener per canvas.`);
+    log(`Listening at ${url.origin}/ for Codex chat ${thread}. Keep Codex Desktop open. A listener started later, from any chat, takes over.`);
     while (!shutdown.signal.aborted) {
       const response = await listen();
       if (!response) break;
       if (response.status === 409) {
-        log("Another agent session is listening now. Stopping without reconnecting.");
+        log("Another session took over this canvas's notes. Stopping without reconnecting.");
         break;
       }
       if (response.status === 204) continue;

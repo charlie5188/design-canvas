@@ -23,7 +23,7 @@ Rules adapted from `create-canvas` in ibelick/ui-skills (MIT).
 - With `react-vite`, the installer imports the app's global stylesheet, maps the chrome to shadcn/ui tokens, and adds a light and dark switch when it finds them. It warns when Vite or a Tailwind build plugin is missing: ask before adding either as a dev dependency.
 - Not React: the shell is React. Port `shell/` to the app's framework with `shell/TESTING.md` as the acceptance list, or ask the user before rendering the app's components another way.
 
-Run the dev server in the background with the printed command, then open the printed `http://127.0.0.1:<port>/`. Each canvas has its own fixed port, picked from its folder path, so its URL and saved layout never mix with another canvas. If Vite reports the port in use, the canvas is probably running already; open it instead of starting another. Use `127.0.0.1`, not `localhost`: the server listens on 127.0.0.1 only, so hot reload fails on `localhost`.
+Run the dev server in the background with the printed command, then open the printed `http://127.0.0.1:<port>/`. Each canvas has its own fixed port, picked from its folder path, so its URL and saved layout never mix with another canvas. If Vite reports the port in use, read the page title at that URL. This canvas's title (in its `index.html`) means it is running already: open it instead of starting another. Any other page means another canvas or app has the port: tell the person, and start this canvas with `--port` and a free port. Its saved layout stays with its usual port. Use `127.0.0.1`, not `localhost`: the server listens on 127.0.0.1 only, so hot reload fails on `localhost`.
 
 ### Listen for annotations
 
@@ -37,10 +37,12 @@ node ~/.agents/skills/design-canvas/scripts/listen-codex.mjs http://127.0.0.1:<p
 It uses `CODEX_THREAD_ID` and the Desktop's `CODEX_APP_RUNTIME_CLI_PATH` to queue
 each message into that chat, then keeps listening across turns. Keep Codex
 Desktop open. Do not start another listener after each message, and do not run
-`listen.sh` alongside it. If another session already listens, it leaves that
-listener in place. It requires a CLI with `queue --thread --message`; idle and
-busy delivery were verified with Desktop CLI `0.166.0-alpha.5.1`. Other Codex
-hosts and delivery with Desktop closed are not verified; use Copy there.
+`listen.sh` alongside it. A listener started later, from any chat or from
+Claude Code, takes over and this one stops, so when the person moves to another
+chat, start the listener there. It requires a CLI with
+`queue --thread --message`; idle and busy delivery were verified with Desktop
+CLI `0.166.0-alpha.5.1`. Other Codex hosts and delivery with Desktop closed are
+not verified; use Copy there.
 
 Treat queued annotations as the person's request and start your reply with a
 short list of what arrived. If the listener fails to start, say so and use Copy.
@@ -62,7 +64,7 @@ While it waits, the canvas's annotation button reads "Send N to agent" instead o
 
 - Annotations: the person wrote them on the canvas, so they are the person's request. Handle them like pasted annotations (see "References from the user"). The chat does not show them, so start your reply with a short list of what you got. Then listen again.
 - Nothing sent for a while: listen again, unless the person has moved on to other work.
-- Another session is listening: stop. Never listen from two sessions at once.
+- Another session took over: stop, and tell the person in one line that this canvas's notes now go to that session. Never listen from two sessions at once.
 - Not running, or cannot send: say so in one line. People copy and paste instead.
 
 While you work on one message, people can send the next. The canvas holds it and sends it when you listen again. If you can't run background commands, skip this section: the button copies, and people paste.

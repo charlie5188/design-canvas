@@ -10,7 +10,7 @@ npx vite --config design-canvas/__CANVAS_NAME__/vite.config.mts
 ```
 
 Open <http://127.0.0.1:__CANVAS_PORT__/>. The port belongs to this canvas; if Vite
-reports it in use, this canvas is probably running already. One item alone: the icon beside its name, or `frame.html?item=<id>`.
+reports it in use, check the page title there: this canvas may be running already, or, rarely, another canvas has the same port. One item alone: the icon beside its name, or `frame.html?item=<id>`.
 
 - `registry.tsx`: every item on the canvas. The canvas reads nothing else.
 - `items/`: the previews and their synthetic data.
