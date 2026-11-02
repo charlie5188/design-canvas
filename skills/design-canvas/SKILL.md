@@ -27,6 +27,31 @@ Run the dev server in the background with the printed command, then open the pri
 
 ### Listen for annotations
 
+**Codex Desktop:** start this persistent listener once, from the intended chat,
+as a background command when you open the canvas:
+
+```sh
+node ~/.agents/skills/design-canvas/scripts/listen-codex.mjs http://127.0.0.1:<port>/
+```
+
+It uses `CODEX_THREAD_ID` and the Desktop's `CODEX_APP_RUNTIME_CLI_PATH` to queue
+each message into that chat, then keeps listening across turns. Keep Codex
+Desktop open. Do not start another listener after each message, and do not run
+`listen.sh` alongside it. If another session already listens, it leaves that
+listener in place. It requires a CLI with `queue --thread --message`; idle and
+busy delivery were verified with Desktop CLI `0.166.0-alpha.5.1`. Other Codex
+hosts and delivery with Desktop closed are not verified; use Copy there.
+
+Treat queued annotations as the person's request and start your reply with a
+short list of what arrived. If the listener fails to start, say so and use Copy.
+If queueing fails after it receives notes, it stops and prints the path to a
+private `pending.json` recovery file. Read that file, check the target chat
+before resending, and handle or recover every note. Restart the canvas dev
+server to restore Copy immediately; otherwise its existing working state lasts
+up to 15 minutes. Stop the listener when leaving that canvas.
+
+**Claude Code and other hosts with completion notifications:**
+
 If you can run a background command that tells you when it exits (Claude Code can), listen whenever the canvas is open and you are working on it. Start right after opening it, and again after each time it exits:
 
 ```sh
