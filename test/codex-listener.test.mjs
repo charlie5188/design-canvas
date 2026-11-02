@@ -36,6 +36,7 @@ if (args[0] === 'queue' && args[1] === '--help') {
 `, { mode: 0o700 });
   let listener;
   let listens = 0;
+  let lastListen;
   const server = createServer((request, response) => {
     if (request.url === "/__design-canvas/agent") {
       if (options.noChannel) {
@@ -47,6 +48,7 @@ if (args[0] === 'queue' && args[1] === '--help') {
       response.end(JSON.stringify({ state: options.occupied || listener ? "listening" : "off" }));
     } else if (request.url.startsWith("/__design-canvas/agent/listen?")) {
       listens++;
+      lastListen = new URL(request.url, "http://canvas");
       listener = response;
       request.on("close", () => { if (listener === response) listener = undefined; });
     } else {
@@ -84,6 +86,7 @@ if (args[0] === 'queue' && args[1] === '--help') {
   return {
     child, url, exited,
     get listens() { return listens; },
+    get lastListen() { return lastListen; },
     get output() { return output; },
     async ready() { await until(() => !!listener); },
     send(body, status = 200) {
@@ -141,11 +144,20 @@ test("a replacement listener stops the bridge rather than stealing the canvas ba
   assert.deepEqual(await f.calls(), []);
 });
 
-test("leaves an existing Claude or Codex listener in place", async (t) => {
+test("takes over from an older Claude or Codex listener, as listen.sh does", async (t) => {
   const f = await fixture(t, { occupied: true });
-  assert.equal(await f.exited(), 0);
-  assert.equal(f.listens, 0);
-  assert.deepEqual(await f.calls(), []);
+  await f.ready();
+  assert.equal(f.listens, 1);
+  assert.equal(f.child.exitCode, null, "The newer listener must keep the canvas");
+  f.send("For the newest chat");
+  await until(async () => (await f.calls()).length === 1);
+  assert.equal((await f.calls())[0][2], thread);
+});
+
+test("keeps each long poll under Node's 300-second header timeout", async (t) => {
+  const f = await fixture(t, { env: { DESIGN_CANVAS_LISTEN_SECONDS: "3600" } });
+  await f.ready();
+  assert.equal(f.lastListen.searchParams.get("timeout"), "240");
 });
 
 test("queue failure preserves a private recovery copy and never retries an ambiguous delivery", async (t) => {

@@ -38,7 +38,7 @@ case "${status%% *}" in
     echo "Nothing was sent from the canvas for a while. Listen again in the background to keep the canvas's Send button, unless the person has moved on: $again"
     ;;
   409)
-    echo "Another agent session is listening to this canvas now. Do not listen again from this session."
+    echo "Another agent session took over this canvas's notes. Do not listen again from this session. Tell the person in one line that notes from this canvas now go to that session."
     ;;
   no-channel)
     die "the canvas at $url/ cannot send to the agent. Add agentChannel() to its vite.config (see SKILL.md), then listen again."
