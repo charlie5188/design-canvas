@@ -201,3 +201,30 @@ test('a shared file works from disk, frames included, without the agent tools', 
   }
   expect(errors).toEqual([])
 })
+
+test('Share downloads the canvas as one file, without reloading the canvas', async ({ page }) => {
+  const errors = collectErrors(page)
+  await page.goto('/')
+  await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toContainText('Canvas is ready')
+  // The build runs inside the dev server; a page reload during it would lose this.
+  await page.evaluate(() => Object.assign(window, { kept: true }))
+  const download = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Share', exact: true }).click()
+  const file = await download
+  expect(file.suggestedFilename()).toMatch(/^smoke-\d{4}-\d{2}-\d{2}\.html$/)
+  await expect(page.locator('.canvas-toast')).toContainText(`Downloaded ${file.suggestedFilename()}`)
+  // Once focused, its tooltip joins the name, as with every toolbar tip.
+  await expect(page.getByRole('button', { name: /^Share/ })).toBeEnabled()
+  expect(await page.evaluate(() => 'kept' in window)).toBe(true)
+  const path = join(mkdtempSync(join(tmpdir(), 'design-canvas-share-')), file.suggestedFilename())
+  await file.saveAs(path)
+  await page.goto(pathToFileURL(path).href)
+  await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toContainText('Canvas is ready')
+  await expect(page.getByRole('button', { name: 'Share', exact: true })).toHaveCount(0)
+  expect(errors).toEqual([])
+})
+
+test('only the canvas page can build a shared file', async ({ request }) => {
+  const other = await request.post('/__design-canvas/share', { headers: { Origin: 'http://evil.test' } })
+  expect(other.status()).toBe(403)
+})

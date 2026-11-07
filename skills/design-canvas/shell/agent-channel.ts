@@ -19,6 +19,10 @@
 // - Only the canvas page itself may send, and browsers may not listen.
 //   Otherwise any web page open in the browser could instruct the agent, or
 //   read what was meant for it, through this port.
+//
+// The same plugin serves the toolbar's Share button: `<SHARE_PATH>` builds the
+// canvas into one HTML file with share.config.mts, in memory, and returns it
+// for the page to download. Only the canvas page may ask.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Plugin } from "vite";
@@ -29,6 +33,9 @@ export type AgentStatus = { state: AgentState; handling: boolean; finished?: boo
 export const AGENT_PATH = "/__design-canvas/agent";
 /** Vite's HMR channel carries state changes to open pages. */
 export const AGENT_EVENT = "design-canvas:agent";
+export const SHARE_PATH = "/__design-canvas/share";
+/** The shared file the Share button downloads, and the files that could not go inside it. */
+export type SharedFile = { name: string; html: string; missing: string[] };
 
 const DEFAULT_WAIT_S = 3600;
 const BUSY_MS = 15 * 60_000;
@@ -65,6 +72,33 @@ function readBody(request: IncomingMessage): Promise<string> {
     request.on("end", () => resolve(body));
     request.on("error", reject);
   });
+}
+
+// The page imports this file for its constants, so server-only modules load by
+// name at run time, where no bundler follows them into the page.
+const load = (name: string): Promise<unknown> => import(/* @vite-ignore */ name);
+
+/** Builds the canvas at `root` into one HTML file with its share.config.mts, in memory. */
+async function buildSharedFile(root: string): Promise<SharedFile> {
+  const vite = (await load("vite")) as typeof import("vite");
+  const result = await vite.build({ configFile: `${root}/canvas/share.config.mts`, build: { write: false } });
+  const files = (Array.isArray(result) ? result : [result]).flatMap(
+    (entry) => (entry as { output?: { fileName: string; source?: unknown }[] }).output ?? [],
+  );
+  const page = files.find((file) => file.fileName === "index.html");
+  if (typeof page?.source !== "string") throw new Error("the build made no page");
+  // share.config.mts lists what it could not put inside the file.
+  const report = files.find((file) => file.fileName === "design-canvas-share.json");
+  let missing: string[] = [];
+  try {
+    missing = (JSON.parse(String(report?.source ?? "{}")) as { missing?: string[] }).missing ?? [];
+  } catch {
+    // No list: report nothing missing rather than fail the download.
+  }
+  const now = new Date();
+  const date = [now.getFullYear(), now.getMonth() + 1, now.getDate()].map((n) => String(n).padStart(2, "0")).join("-");
+  const name = root.split("/").filter(Boolean).pop() ?? "canvas";
+  return { name: `${name}-${date}.html`, html: page.source, missing };
 }
 
 export function agentChannel(): Plugin {
@@ -179,6 +213,20 @@ export function agentChannel(): Plugin {
         }
 
         next();
+      });
+
+      // One build at a time: a second click while it runs gets the same file.
+      let sharing: Promise<SharedFile> | undefined;
+      server.middlewares.use(SHARE_PATH, (request, response, next) => {
+        if (request.method !== "POST" || (request.url ?? "/") !== "/") return next();
+        if (!fromCanvasPage(request)) return send(response, 403, "Not allowed");
+        sharing ??= buildSharedFile(server.config.root).finally(() => {
+          sharing = undefined;
+        });
+        sharing.then(
+          (file) => sendJson(response, file),
+          (error: unknown) => send(response, 500, error instanceof Error ? error.message : String(error)),
+        );
       });
     },
   };

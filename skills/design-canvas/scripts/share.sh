@@ -4,12 +4,13 @@
 #
 # The file opens from disk with a double-click and needs no server, so people
 # who do not run the canvas can try every item, and it imports into Figma as a
-# code layer. It is a snapshot: share again after changing the canvas.
+# code layer. It is a snapshot: share again after changing the canvas. The
+# toolbar's Share button builds the same file; the build itself (the canvas's
+# canvas/share.config.mts) warns about anything it could not put inside.
 set -euo pipefail
 
 skill_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 die() { echo "design-canvas: $*" >&2; exit 1; }
-warn() { echo "design-canvas: warning: $*" >&2; }
 
 dir="${1:-}"
 [[ -n "$dir" ]] || die "usage: share.sh <canvas-folder> [output.html]"
@@ -29,17 +30,8 @@ trap 'rm -rf "$tmp"' EXIT
 (cd "$dir" && DESIGN_CANVAS_SHARE_DIR="$tmp" npx --no-install vite build --config canvas/share.config.mts) ||
   die "the build failed. Fix the errors above, which a plain vite build of the canvas shows too, then share again."
 [[ -f "$tmp/index.html" ]] || die "the build made no index.html; check the canvas's vite config"
-leftover="$(cd "$tmp" && find . -type f ! -name index.html | sed 's|^\./||' | head -5 | paste -sd ' ' -)"
-[[ -z "$leftover" ]] || warn "the build made files that the shared file cannot hold, so they will be missing: $leftover"
-
 mkdir -p "$(dirname "$out")"
 mv "$tmp/index.html" "$out"
-
-# Root paths such as "/logo.svg" point at the app's public folder, which a file on its own does not have.
-missing="$(grep -oE "(src|href)[=:] ?[\"'\`]/[^/\"'\`][^\"'\`]*\.(png|jpe?g|gif|svg|webp|avif|ico|woff2?|ttf|otf|mp4|webm|mp3)|url\(['\"]?/[^/)'\"][^)'\"]*" "$out" |
-  sed -E "s/^.*[\"'\`(]//" | sort -u | head -5 | paste -sd ' ' - || true)"
-[[ -z "$missing" ]] ||
-  warn "these files come from the app's public folder and will not load in the shared file: $missing. Import each one in its item instead, such as import logo from \"<path>/logo.svg\", so the build puts it inside the file."
 
 size="$(du -h "$out" | cut -f1 | tr -d ' ')"
 cat <<EOF

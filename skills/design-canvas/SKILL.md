@@ -5,7 +5,7 @@ description: Build or update a local design canvas of live, real product compone
 
 # Design canvas
 
-A freeform canvas of live previews: the app's real components, synthetic data, no backend. People pan, zoom, drag items by their name or grip, click a name to copy it, open an item alone in a new tab, move items to the trash and put them back, switch the app's themes, Alt/Option-click any element to copy a reference for the conversation, and send you annotations straight from the canvas. You change content in source files. The canvas shell is already built and tested, so never rebuild it.
+A freeform canvas of live previews: the app's real components, synthetic data, no backend. People pan, zoom, drag items by their name or grip, click a name to copy it, open an item alone in a new tab, move items to the trash and put them back, switch the app's themes, Alt/Option-click any element to copy a reference for the conversation, send you annotations straight from the canvas, and download the canvas as one HTML file to share. You change content in source files. The canvas shell is already built and tested, so never rebuild it.
 
 Rules adapted from `create-canvas` in ibelick/ui-skills (MIT).
 
@@ -141,12 +141,12 @@ Sent and copied annotations stay on the canvas as sent pins and disappear on the
 
 The canvas runs on this machine. To let other people try it, share it as a file.
 
-- **Share as a file.** When the person wants others to try the canvas, or wants it in Figma, run `bash ~/.agents/skills/design-canvas/scripts/share.sh <canvas-folder>`. It builds the canvas into one HTML file, `<canvas-folder>/shared/<name>-<date>.html`, and prints its path and size. Give the person the path; on a Mac, `open -R <file>` shows it in Finder. A second argument writes the file somewhere else.
+- **Share as a file.** When the person wants others to try the canvas, or wants it in Figma, run `bash ~/.agents/skills/design-canvas/scripts/share.sh <canvas-folder>`. It builds the canvas into one HTML file, `<canvas-folder>/shared/<name>-<date>.html`, and prints its path and size. Give the person the path; on a Mac, `open -R <file>` shows it in Finder. A second argument writes the file somewhere else. People can also click **Share** in the canvas toolbar: the dev server builds the same file and the browser downloads it.
   - The file opens with a double-click in any browser, with no server, the app, or an agent. Every item, theme, pan and zoom, and Alt-click reference works. It leaves out annotations and sending to the agent. Each viewer's layout stays in their own browser.
   - In Figma, people drag the file onto a canvas. It becomes a code layer; they press its play button or view it full screen.
   - It is a snapshot. Share again after changes, and say which items changed.
   - The file holds the canvas's built code and every item's data, and it leaves this machine. Before sharing, check that the items follow the rules in "Add content": made-up data, no secrets, no analytics.
-  - If it warns that files from the app's public folder will not load, import those files in their items so the build includes them, then share again.
+  - Files the items load from the app's public folder by root path, such as `/logo.svg`, go inside the file too. If it names files it could not include, their paths match no file in the public folder: fix the path or import the file in its item, then share again. A path built at runtime, such as `/avatars/${id}.png`, cannot be found this way, so import those files in the item.
 - `frame.html?item=<id>` shows one item alone at its real size, without canvas chrome. People open it from the icon beside each item name. A `viewport` item keeps its own width there even in a wide tab. For a screenshot, set the browser viewport to the item's width and height first, so the item fills the page exactly.
 - Present screenshots the way the user reviews UI, for example an inline comparison, a shared page, or their issue tracker.
 - To put an item in a design tool, point that tool's capture or import at the item's frame page. Say which items you sent.

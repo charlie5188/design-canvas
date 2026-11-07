@@ -65,6 +65,14 @@ export const labels = {
   agentGoneCopied: (n: number) => `The agent stopped listening. Copied ${n} annotation${n === 1 ? "" : "s"} instead.`,
   /** In the toolbar while the agent handles the notes it was sent. */
   agentWorking: "Agent working",
+  share: "Share",
+  shareHint: "Download the canvas as one HTML file that anyone can open",
+  sharing: "Preparing…",
+  shared: (file: string) => `Downloaded ${file}`,
+  /** The first two files the shared file could not hold, and how many more. */
+  sharedMissing: (file: string, missing: string[]) =>
+    `Downloaded ${file}. Missing: ${missing.slice(0, 2).join(", ")}${missing.length > 2 ? ` and ${missing.length - 2} more` : ""}`,
+  shareFailed: (reason: string) => `Couldn't make the file: ${reason}`,
   agentFinished: "The agent finished",
   agentGoneQueued: (n: number) => `The agent stopped listening, so ${n} annotation${n === 1 ? " wasn't" : "s weren't"} sent`,
   clearAnnotations: "Clear annotations",

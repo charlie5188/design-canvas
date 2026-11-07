@@ -104,10 +104,12 @@ Run `scripts/listen.sh <canvas-url>` in a terminal as the agent would.
 
 Run `scripts/share.sh` on a canvas with a `viewport` item, and open the file from disk in Chrome and Safari.
 
-- Every item renders and works, with no console errors. Annotate, its A shortcut, and its help line are gone; Alt-click still copies a reference.
+- Every item renders and works, with no console errors. Annotate, its A shortcut, its help line, and Share are gone; Alt-click still copies a reference.
+- An image an item loads from the app's public folder by root path shows; a root path with no file there is named by share.sh.
 - Wheel, pinch, Space-drag, and Alt-click over a `viewport` item reach the canvas, as on the dev server.
 - The open-alone icon opens the same file with `?item=<id>`, which shows that item alone.
 - Reload keeps the layout.
+- On the dev server, Share reads "Preparing…" and takes no second click while the file builds, then downloads `<canvas-name>-<date>.html` and says so, without reloading the page. Files the file could not include are named in the notice. At 375 px it is an icon like the other buttons.
 
 ## Layout
 

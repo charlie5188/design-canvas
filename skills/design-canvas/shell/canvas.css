@@ -262,6 +262,11 @@ body,
   white-space: nowrap;
   cursor: default;
 }
+/* Share while the file builds: it reads "Preparing…" and takes no second click. */
+.canvas-button:disabled {
+  color: var(--canvas-subtle-color);
+  cursor: progress;
+}
 .canvas-icon-button {
   justify-content: center;
   inline-size: 30px;

@@ -1,19 +1,21 @@
-import { existsSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig, loadConfigFromFile, mergeConfig, type Plugin, type UserConfig, version as viteVersion } from "vite";
 
 // Builds the canvas into one self-contained HTML file to share. The file opens
 // from disk with a double-click, needs no server, and imports into Figma as a
-// code layer. scripts/share.sh runs this with DESIGN_CANVAS_SHARE_DIR set to a
-// temporary folder, then moves the file to where the person gets it.
+// code layer. The toolbar's Share button (agent-channel.ts) and scripts/share.sh
+// both build with this config.
 //
 // It reuses the canvas's own vite config, so the app's styles, aliases, and
 // plugins build exactly as on the canvas page, then puts every script,
-// stylesheet, image, and font inside the HTML. Files the app serves from its
-// public folder by root path, such as "/logo.svg", are not part of the build;
-// share.sh names the ones the file refers to.
+// stylesheet, image, and font inside the HTML, including files the app serves
+// from its public folder by root path, such as "/logo.svg". It warns about
+// anything that could not go inside.
 const canvasDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+/** What could not go inside the file, beside it in the build. The Share button (agent-channel.ts) reads it by this name. */
+const SHARE_REPORT = "design-canvas-share.json";
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // One bundle from the canvas page, with nothing split into separate files. Vite 8
@@ -23,8 +25,52 @@ const oneBundle = (input: string) =>
     ? { rolldownOptions: { input, output: { codeSplitting: false } } }
     : { rollupOptions: { input, output: { inlineDynamicImports: true } } }) as UserConfig["build"];
 
-/** Moves the built scripts and styles into the page, and marks it as a shared file (see bridge.ts). */
-function oneFile(): Plugin {
+const MEDIA: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  svg: "image/svg+xml",
+  webp: "image/webp",
+  avif: "image/avif",
+  ico: "image/x-icon",
+  woff: "font/woff",
+  woff2: "font/woff2",
+  ttf: "font/ttf",
+  otf: "font/otf",
+  mp4: "video/mp4",
+  webm: "video/webm",
+  mp3: "audio/mpeg",
+};
+const OTHER: Record<string, string> = { json: "application/json", pdf: "application/pdf" };
+const TYPES = { ...MEDIA, ...OTHER };
+// A root path to a file, in quotes or url(): "/logo.svg", url(/fonts/a.woff2).
+// A path built at runtime, such as `/avatars/${id}.png`, has no whole literal to find.
+const ROOT_FILE = new RegExp(`(["'\`(])(/(?!/)[\\w\\-.~@%+/]+\\.(${Object.keys(TYPES).join("|")}))(?=["'\`)])`, "gi");
+
+/** Puts the public-folder files the page refers to inside it as data URLs. Returns the media it could not find. */
+function inlinePublicFiles(html: string, publicDir: string | undefined) {
+  const missing = new Set<string>();
+  const result = html.replace(ROOT_FILE, (match, open: string, path: string, extension: string) => {
+    const type = extension.toLowerCase();
+    let file: string | undefined;
+    try {
+      file = publicDir && resolve(publicDir, `.${decodeURIComponent(path)}`);
+    } catch {
+      // A malformed escape is not a file path.
+    }
+    if (!file || !publicDir || !file.startsWith(publicDir + sep) || !existsSync(file)) {
+      // JSON and PDF paths in library code are often not files at all; only media is worth a warning.
+      if (type in MEDIA) missing.add(path);
+      return match;
+    }
+    return `${open}data:${TYPES[type]};base64,${readFileSync(file).toString("base64")}`;
+  });
+  return { html: result, missing: [...missing] };
+}
+
+/** Moves everything the page uses into it, and marks it as a shared file (see bridge.ts). */
+function oneFile(publicDir: string | undefined): Plugin {
   return {
     name: "design-canvas:one-file",
     enforce: "post",
@@ -45,22 +91,38 @@ function oneFile(): Plugin {
           const tag = new RegExp(`<link[^>]*href="[^"]*${escapeRegExp(name)}"[^>]*>`);
           html = html.replace(tag, () => `<style>${String(file.source)}</style>`);
         }
-        // Anything the page does not reference stays a separate file, and share.sh reports it.
         if (html !== before) delete bundle[name];
       }
-      page.source = html;
+      const inlined = inlinePublicFiles(html, publicDir);
+      page.source = inlined.html;
+
+      const left = Object.keys(bundle).filter((name) => name !== "index.html");
+      this.emitFile({
+        type: "asset",
+        fileName: SHARE_REPORT,
+        source: JSON.stringify({ missing: [...inlined.missing, ...left] }),
+      });
+      if (left.length)
+        this.warn(`these built files cannot go inside the shared file, so it will miss them: ${left.join(", ")}`);
+      if (inlined.missing.length)
+        this.warn(
+          `these files are not in the app's public folder, so they will not load in the shared file: ${inlined.missing.join(", ")}. Check each path, or import the file in its item.`,
+        );
     },
   };
 }
 
 export default defineConfig(async (env): Promise<UserConfig> => {
-  const outDir = process.env.DESIGN_CANVAS_SHARE_DIR;
-  if (!outDir) throw new Error("design-canvas: run scripts/share.sh <canvas-folder> to share a canvas");
   const file = ["vite.config.mts", "vite.config.ts", "vite.config.mjs", "vite.config.js"]
     .map((name) => resolve(canvasDir, name))
     .find((path) => existsSync(path));
   if (!file) throw new Error(`design-canvas: no vite config in ${canvasDir}`);
   const config = (await loadConfigFromFile(env, file, canvasDir))?.config ?? {};
+  // Where the canvas serves root paths from: the kit points it at the app's public folder.
+  const publicDir =
+    config.publicDir === false
+      ? undefined
+      : resolve(config.root ?? canvasDir, typeof config.publicDir === "string" ? config.publicDir : "public");
 
   // React's production build: smaller and faster than the development build the
   // canvas page uses. The app's public environment values stay as they are.
@@ -77,11 +139,13 @@ export default defineConfig(async (env): Promise<UserConfig> => {
   return mergeConfig({ ...config, define }, {
     // Relative URLs, so the file works wherever it is opened.
     base: "./",
+    // Root-path files go inside the file instead (see inlinePublicFiles).
     publicDir: false,
     logLevel: "warn",
-    plugins: [oneFile()],
+    plugins: [oneFile(publicDir)],
     build: {
-      outDir,
+      // share.sh moves the file out of a temporary folder; the Share button builds in memory.
+      outDir: process.env.DESIGN_CANVAS_SHARE_DIR ?? resolve(canvasDir, "shared", ".build"),
       emptyOutDir: true,
       // Every imported image, font, and icon goes inside the file as a data URL.
       assetsInlineLimit: 1e9,

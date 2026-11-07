@@ -11,7 +11,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { sendToAgent, useAgentStatus } from "./agent";
+import { downloadSharedFile, sendToAgent, useAgentStatus } from "./agent";
 import { frameUrl, fromThisCanvas, NAVIGATE_EVENT, postToFrame, readFrameMessage, shared } from "./bridge";
 import { FrameHost } from "./FrameHost";
 import {
@@ -208,6 +208,12 @@ const QueuedIcon = () => (
   </svg>
 );
 
+const ShareIcon = () => (
+  <ToolIcon>
+    <path d="M8 10V2.5M5 5.5l3-3 3 3" />
+    <path d="M4.5 7.5h-1v6h9v-6h-1" />
+  </ToolIcon>
+);
 const HelpIcon = () => (
   <ToolIcon>
     <circle cx="8" cy="8" r="5.75" />
@@ -773,15 +779,30 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
     [announce],
   );
   const notify = useCallback(
-    (text: string, action?: Toast["action"]) => {
+    (text: string, action?: Toast["action"], long = false) => {
       window.clearTimeout(toastTimer.current);
       setToast({ kind: "notice", text, action });
       announce(text);
-      // A notice with an action stays long enough to reach the button.
-      toastTimer.current = window.setTimeout(() => setToast(null), action ? TOAST_ACTION_MS : TOAST_MS);
+      // A notice with an action, or a long one, stays long enough to read and reach.
+      toastTimer.current = window.setTimeout(() => setToast(null), action || long ? TOAST_ACTION_MS : TOAST_MS);
     },
     [announce],
   );
+  // Share: the dev server builds the canvas into one HTML file and the browser downloads it.
+  const [sharing, setSharing] = useState(false);
+  const share = useCallback(async () => {
+    setSharing(true);
+    try {
+      const file = await downloadSharedFile();
+      if (file.missing.length) notify(labels.sharedMissing(file.name, file.missing), undefined, true);
+      else notify(labels.shared(file.name));
+    } catch (error) {
+      const reason = (error instanceof Error ? error.message : String(error)).split("\n")[0].slice(0, 160);
+      notify(labels.shareFailed(reason), undefined, true);
+    } finally {
+      setSharing(false);
+    }
+  }, [notify]);
   useEffect(() => () => window.clearTimeout(toastTimer.current), []);
 
   // Annotations. Annotate mode turns clicks in previews into numbered pins. The
@@ -2102,6 +2123,22 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
                 );
               })}
             </fieldset>
+            <span className="canvas-separator" aria-hidden="true" />
+          </>
+        )}
+        {!shared && (
+          <>
+            <button
+              type="button"
+              className="canvas-button"
+              disabled={sharing}
+              aria-busy={sharing}
+              data-tip={labels.shareHint}
+              onClick={() => void share()}
+            >
+              <ShareIcon />
+              {sharing ? labels.sharing : labels.share}
+            </button>
             <span className="canvas-separator" aria-hidden="true" />
           </>
         )}
