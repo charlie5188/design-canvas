@@ -214,6 +214,11 @@ const ShareIcon = () => (
     <path d="M4.5 7.5h-1v6h9v-6h-1" />
   </ToolIcon>
 );
+const CloseIcon = () => (
+  <ToolIcon>
+    <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
+  </ToolIcon>
+);
 const HelpIcon = () => (
   <ToolIcon>
     <circle cx="8" cy="8" r="5.75" />
@@ -627,6 +632,50 @@ function TrashPopover({
   );
 }
 
+/**
+ * After Share downloads the file: its name, any file it could not hold, and the
+ * ways to pass it on. It confirms the download too, so no notice shows.
+ */
+function SharePanel({ file, missing, onClose }: { file: string; missing: string[]; onClose: () => void }) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => closeRef.current?.focus({ preventScroll: true }), []);
+  return (
+    <div
+      className="canvas-share-popover"
+      role="dialog"
+      aria-label={labels.shared(file)}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+      }}
+    >
+      <div className="canvas-share-head">
+        <span className="canvas-share-title">{labels.shared(file)}</span>
+        <button
+          ref={closeRef}
+          type="button"
+          className="canvas-button canvas-icon-button"
+          aria-label={labels.dismiss}
+          onClick={onClose}
+        >
+          <CloseIcon />
+        </button>
+      </div>
+      {missing.length > 0 && <p className="canvas-share-missing">{labels.sharedMissing(missing)}</p>}
+      <ul className="canvas-share-ways">
+        {labels.shareWays.map(([way, how]) => (
+          <li key={way}>
+            <span className="canvas-share-way">{way}</span>
+            <span>{how}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 type Toast = { kind: "copied" | "failed" | "notice"; text: string; action?: { label: string; run: () => void } };
 /**
  * The open annotation, and how it and its item's other annotations were before
@@ -790,12 +839,17 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
   );
   // Share: the dev server builds the canvas into one HTML file and the browser downloads it.
   const [sharing, setSharing] = useState(false);
+  const [sharedFile, setSharedFile] = useState<{ name: string; missing: string[] } | null>(null);
+  const shareButtonRef = useRef<HTMLButtonElement>(null);
   const share = useCallback(async () => {
     setSharing(true);
     try {
       const file = await downloadSharedFile();
-      if (file.missing.length) notify(labels.sharedMissing(file.name, file.missing), undefined, true);
-      else notify(labels.shared(file.name));
+      // The panel opens where notices and the trash show.
+      window.clearTimeout(toastTimer.current);
+      setToast(null);
+      setTrashOpen(false);
+      setSharedFile(file);
     } catch (error) {
       const reason = (error instanceof Error ? error.message : String(error)).split("\n")[0].slice(0, 160);
       notify(labels.shareFailed(reason), undefined, true);
@@ -1310,6 +1364,21 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
     },
     [closeAnnotation, notify, putBack, setTrash],
   );
+  const closeSharePanel = useCallback(() => {
+    setSharedFile(null);
+    shareButtonRef.current?.focus({ preventScroll: true });
+  }, []);
+  // Like the trash, the share panel closes on a press outside it.
+  useEffect(() => {
+    if (!sharedFile) return;
+    const onDown = (event: PointerEvent) => {
+      if (event.target instanceof Element && event.target.closest(".canvas-share-popover, .canvas-share-button")) return;
+      setSharedFile(null);
+    };
+    window.addEventListener("pointerdown", onDown, true);
+    return () => window.removeEventListener("pointerdown", onDown, true);
+  }, [sharedFile]);
+
   const closeTrash = useCallback(() => {
     setTrashOpen(false);
     trashButtonRef.current?.focus({ preventScroll: true });
@@ -2036,9 +2105,14 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
           <FitIcon />
           {labels.fitAll}
         </button>
-        <button type="button" className="canvas-button" onClick={resetCamera}>
+        <button
+          type="button"
+          className="canvas-button canvas-icon-button"
+          aria-label={labels.resetCamera}
+          data-tip={labels.resetCamera}
+          onClick={resetCamera}
+        >
           <ResetIcon />
-          {labels.resetCamera}
         </button>
         {!shared && (
           <>
@@ -2092,8 +2166,9 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
               aria-controls={trashOpen ? "canvas-trash" : undefined}
               data-tip={labels.trashHeading}
               onClick={() => {
-                // The trash opens where notices show.
+                // The trash opens where notices and the share panel show.
                 setToast(null);
+                setSharedFile(null);
                 setTrashOpen((open) => !open);
               }}
             >
@@ -2128,16 +2203,18 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
         )}
         {!shared && (
           <>
+            {/* While the file builds, the icon pulses and the button takes no second click. */}
             <button
+              ref={shareButtonRef}
               type="button"
-              className="canvas-button"
+              className="canvas-button canvas-icon-button canvas-share-button"
               disabled={sharing}
               aria-busy={sharing}
-              data-tip={labels.shareHint}
+              aria-label={sharing ? labels.sharing : labels.share}
+              data-tip={sharing ? labels.sharing : labels.share}
               onClick={() => void share()}
             >
               <ShareIcon />
-              {sharing ? labels.sharing : labels.share}
             </button>
             <span className="canvas-separator" aria-hidden="true" />
           </>
@@ -2159,6 +2236,7 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
           </span>
         </span>
       </div>
+      {sharedFile && <SharePanel file={sharedFile.name} missing={sharedFile.missing} onClose={closeSharePanel} />}
       {trashOpen && (
         <TrashPopover
           items={trashedItems}

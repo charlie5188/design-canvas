@@ -63,6 +63,16 @@ Then ask your agent, for example:
 - "Add a version of the inbox with grouped notifications next to the current one."
 - "Show the settings page on a phone and on desktop."
 
+## Share a canvas
+
+Click Share (the share icon) in the canvas toolbar, or ask the agent to share the canvas. You get one HTML file, `<canvas-name>-<date>.html`.
+
+- **Open it.** Double-click the file. It runs in any browser, with no setup, server, or agent.
+- **Send it.** Share it like any file, in Slack, email, or Drive.
+- **Put it in Figma.** Drag the file onto a Figma canvas. It becomes a code layer: press play to use it, or play it full screen.
+
+The file is a snapshot, so share again after changes. It holds every item's data, so keep items on made-up data. Annotations and sending to the agent are not in the file.
+
 ## How it works
 
 - `skills/design-canvas/shell/`: the canvas itself, in React. It is copied into each canvas and never rebuilt by the agent.
@@ -152,6 +162,16 @@ npx skills add charlie5188/design-canvas
 - 「料金カードのレイアウトを 3 案比較するキャンバスを作って」
 - 「通知をグループ化した受信箱を、今のものの隣に追加して」
 - 「設定ページをスマートフォンとデスクトップで並べて見せて」
+
+### キャンバスを共有する
+
+キャンバスのツールバーの Share（共有アイコン）をクリックするか、エージェントに共有を頼みます。`<キャンバス名>-<日付>.html` という 1 つの HTML ファイルができます。
+
+- **開く。** ファイルをダブルクリックします。準備、サーバー、エージェントなしで、どのブラウザでも動きます。
+- **送る。** Slack、メール、Drive など、普通のファイルと同じように共有できます。
+- **Figma に置く。** ファイルを Figma のキャンバスにドラッグすると、コードレイヤーになります。再生ボタンを押すと操作でき、フルスクリーンでも再生できます。
+
+ファイルはその時点のスナップショットなので、変更したらもう一度共有してください。すべてのアイテムのデータが含まれるので、アイテムには架空のデータを使ってください。注釈とエージェントへの送信は含まれません。
 
 ### しくみ
 

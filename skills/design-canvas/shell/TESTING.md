@@ -34,7 +34,7 @@ a device or input you do not have.
 
 ## Toolbar
 
-- Zoom out, zoom level, zoom in, show all, reset, annotate, and help sit centered at the bottom; copy (send, while an agent listens) appears only while there are unsent annotations, clear (eraser) while there are any, and trash while it holds items. The help list opens on hover or keyboard focus and describes the canvas region for screen readers.
+- Zoom out, zoom level, zoom in, show all, reset view, annotate, share, and help sit centered at the bottom; zoom, reset view, share, and help are icon buttons with tooltips; copy (send, while an agent listens) appears only while there are unsent annotations, clear (eraser) while there are any, and trash while it holds items. The help list opens on hover or keyboard focus and describes the canvas region for screen readers.
 - At narrow widths (375 px) the text labels and separators drop and every control stays on screen, with annotations and trashed items present.
 
 ## Themes
@@ -109,7 +109,8 @@ Run `scripts/share.sh` on a canvas with a `viewport` item, and open the file fro
 - Wheel, pinch, Space-drag, and Alt-click over a `viewport` item reach the canvas, as on the dev server.
 - The open-alone icon opens the same file with `?item=<id>`, which shows that item alone.
 - Reload keeps the layout.
-- On the dev server, Share reads "Preparing…" and takes no second click while the file builds, then downloads `<canvas-name>-<date>.html` and says so, without reloading the page. Files the file could not include are named in the notice. At 375 px it is an icon like the other buttons.
+- On the dev server, the Share icon button (tooltip "Share as an HTML file") dims, pulses, and takes no second click while the file builds, then downloads `<canvas-name>-<date>.html` without reloading the page.
+- After the download, a panel above the toolbar names the file, any file it could not include, and how to open it, send it, or put it in Figma. Escape, its close button, or a press outside closes it and returns focus to Share; opening the trash closes it too.
 
 ## Layout
 

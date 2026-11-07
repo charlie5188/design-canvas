@@ -209,18 +209,21 @@ test('Share downloads the canvas as one file, without reloading the canvas', asy
   // The build runs inside the dev server; a page reload during it would lose this.
   await page.evaluate(() => Object.assign(window, { kept: true }))
   const download = page.waitForEvent('download')
-  await page.getByRole('button', { name: 'Share', exact: true }).click()
+  await page.getByRole('button', { name: 'Share as an HTML file' }).click()
   const file = await download
   expect(file.suggestedFilename()).toMatch(/^smoke-\d{4}-\d{2}-\d{2}\.html$/)
-  await expect(page.locator('.canvas-toast')).toContainText(`Downloaded ${file.suggestedFilename()}`)
-  // Once focused, its tooltip joins the name, as with every toolbar tip.
-  await expect(page.getByRole('button', { name: /^Share/ })).toBeEnabled()
+  // A panel confirms the download and says how to pass the file on; Escape closes it.
+  const panel = page.getByRole('dialog', { name: `Downloaded ${file.suggestedFilename()}` })
+  await expect(panel).toContainText('Figma')
+  await page.keyboard.press('Escape')
+  await expect(panel).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Share as an HTML file' })).toBeFocused()
   expect(await page.evaluate(() => 'kept' in window)).toBe(true)
   const path = join(mkdtempSync(join(tmpdir(), 'design-canvas-share-')), file.suggestedFilename())
   await file.saveAs(path)
   await page.goto(pathToFileURL(path).href)
   await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toContainText('Canvas is ready')
-  await expect(page.getByRole('button', { name: 'Share', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Share as an HTML file' })).toHaveCount(0)
   expect(errors).toEqual([])
 })
 
