@@ -45,6 +45,8 @@ export type FrameMessage =
   | { type: "form" }
   /** In annotate mode: the element clicked, at (x, y) in the frame. */
   | { type: "annotate"; label: string; x: number; y: number }
+  /** In annotate mode: an area drawn in the frame, described by the frame. */
+  | { type: "annotate-area"; label: string; x: number; y: number; w: number; h: number }
   /** Escape pressed inside the frame while annotating. */
   | { type: "escape" };
 
@@ -71,6 +73,19 @@ export function readFrameMessage(data: unknown): FrameMessage | undefined {
   if (m.type === "form") return { type: "form" };
   if (m.type === "annotate" && typeof m.label === "string" && m.label.length <= MAX_LABEL && finite(m.x) && finite(m.y)) {
     return { type: "annotate", label: m.label, x: m.x, y: m.y };
+  }
+  if (
+    m.type === "annotate-area" &&
+    typeof m.label === "string" &&
+    m.label.length <= MAX_LABEL * 3 &&
+    finite(m.x) &&
+    finite(m.y) &&
+    finite(m.w) &&
+    finite(m.h) &&
+    m.w > 0 &&
+    m.h > 0
+  ) {
+    return { type: "annotate-area", label: m.label, x: m.x, y: m.y, w: m.w, h: m.h };
   }
   if (m.type === "escape") return { type: "escape" };
   return undefined;

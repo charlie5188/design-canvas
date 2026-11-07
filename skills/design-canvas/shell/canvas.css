@@ -10,7 +10,9 @@ body,
 .canvas-root,
 .canvas-frame-page,
 .canvas-frame-root,
-.canvas-frame-missing {
+.canvas-frame-missing,
+/* In a frame the draw box sits beside the frame root, so it carries the tokens itself. */
+.canvas-draw {
   --canvas-bg-color: var(--canvas-bg, #eef0f2);
   --canvas-surface-color: var(--canvas-surface, #ffffff);
   --canvas-border-color: var(--canvas-border, #d5d9de);
@@ -42,7 +44,8 @@ body,
   overflow: hidden;
   overscroll-behavior: none;
   touch-action: none;
-  cursor: default;
+  /* Dragging empty space pans the canvas. */
+  cursor: grab;
 }
 .canvas-viewport:focus-visible {
   outline: 2px solid var(--canvas-focus-color);
@@ -61,6 +64,7 @@ body,
   display: flex;
   flex-direction: column;
   gap: 8px;
+  cursor: default;
 }
 /* The item last touched or focused rises above overlapping items, so its
    handle and name stay reachable. */
@@ -95,7 +99,7 @@ body,
   border-radius: 4px;
   background: transparent;
   color: var(--canvas-subtle-color);
-  cursor: default;
+  cursor: grab;
   touch-action: none;
 }
 .canvas-handle:hover,
@@ -130,7 +134,8 @@ body,
   font-weight: 600;
   font-size: 15px;
   text-align: start;
-  cursor: default;
+  /* It copies on click and moves the item on drag; the hand says it can move. */
+  cursor: grab;
 }
 /* Open alone and move to trash: quiet until the title is hovered or one has
    keyboard focus. */
@@ -200,6 +205,8 @@ body,
   border-radius: var(--canvas-radius-size);
   background: var(--canvas-surface-color);
   touch-action: pan-x pan-y;
+  /* The app's own cursors: a text cursor over text, its pointers on controls. */
+  cursor: auto;
 }
 .canvas-frame {
   display: block;
@@ -416,12 +423,62 @@ body,
 /* Annotations. In annotate mode previews take a crosshair and stop reacting;
    pins and the open annotation use the chrome tokens and font. */
 .canvas-viewport[data-annotating] .canvas-preview,
-.canvas-viewport[data-annotating] .canvas-preview * {
+.canvas-viewport[data-annotating] .canvas-preview *,
+.canvas-viewport[data-annotating] .canvas-item-title,
+.canvas-viewport[data-annotating] .canvas-item-title *:not(.canvas-item-action, .canvas-item-action *) {
   cursor: crosshair !important;
 }
 html[data-canvas-annotating] .canvas-frame-root,
 html[data-canvas-annotating] .canvas-frame-root * {
   cursor: crosshair !important;
+}
+/* Cursors that say what a drag will do. Later and as specific as the crosshair,
+   so a pan or move in progress, Space, or Alt wins over it. Frames drop
+   pointer events during a pan, move, or Space, so these show over them too. */
+.canvas-viewport[data-space="true"],
+.canvas-viewport[data-space="true"] .canvas-item,
+.canvas-viewport[data-space="true"] .canvas-item * {
+  cursor: grab !important;
+}
+.canvas-viewport[data-gesture],
+.canvas-viewport[data-gesture] .canvas-item,
+.canvas-viewport[data-gesture] .canvas-item * {
+  cursor: grabbing !important;
+}
+/* Alt-click copies a reference. */
+.canvas-viewport[data-alt]:not([data-space="true"], [data-gesture]) .canvas-preview,
+.canvas-viewport[data-alt]:not([data-space="true"], [data-gesture]) .canvas-preview * {
+  cursor: copy !important;
+}
+html[data-canvas-alt] .canvas-frame-root,
+html[data-canvas-alt] .canvas-frame-root * {
+  cursor: copy !important;
+}
+/* An area marked in annotate mode: while drawing (fixed, screen pixels) and
+   after (inside the item, kept one stroke wide at any zoom). */
+.canvas-draw {
+  position: fixed;
+  z-index: 2147483646;
+  box-sizing: border-box;
+  border: 2px solid var(--canvas-focus-color);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--canvas-focus-color) 10%, transparent);
+  pointer-events: none;
+}
+.canvas-area {
+  position: absolute;
+  box-sizing: border-box;
+  border: calc(2px * var(--canvas-unzoom, 1)) solid var(--canvas-focus-color);
+  border-radius: calc(4px * var(--canvas-unzoom, 1));
+  background: color-mix(in srgb, var(--canvas-focus-color) 6%, transparent);
+  pointer-events: none;
+}
+.canvas-area[data-sent] {
+  border-style: dashed;
+  background: transparent;
+}
+.canvas-area[data-open] {
+  background: color-mix(in srgb, var(--canvas-focus-color) 12%, transparent);
 }
 .canvas-preview-wrap {
   position: relative;
@@ -467,6 +524,14 @@ html[data-canvas-annotating] .canvas-frame-root * {
   font-variant-numeric: tabular-nums;
   box-shadow: 0 2px 6px rgb(0 0 0 / 18%);
   cursor: default;
+}
+/* An area's or a whole item's pin sits just inside its top-left corner, so it
+   never covers the item's title or what is just above the area. */
+.canvas-pin[data-area] .canvas-pin-bubble {
+  inset-block-start: 4px;
+  inset-block-end: auto;
+  inset-inline-start: 4px;
+  border-radius: 3px 14px 14px 14px;
 }
 /* Sent: copied to the conversation, waiting for its item to change. */
 .canvas-pin-bubble[data-sent] {

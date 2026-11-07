@@ -111,21 +111,25 @@ Frames load a full page each, so use them only where width matters. Over a frame
 
 Alt/Option-click inside a preview copies `Item name › role “label”`, numbered when the item has look-alikes, for example `B · tabs › button “Mark as done” (2/3)`. Treat a pasted reference as that element in that item. If it no longer matches the source, ask. Portaled content such as an open menu is outside the preview and cannot be referenced this way.
 
-For several changes at once, people use annotate mode (the toolbar's Annotate button, or A): they click elements, write a note on each, and send them all as one message, through `listen.sh` or by copy and paste. Each note has an "Apply to a new version" checkbox, checked by default and shared by all notes on the same item. Checked items are listed on the last line:
+For several changes at once, people use annotate mode (the toolbar's Annotate button, or A): they click elements, drag across an area, or click an item's name for the whole item, write a note on each, and send them all as one message, through `listen.sh` or by copy and paste. Each note has an "Apply to a new version" checkbox, checked by default and shared by all notes on the same item. Checked items are listed on the last line:
 
 ```text
-Annotations from the design canvas (3):
+Annotations from the design canvas (4):
 1. Pricing card · compact › button “Upgrade”
    Make it full width
 2. Pricing card · compact › heading “Pro”
    Make it bigger
-3. Checkout · phone › heading “Summary”
-   Move it above Payment
+3. Checkout · phone › area 343×120 at 16,200: heading “Summary”, text “Total”
+   Too much empty space here
+4. Pricing card · full-width button
+   Try a dark version
 
 Keep the original and add a new version: Pricing card · compact (1, 2)
 ```
 
-Treat each numbered entry as a change to that element, and handle every entry; say which ones you could not apply and why. For each item on the last line, leave the original unchanged and add one new item that applies all of its listed notes, following "Try another version" above. Change the other items in place. Without a last line, change every item in place.
+An entry with only an item name is about the whole item. An area entry is the rectangle the person drew: its size and top-left corner in px from the item's top-left at its real size, then the controls, headings, and texts entirely inside it. To see the area, open `frame.html?item=<id>` at the item's size.
+
+Treat each numbered entry as a change to that element, area, or item, and handle every entry; say which ones you could not apply and why. For each item on the last line, leave the original unchanged and add one new item that applies all of its listed notes, following "Try another version" above. Change the other items in place. Without a last line, change every item in place.
 
 Sent and copied annotations stay on the canvas as sent pins and disappear on their own, so you never need to clear them: in-place ones once their item renders differently after your edit, new-version ones once an item with `from` set to their item appears. A sent pin that stays means its item did not change, or its new version has no `from`.
 

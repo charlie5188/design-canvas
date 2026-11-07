@@ -1,5 +1,6 @@
-// Annotations: notes pinned to elements in previews, sent to a listening agent
-// or copied to the conversation as one numbered list. Saved beside the layout
+// Annotations: notes pinned to elements in previews, to an area drawn over a
+// preview, or to a whole item, sent to a listening agent or copied to the
+// conversation as one numbered list. Saved beside the layout
 // so a hot reload, which the agent's own edits often cause, never loses unsent
 // annotations.
 //
@@ -19,10 +20,19 @@ import { labels } from "./labels";
 export type Annotation = {
   id: string;
   itemId: string;
-  /** Pin point in the item's preview, in unscaled canvas units. */
+  /** Pin point in the item's preview, in unscaled canvas units: an area's top-left corner. */
   x: number;
   y: number;
-  /** "Item › role “label”", frozen when the annotation was placed. */
+  /**
+   * A marked area's size from (x, y), in the same units; absent for a single
+   * element. A whole-item annotation is an area that covers the item.
+   */
+  w?: number;
+  h?: number;
+  /**
+   * Frozen when the annotation was placed: "Item › role “label”", "Item › area
+   * W×H at X,Y: what is inside", or just "Item" for the whole item.
+   */
   ref: string;
   text: string;
   /**
@@ -44,7 +54,8 @@ export type Annotation = {
 
 const VERSION = 1;
 const MAX_ANNOTATIONS = 100;
-const MAX_REF = 300;
+// An area's reference lists what it holds, so it runs longer than one element's.
+const MAX_REF = 600;
 const MAX_TEXT = 4000;
 const COORD_LIMIT = 100_000;
 
@@ -64,8 +75,14 @@ const valid = (value: unknown, ids: ReadonlySet<string>): Annotation | undefined
   const sent = typeof c.sent === "string" && c.sent.length <= 16 ? { sent: c.sent } : {};
   const version = c.version === true ? { version: true } : {};
   const queued = c.queued === true && !("sent" in sent) ? { queued: true } : {};
-  return { id: c.id, itemId: c.itemId, x: c.x, y: c.y, ref: c.ref, text: c.text, ...version, ...sent, ...queued };
+  const area =
+    finite(c.w) && finite(c.h) && c.w > 0 && c.h > 0 && c.w <= COORD_LIMIT && c.h <= COORD_LIMIT ? { w: c.w, h: c.h } : {};
+  return { id: c.id, itemId: c.itemId, x: c.x, y: c.y, ...area, ref: c.ref, text: c.text, ...version, ...sent, ...queued };
 };
+
+/** Where an annotation points and what it names, without its note or state: for copies that change the rest. */
+export const placeOf = ({ id, itemId, x, y, w, h, ref }: Annotation) =>
+  w && h ? { id, itemId, x, y, w, h, ref } : { id, itemId, x, y, ref };
 
 /** Saved annotations for items that still exist; anything invalid is dropped. */
 export function loadAnnotations(storageKey: string, ids: ReadonlySet<string>): Annotation[] {
