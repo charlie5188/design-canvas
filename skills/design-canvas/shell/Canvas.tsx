@@ -21,10 +21,12 @@ import {
   limitText,
   loadAnnotations,
   newAnnotationId,
+  placeOf,
   saveAnnotations,
 } from "./annotations";
 import {
   CHROME,
+  describeArea,
   describeElement,
   isEditable,
   nestedCanScroll,
@@ -401,7 +403,23 @@ function AnnotationPin({
   const bubbleRef = useRef<HTMLButtonElement>(null);
   const text = annotation.text || labels.annotationPlaceholder;
   return (
-    <div className="canvas-pin" style={{ left: annotation.x, top: annotation.y }} data-open={open || undefined}>
+    <>
+      {/* An area or a whole item keeps its outline, so the note shows what it covers. */}
+      {annotation.w && annotation.h ? (
+        <div
+          className="canvas-area"
+          style={{ left: annotation.x, top: annotation.y, width: annotation.w, height: annotation.h }}
+          data-sent={number === undefined || undefined}
+          data-open={open || undefined}
+          aria-hidden="true"
+        />
+      ) : null}
+    <div
+      className="canvas-pin"
+      style={{ left: annotation.x, top: annotation.y }}
+      data-open={open || undefined}
+      data-area={annotation.w && annotation.h ? true : undefined}
+    >
       <button
         ref={bubbleRef}
         type="button"
@@ -421,6 +439,7 @@ function AnnotationPin({
       </button>
       {open && <AnnotationCard annotation={annotation} handlers={handlers} done={() => bubbleRef.current?.focus({ preventScroll: true })} />}
     </div>
+    </>
   );
 }
 
@@ -710,6 +729,8 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
   const zoomLabelRef = useRef<HTMLSpanElement>(null);
   const liveRef = useRef<HTMLDivElement>(null);
   const pickRef = useRef<HTMLDivElement>(null);
+  /** The rectangle being drawn in annotate mode, in screen coordinates. */
+  const drawRef = useRef<HTMLDivElement>(null);
   const elements = useRef(new Map<string, HTMLDivElement>());
   const ids = useMemo(() => new Set(items.map((item) => item.id)), [items]);
   const themeIds = useMemo(() => new Set(theme?.options.map((option) => option.id)), [theme]);
@@ -955,7 +976,7 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
     [closeAnnotation, setOpen, versionsBefore],
   );
   const startAnnotation = useCallback(
-    (itemId: string, x: number, y: number, ref: string) => {
+    (itemId: string, x: number, y: number, ref: string, area?: { w: number; h: number }) => {
       closeAnnotation();
       // The item's choice so far, or a new version by default: exploring keeps what was there.
       const unsent = annotationsRef.current.filter((a) => a.itemId === itemId && !a.sent && !a.queued && a.text.trim());
@@ -965,6 +986,7 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
         itemId,
         x: Math.round(x),
         y: Math.round(y),
+        ...(area ? { w: Math.round(area.w), h: Math.round(area.h) } : {}),
         ref,
         text: "",
         version,
@@ -984,7 +1006,7 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
         setAnnotations((prev) =>
           prev.map((a) =>
             a.id === id
-              ? { id: a.id, itemId: a.itemId, x: a.x, y: a.y, ref: a.ref, text: limitText(text), version: a.version }
+              ? { ...placeOf(a), text: limitText(text), version: a.version }
               : a,
           ),
         ),
@@ -995,7 +1017,7 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
           const itemId = prev.find((a) => a.id === id)?.itemId;
           return prev.map((a) =>
             a.id === id || (a.itemId === itemId && !a.sent && !a.queued)
-              ? { id: a.id, itemId: a.itemId, x: a.x, y: a.y, ref: a.ref, text: a.text, version }
+              ? { ...placeOf(a), text: a.text, version }
               : a,
           );
         }),
@@ -1694,35 +1716,118 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
     const hidePick = () => {
       if (pickRef.current) pickRef.current.hidden = true;
     };
-    const showPick = (target: EventTarget | null) => {
-      const box = pickRef.current;
-      const pick = pickTarget(target);
-      if (!box || !pick) return hidePick();
-      const rect = pick.element.getBoundingClientRect();
+    const placeBox = (box: HTMLElement | null, rect: { left: number; top: number; right: number; bottom: number }) => {
+      if (!box) return;
       Object.assign(box.style, {
         left: `${rect.left}px`,
         top: `${rect.top}px`,
-        width: `${rect.width}px`,
-        height: `${rect.height}px`,
+        width: `${rect.right - rect.left}px`,
+        height: `${rect.bottom - rect.top}px`,
       });
       box.hidden = false;
     };
+    const showPick = (target: EventTarget | null) => {
+      const pick = pickTarget(target);
+      if (!pick) return hidePick();
+      placeBox(pickRef.current, pick.element.getBoundingClientRect());
+    };
+    // In annotate mode an item's title (its name or grip, not its actions) stands for the whole item.
+    const headItem = (target: EventTarget | null) => {
+      if (!(target instanceof Element) || target.closest(".canvas-item-action")) return null;
+      const element = target.closest(".canvas-item-head")?.closest<HTMLElement>(".canvas-item");
+      const item = element && items.find((entry) => entry.id === element.dataset.canvasItem);
+      const preview = element?.querySelector<HTMLElement>("[data-canvas-preview]");
+      return item && preview && world.contains(element) ? { item, preview } : null;
+    };
+
+    // In annotate mode a drag across a preview marks an area; a press that does
+    // not travel past the drag threshold stays a click on one element.
+    let drawing: { pointerId: number; item: CanvasItem; preview: HTMLElement; x: number; y: number; moved: boolean } | null =
+      null;
+    const areaOf = (current: NonNullable<typeof drawing>, clientX: number, clientY: number) => {
+      const rect = current.preview.getBoundingClientRect();
+      const clampX = (x: number) => Math.min(rect.right, Math.max(rect.left, x));
+      const clampY = (y: number) => Math.min(rect.bottom, Math.max(rect.top, y));
+      const [x1, x2] = [clampX(current.x), clampX(clientX)].sort((a, b) => a - b);
+      const [y1, y2] = [clampY(current.y), clampY(clientY)].sort((a, b) => a - b);
+      return { left: x1!, top: y1!, right: x2!, bottom: y2! };
+    };
+    const cancelDraw = () => {
+      drawing = null;
+      if (drawRef.current) drawRef.current.hidden = true;
+    };
+    const moveDraw = (event: PointerEvent) => {
+      if (!drawing || event.pointerId !== drawing.pointerId) return false;
+      if (!drawing.moved) {
+        if (Math.hypot(event.clientX - drawing.x, event.clientY - drawing.y) <= DRAG_THRESHOLD) return true;
+        drawing.moved = true;
+        // Keeps the drag when it passes over another item's frame. Only now: a
+        // captured plain click would land on the preview, not the element.
+        try {
+          drawing.preview.setPointerCapture(event.pointerId);
+        } catch {
+          // The pointer may already be gone.
+        }
+        hidePick();
+      }
+      placeBox(drawRef.current, areaOf(drawing, event.clientX, event.clientY));
+      return true;
+    };
+    const endDraw = (event: PointerEvent) => {
+      if (!drawing || event.pointerId !== drawing.pointerId) return;
+      const current = drawing;
+      cancelDraw();
+      if (!current.moved || event.type === "pointercancel") return;
+      // The drag made an area; its click must not also annotate one element.
+      suppressNextClick();
+      const area = areaOf(current, event.clientX, event.clientY);
+      const rect = current.preview.getBoundingClientRect();
+      const scale = rect.width / Math.max(1, current.preview.offsetWidth);
+      const x = Math.round((area.left - rect.left) / scale);
+      const y = Math.round((area.top - rect.top) / scale);
+      const w = Math.round((area.right - area.left) / scale);
+      const h = Math.round((area.bottom - area.top) / scale);
+      if (w < 4 || h < 4) return;
+      const { names, more } = describeArea(current.preview, area);
+      startAnnotation(current.item.id, x, y, `${current.item.name} › ${labels.areaRef(w, h, x, y, names, more)}`, { w, h });
+    };
+
     const onPickMove = (event: PointerEvent) => {
       pointer.x = event.clientX;
       pointer.y = event.clientY;
-      if ((event.altKey || annotatingRef.current) && !gesture.current) showPick(event.target);
-      else hidePick();
+      // Alt shows the copy cursor over previews (canvas.css); the key event alone can be missed.
+      viewport.toggleAttribute("data-alt", event.altKey);
+      if (moveDraw(event)) return;
+      if ((event.altKey || annotatingRef.current) && !gesture.current) {
+        const head = annotatingRef.current && !event.altKey ? headItem(event.target) : null;
+        if (head) placeBox(pickRef.current, head.preview.getBoundingClientRect());
+        else showPick(event.target);
+      } else hidePick();
     };
     // In annotate mode previews stop reacting to presses, except the ones that
     // pan (Space held, middle button).
     const blockPick = (event: MouseEvent) => {
       const annotatePress = annotatingRef.current && event.button === 0 && !spaceArmed.current;
-      if ((!event.altKey && !annotatePress) || !pickTarget(event.target)) return;
+      const pick = pickTarget(event.target);
+      if ((!event.altKey && !annotatePress) || !pick) return;
       event.preventDefault();
       event.stopPropagation();
+      if (annotatePress && !event.altKey && event.type === "pointerdown" && (event as PointerEvent).pointerType !== "touch") {
+        const { pointerId } = event as PointerEvent;
+        drawing = { pointerId, item: pick.item, preview: pick.preview, x: event.clientX, y: event.clientY, moved: false };
+      }
     };
     const onPickClick = (event: MouseEvent) => {
       if ((!event.altKey && !annotatingRef.current) || clickSuppressed.current) return;
+      const head = annotatingRef.current && !event.altKey ? headItem(event.target) : null;
+      if (head) {
+        // Instead of copying the name: a note on the whole item, outlined like an area.
+        event.preventDefault();
+        event.stopPropagation();
+        const { item, preview } = head;
+        startAnnotation(item.id, 0, 0, item.name, { w: preview.offsetWidth, h: preview.offsetHeight });
+        return;
+      }
       const pick = pickTarget(event.target);
       if (!pick) return;
       event.preventDefault();
@@ -1741,6 +1846,7 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
     };
 
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Alt") viewport.setAttribute("data-alt", "");
       if (event.key === "Alt" && pointer.x >= 0) showPick(document.elementFromPoint(pointer.x, pointer.y));
       // A toggles annotate mode, Escape leaves it, as long as nothing editable has focus.
       const plain = !event.metaKey && !event.ctrlKey && !event.altKey;
@@ -1790,11 +1896,14 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
 
     const onKeyUp = (event: KeyboardEvent) => {
       if (event.code === "Space") clearHeld();
+      if (event.key === "Alt") viewport.removeAttribute("data-alt");
       if (event.key === "Alt" && !annotatingRef.current) hidePick();
     };
     const onBlur = () => {
       clearHeld();
       hidePick();
+      cancelDraw();
+      viewport.removeAttribute("data-alt");
       touches.current.clear();
       endGesture();
     };
@@ -1830,6 +1939,11 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
       } else if (message.type === "annotate") {
         // A frame fills its preview at item size, so frame pixels are preview units.
         if (annotatingRef.current) startAnnotation(item.id, message.x, message.y, `${item.name} › ${message.label}`);
+      } else if (message.type === "annotate-area") {
+        if (annotatingRef.current) {
+          const { x, y, w, h } = message;
+          startAnnotation(item.id, x, y, `${item.name} › ${message.label}`, { w, h });
+        }
       } else if (message.type === "escape") {
         if (annotatingRef.current) setAnnotateMode(false);
       } else if (message.type === "link") {
@@ -1881,6 +1995,8 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
     window.addEventListener("pointerdown", blockPick, { capture: true });
     window.addEventListener("mousedown", blockPick, { capture: true });
     window.addEventListener("click", onPickClick, { capture: true });
+    window.addEventListener("pointerup", endDraw, { capture: true });
+    window.addEventListener("pointercancel", endDraw, { capture: true });
     window.addEventListener("click", onLinkClick, { capture: true });
     window.addEventListener("submit", onSubmit);
     window.addEventListener("keydown", onKeyDown);
@@ -1904,6 +2020,8 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
       window.removeEventListener("pointerdown", blockPick, { capture: true });
       window.removeEventListener("mousedown", blockPick, { capture: true });
       window.removeEventListener("click", onPickClick, { capture: true });
+      window.removeEventListener("pointerup", endDraw, { capture: true });
+      window.removeEventListener("pointercancel", endDraw, { capture: true });
       window.removeEventListener("click", onLinkClick, { capture: true });
       window.removeEventListener("submit", onSubmit);
       window.removeEventListener("keydown", onKeyDown);
@@ -1931,6 +2049,7 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
     setCamera,
     setAnnotateMode,
     startAnnotation,
+    suppressNextClick,
     zoomBy,
   ]);
 
@@ -2027,6 +2146,7 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
         </div>
       </div>
       <div ref={pickRef} className="canvas-pick" hidden aria-hidden="true" />
+      <div ref={drawRef} className="canvas-draw" hidden aria-hidden="true" />
       {toast && (
         <div className="canvas-toast">
           {toast.kind === "copied" ? (

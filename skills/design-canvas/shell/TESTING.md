@@ -15,6 +15,13 @@ a device or input you do not have.
 - Horizontal trackpad swipes never trigger browser Back or Forward.
 - Arrow keys pan when the canvas has focus. Tabbing to an offscreen control moves the camera to show it.
 
+## Cursors
+
+- Empty space and an item's grip and name show an open hand; a pan or an item move shows a closed hand everywhere, including over previews and frames. Holding Space shows the open hand everywhere.
+- Previews keep the app's own cursors: a text cursor over text, the app's pointers on controls.
+- Holding Alt/Option over a preview or a frame shows the copy cursor.
+- In annotate mode previews, frames, and item titles show a crosshair; a pan or Space still shows the hand.
+
 ## Items
 
 - Dragging the grip or the name moves an item at every zoom level, with mouse and touch; arrow keys on the focused grip move it, Shift for larger steps. Moving never remounts a preview or clears its input.
@@ -54,6 +61,8 @@ a device or input you do not have.
 - The Annotate button and A (with the canvas, toolbar, or a pin focused) toggle annotate mode; Escape leaves it. A typed inside a preview or a field reaches that field.
 - In annotate mode, hovering outlines elements in plain items and in frames without holding Alt; the outline hides when the camera moves.
 - Clicking an element in a plain item or in a frame places a numbered pin at the click, also right after a zoom, and opens a note showing `Item › role “label”`. The control is not activated, and a link shows no notice and leaves the URL unchanged.
+- Dragging across a plain item or a frame draws a box, kept inside the item, and on release opens a note showing `Item › area W×H at X,Y: …` with the controls, headings, and texts entirely inside it, in item pixels at any zoom. The area keeps its outline, with its pin at the top-left corner; no element note opens too. A press that barely moves stays a click on one element.
+- Clicking an item's name or grip annotates the whole item (`Item`), outlined around the preview, instead of copying the name; dragging them still moves the item. Hovering a title outlines the whole preview.
 - Enter saves, Shift+Enter adds a line, and Enter that confirms an IME composition (Japanese, Chinese) does neither. Escape, in the note or on the checkbox, removes a new annotation and restores an edited one. Saving or cancelling returns focus to the pin.
 - "Apply to a new version" is checked on an item's first annotation; later ones on that item start with the item's current choice. Changing it changes every unsent annotation on that item, and Escape undoes that too. Changing it on a sent annotation makes it unsent.
 - Clicking elsewhere, or another element, keeps the typed text; an empty annotation is removed. Clicking a pin reopens it with the caret at the end; delete removes it.

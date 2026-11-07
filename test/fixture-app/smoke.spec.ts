@@ -67,6 +67,40 @@ test('copied annotations ask for a new version by default', async ({ page, conte
   expect(errors).toEqual([])
 })
 
+// Before the agent tests: they leave the agent busy for a while, and then the button sends instead of copying.
+test('a drag annotates an area, and the name annotates the whole item', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  const errors = collectErrors(page)
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Annotate', exact: true }).click()
+  const preview = page.locator('.canvas-preview[data-canvas-preview="example"]')
+  const box = (await preview.boundingBox())!
+  // Item pixels to screen pixels, whatever the zoom: drag across the heading only.
+  const scale = box.width / 360
+  await page.mouse.move(box.x + 4 * scale, box.y + 4 * scale)
+  await page.mouse.down()
+  await page.mouse.move(box.x + 180 * scale, box.y + 30 * scale, { steps: 4 })
+  await page.mouse.move(box.x + 356 * scale, box.y + 50 * scale, { steps: 4 })
+  await page.mouse.up()
+  const area = page.getByRole('dialog', { name: /^Annotation on Example · replace me › area / })
+  await expect(area).toContainText('heading “Canvas is ready”')
+  await expect(area).not.toContainText('text “Add items')
+  await area.getByRole('textbox').fill('Tighter header')
+  await area.getByRole('button', { name: 'Save' }).click()
+  await expect(page.locator('.canvas-area')).toHaveCount(1)
+  // In annotate mode the item's name stands for the whole item, instead of copying it.
+  await page.locator('.canvas-item[data-canvas-item="example"] .canvas-name').click()
+  const whole = page.getByRole('dialog', { name: 'Annotation on Example · replace me' })
+  await whole.getByRole('textbox').fill('Denser overall')
+  await whole.getByRole('button', { name: 'Save' }).click()
+  await expect(page.locator('.canvas-area')).toHaveCount(2)
+  await page.getByRole('button', { name: 'Copy 2 annotations' }).click()
+  const text = await page.evaluate(() => navigator.clipboard.readText())
+  expect(text).toMatch(/1\. Example · replace me › area \d+×\d+ at \d+,\d+: heading “Canvas is ready”\n {3}Tighter header/)
+  expect(text).toContain('2. Example · replace me\n   Denser overall')
+  expect(errors).toEqual([])
+})
+
 test('annotations go straight to a listening agent', async ({ page, baseURL }) => {
   const errors = collectErrors(page)
   // The agent's side, as SKILL.md runs it: listen.sh prints what the page sends and exits.
@@ -230,4 +264,18 @@ test('Share downloads the canvas as one file, without reloading the canvas', asy
 test('only the canvas page can build a shared file', async ({ request }) => {
   const other = await request.post('/__design-canvas/share', { headers: { Origin: 'http://evil.test' } })
   expect(other.status()).toBe(403)
+})
+
+test('cursors say what a press or drag will do', async ({ page }) => {
+  await page.goto('/')
+  const cursor = (selector: string) => page.locator(selector).first().evaluate((element) => getComputedStyle(element).cursor)
+  expect(await cursor('.canvas-viewport')).toBe('grab')
+  expect(await cursor('.canvas-name')).toBe('grab')
+  expect(await cursor('.canvas-handle')).toBe('grab')
+  expect(await cursor('.canvas-preview h2')).toBe('auto')
+  await page.getByRole('button', { name: 'Annotate', exact: true }).click()
+  expect(await cursor('.canvas-preview h2')).toBe('crosshair')
+  expect(await cursor('.canvas-name')).toBe('crosshair')
+  await page.locator('.canvas-viewport').evaluate((element) => element.setAttribute('data-gesture', 'pan'))
+  expect(await cursor('.canvas-preview h2')).toBe('grabbing')
 })

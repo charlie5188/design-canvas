@@ -1,5 +1,6 @@
 // Canvas chrome copy. Edit here to change the language of the controls.
-const ANNOTATE_HELP = "Press A to annotate several elements, then send or copy them all at once";
+const ANNOTATE_HELP =
+  "Press A to annotate: click an element, drag across an area, or click an item's name for the whole item, then send or copy them all at once";
 
 export const labels = {
   region: "Design canvas",
@@ -42,8 +43,12 @@ export const labels = {
   trashHint: "Click an item to put it back",
   putBack: (name: string) => `Put back ${name}`,
   annotate: "Annotate",
-  annotateHint: "Annotate elements (A)",
-  annotateModeOn: "Annotate mode. Click an element to annotate it. Press Escape to finish.",
+  annotateHint: "Annotate (A)",
+  annotateModeOn:
+    "Annotate mode. Click an element, drag across an area, or click an item's name for the whole item. Press Escape to finish.",
+  /** An area drawn over a preview, in px from the item's top-left, and what is entirely inside it. */
+  areaRef: (w: number, h: number, x: number, y: number, names: string[], more: number) =>
+    `area ${w}×${h} at ${x},${y}${names.length ? `: ${names.join(", ")}${more ? ` and ${more} more` : ""}` : ""}`,
   annotateModeOff: "Annotate mode off",
   annotationPlaceholder: "Note for the agent",
   annotationField: (ref: string) => `Annotation on ${ref}`,

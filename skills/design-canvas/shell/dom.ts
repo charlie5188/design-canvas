@@ -121,3 +121,25 @@ export function describeElement(element: Element, root: Element) {
   const twins = [...root.querySelectorAll(element.tagName)].filter((other) => describeOne(other) === text);
   return twins.length > 1 ? `${text} (${twins.indexOf(element) + 1}/${twins.length})` : text;
 }
+
+/**
+ * What an area drawn over a preview holds, for its reference: the controls,
+ * headings, and texts entirely inside `area` (client coordinates), outermost
+ * first, at most `limit` of them, and how many more there are.
+ */
+export function describeArea(root: Element, area: { left: number; top: number; right: number; bottom: number }, limit = 4) {
+  const inside = (rect: DOMRect) =>
+    rect.width > 0 &&
+    rect.height > 0 &&
+    rect.left >= area.left - 1 &&
+    rect.right <= area.right + 1 &&
+    rect.top >= area.top - 1 &&
+    rect.bottom <= area.bottom + 1;
+  const found: Element[] = [];
+  for (const element of root.querySelectorAll("*")) {
+    if (found.some((outer) => outer.contains(element))) continue;
+    if (!element.matches(PICKABLE) && !hasOwnText(element)) continue;
+    if (inside(element.getBoundingClientRect())) found.push(element);
+  }
+  return { names: found.slice(0, limit).map((element) => describeElement(element, root)), more: Math.max(0, found.length - limit) };
+}
