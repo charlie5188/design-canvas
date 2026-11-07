@@ -119,7 +119,7 @@ Run `scripts/share.sh` on a canvas with a `viewport` item, and open the file fro
 - The open-alone icon opens the same file with `?item=<id>`, which shows that item alone.
 - Reload keeps the layout.
 - On the dev server, the Share icon button (tooltip "Share as an HTML file") dims, pulses, and takes no second click while the file builds, then downloads `<canvas-name>-<date>.html` without reloading the page.
-- After the download, a panel above the toolbar names the file, any file it could not include, and how to open it, send it, or put it in Figma. Escape, its close button, or a press outside closes it and returns focus to Share; opening the trash closes it too.
+- After the download, a panel above the toolbar names the file, any file it could not include, and how to open it, send it, or put it in Figma or Notion. Escape, its close button, or a press outside closes it and returns focus to Share; opening the trash closes it too.
 
 ## Layout
 

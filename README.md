@@ -70,6 +70,7 @@ Click Share (the share icon) in the canvas toolbar, or ask the agent to share th
 - **Open it.** Double-click the file. It runs in any browser, with no setup, server, or agent.
 - **Send it.** Share it like any file, in Slack, email, or Drive.
 - **Put it in Figma.** Drag the file onto a Figma canvas. It becomes a code layer: press play to use it, or play it full screen.
+- **Put it in Notion.** Drag the file into a Notion page. It becomes an embedded web page that people can use right in the page.
 
 The file is a snapshot, so share again after changes. It holds every item's data, so keep items on made-up data. Annotations and sending to the agent are not in the file.
 
@@ -170,6 +171,7 @@ npx skills add charlie5188/design-canvas
 - **開く。** ファイルをダブルクリックします。準備、サーバー、エージェントなしで、どのブラウザでも動きます。
 - **送る。** Slack、メール、Drive など、普通のファイルと同じように共有できます。
 - **Figma に置く。** ファイルを Figma のキャンバスにドラッグすると、コードレイヤーになります。再生ボタンを押すと操作でき、フルスクリーンでも再生できます。
+- **Notion に置く。** ファイルを Notion のページにドラッグすると、埋め込みのウェブページになり、ページの中でそのまま操作できます。
 
 ファイルはその時点のスナップショットなので、変更したらもう一度共有してください。すべてのアイテムのデータが含まれるので、アイテムには架空のデータを使ってください。注釈とエージェントへの送信は含まれません。
 
