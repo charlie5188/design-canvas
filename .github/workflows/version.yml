@@ -18,7 +18,8 @@ jobs:
       - name: Check that VERSION went up
         shell: bash
         run: |
-          base="$(git show "origin/${{ github.base_ref }}:skills/design-canvas/VERSION" 2>/dev/null | tr -dc '0-9')"
+          # Before VERSION reaches the base branch, git show fails; count that as 0.
+          base="$(git show "origin/${{ github.base_ref }}:skills/design-canvas/VERSION" 2>/dev/null | tr -dc '0-9' || true)"
           head="$(tr -dc '0-9' < skills/design-canvas/VERSION)"
           if (( 10#${head:-0} <= 10#${base:-0} )); then
             echo "::warning file=skills/design-canvas/VERSION::This PR changes the skill but VERSION is still ${base:-0}. If installed copies should update, raise it to $(( 10#${base:-0} + 1 ))."
