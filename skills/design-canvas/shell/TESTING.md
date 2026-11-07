@@ -100,6 +100,15 @@ Run `scripts/listen.sh <canvas-url>` in a terminal as the agent would.
 - `frame.html?item=<id>` alone renders the item at its size without chrome, centered in a larger tab and scrollable in a smaller one; an unknown id shows a short message.
 - Opened alone in a wide tab, a `viewport` item still shows its narrow layout.
 
+## Shared file
+
+Run `scripts/share.sh` on a canvas with a `viewport` item, and open the file from disk in Chrome and Safari.
+
+- Every item renders and works, with no console errors. Annotate, its A shortcut, and its help line are gone; Alt-click still copies a reference.
+- Wheel, pinch, Space-drag, and Alt-click over a `viewport` item reach the canvas, as on the dev server.
+- The open-alone icon opens the same file with `?item=<id>`, which shows that item alone.
+- Reload keeps the layout.
+
 ## Layout
 
 - Reload keeps camera and positions; removed ids are ignored.

@@ -12,7 +12,8 @@ import {
   useState,
 } from "react";
 import { sendToAgent, useAgentStatus } from "./agent";
-import { frameUrl, NAVIGATE_EVENT, postToFrame, readFrameMessage } from "./bridge";
+import { frameUrl, fromThisCanvas, NAVIGATE_EVENT, postToFrame, readFrameMessage, shared } from "./bridge";
+import { FrameHost } from "./FrameHost";
 import {
   type Annotation,
   fingerprintItem,
@@ -629,16 +630,26 @@ type OpenAnnotation = { id: string; original: Annotation; versions: Map<string, 
 /** The part of Vite's `import.meta.hot` the canvas uses; absent outside the dev server. */
 type HotUpdates = { on(event: string, listener: () => void): void; off?(event: string, listener: () => void): void };
 
-export function Canvas({
-  items,
-  storageKey,
-  theme,
-}: {
+// A shared file has no annotations, so its help leaves out annotate mode.
+const HELP_LINES = shared ? labels.helpLines.filter((line) => line !== labels.annotateHelp) : labels.helpLines;
+
+type CanvasProps = {
   items: CanvasItem[];
   storageKey: string;
   /** The project's themes. Leave out when the project has a single theme. */
   theme?: ThemeStore;
-}) {
+};
+
+/**
+ * The canvas page. A shared file (scripts/share.sh) is one page for everything,
+ * so there it also shows single items and item frames, at ?item=<id>.
+ */
+export function Canvas(props: CanvasProps) {
+  if (shared && new URLSearchParams(window.location.search).has("item")) return <FrameHost {...props} />;
+  return <CanvasBoard {...props} />;
+}
+
+function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const worldRef = useRef<HTMLDivElement>(null);
   const zoomLabelRef = useRef<HTMLSpanElement>(null);
@@ -778,14 +789,17 @@ export function Canvas({
   // message and marks them sent; a sent one leaves once its item renders
   // differently after a code update. The open annotation's text is live state,
   // so switching elements never loses typing.
-  const [annotations, setAnnotations] = useState<Annotation[]>(() => loadAnnotations(storageKey, ids));
+  // A shared file has no annotation tools, so it neither shows nor stores any.
+  const [annotations, setAnnotations] = useState<Annotation[]>(() => (shared ? [] : loadAnnotations(storageKey, ids)));
   const annotationsRef = useRef(annotations);
   annotationsRef.current = annotations;
   const [openAnnotation, setOpenAnnotation] = useState<OpenAnnotation | null>(null);
   const openRef = useRef(openAnnotation);
   const [annotating, setAnnotating] = useState(false);
   const annotatingRef = useRef(false);
-  useEffect(() => saveAnnotations(storageKey, annotations), [annotations, storageKey]);
+  useEffect(() => {
+    if (!shared) saveAnnotations(storageKey, annotations);
+  }, [annotations, storageKey]);
   // Annotations on trashed items wait, unseen and unsent, until it is put back.
   const visibleAnnotations = useMemo(() => annotations.filter((a) => shownIds.has(a.itemId)), [annotations, shownIds]);
   // Pins number the next message: unsent annotations in order. Sent ones show a
@@ -1645,7 +1659,7 @@ export function Canvas({
         event.target === viewport ||
         event.target === document.body ||
         (event.target instanceof Element && event.target.closest(".canvas-toolbar, .canvas-pin-bubble") !== null);
-      if (plain && canvasFocus && (event.key === "a" || event.key === "A") && !event.repeat) {
+      if (!shared && plain && canvasFocus && (event.key === "a" || event.key === "A") && !event.repeat) {
         event.preventDefault();
         setAnnotateMode(!annotatingRef.current);
         if (annotatingRef.current && pointer.x >= 0) showPick(document.elementFromPoint(pointer.x, pointer.y));
@@ -1704,7 +1718,7 @@ export function Canvas({
 
     // Item frames forward the gestures and picks they receive.
     const onMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) return;
+      if (!fromThisCanvas(event)) return;
       const message = readFrameMessage(event.data);
       if (!message) return;
       const frameElement = [...world.querySelectorAll<HTMLIFrameElement>("iframe[data-canvas-frame]")].find(
@@ -2005,40 +2019,44 @@ export function Canvas({
           <ResetIcon />
           {labels.resetCamera}
         </button>
-        <span className="canvas-separator" aria-hidden="true" />
-        <button
-          type="button"
-          className="canvas-button"
-          aria-pressed={annotating}
-          data-tip={labels.annotateHint}
-          onClick={() => setAnnotateMode(!annotatingRef.current)}
-        >
-          <AnnotateIcon />
-          {labels.annotate}
-        </button>
-        {agentHandling && (
-          <span className="canvas-agent-status">
-            <span className="canvas-agent-dot" aria-hidden="true" />
-            {labels.agentWorking}
-          </span>
-        )}
-        {unsentCount > 0 && (
-          <button type="button" className="canvas-button canvas-button-primary" onClick={() => void sendAnnotations()}>
-            {agentOn ? <SendIcon /> : <CopyIcon />}
-            {agentOn ? labels.sendAnnotations(unsentCount) : labels.copyAnnotations(unsentCount)}
-          </button>
-        )}
-        {visibleAnnotations.some((a) => a.text.trim()) && (
+        {!shared && (
           <>
+            <span className="canvas-separator" aria-hidden="true" />
             <button
               type="button"
-              className="canvas-button canvas-icon-button"
-              aria-label={labels.clearAnnotations}
-              data-tip={labels.clearAnnotations}
-              onClick={clearAnnotations}
+              className="canvas-button"
+              aria-pressed={annotating}
+              data-tip={labels.annotateHint}
+              onClick={() => setAnnotateMode(!annotatingRef.current)}
             >
-              <EraserIcon />
+              <AnnotateIcon />
+              {labels.annotate}
             </button>
+            {agentHandling && (
+              <span className="canvas-agent-status">
+                <span className="canvas-agent-dot" aria-hidden="true" />
+                {labels.agentWorking}
+              </span>
+            )}
+            {unsentCount > 0 && (
+              <button type="button" className="canvas-button canvas-button-primary" onClick={() => void sendAnnotations()}>
+                {agentOn ? <SendIcon /> : <CopyIcon />}
+                {agentOn ? labels.sendAnnotations(unsentCount) : labels.copyAnnotations(unsentCount)}
+              </button>
+            )}
+            {visibleAnnotations.some((a) => a.text.trim()) && (
+              <>
+                <button
+                  type="button"
+                  className="canvas-button canvas-icon-button"
+                  aria-label={labels.clearAnnotations}
+                  data-tip={labels.clearAnnotations}
+                  onClick={clearAnnotations}
+                >
+                  <EraserIcon />
+                </button>
+              </>
+            )}
           </>
         )}
         <span className="canvas-separator" aria-hidden="true" />
@@ -2098,7 +2116,7 @@ export function Canvas({
             <HelpIcon />
           </button>
           <span id="canvas-help" role="tooltip" className="canvas-help-popover">
-            {labels.helpLines.map((line) => (
+            {HELP_LINES.map((line) => (
               <span key={line}>{line}</span>
             ))}
           </span>

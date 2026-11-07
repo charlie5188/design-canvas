@@ -1,16 +1,20 @@
 // Canvas chrome copy. Edit here to change the language of the controls.
+const ANNOTATE_HELP = "Press A to annotate several elements, then send or copy them all at once";
+
 export const labels = {
   region: "Design canvas",
   toolbar: "Canvas view",
   theme: "Theme",
   help: "Canvas controls",
+  /** The help line a shared file leaves out, since it has no annotations. */
+  annotateHelp: ANNOTATE_HELP,
   helpLines: [
     "Drag empty space to pan",
     "Drag an item's name or grip to move it",
     "⌘/Ctrl + scroll or pinch to zoom",
     "Hold Space or the middle button and drag to pan anywhere",
     "Hold ⌥/Alt and click an element to copy a reference to it",
-    "Press A to annotate several elements, then send or copy them all at once",
+    ANNOTATE_HELP,
     "Hover an item's name to open it alone or move it to the trash",
     "With the canvas focused: arrow keys pan, + and − zoom, 0 resets, 1 fits all",
   ],

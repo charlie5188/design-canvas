@@ -1,6 +1,6 @@
 ---
 name: design-canvas
-description: Build or update a local design canvas of live, real product components to explore, compare, and iterate on UI options side by side in a React app. Installs a ready-made, tested canvas shell instead of building one, so each project only needs its items. Use when the user asks for a canvas, wants several versions or directions of a screen or component next to each other, says "create canvas" or "design canvas", or pastes a canvas reference such as "Name › button “Send”".
+description: Build or update a local design canvas of live, real product components to explore, compare, and iterate on UI options side by side in a React app. Installs a ready-made, tested canvas shell instead of building one, so each project only needs its items. Use when the user asks for a canvas, wants several versions or directions of a screen or component next to each other, says "create canvas" or "design canvas", wants to share a canvas as a file or put it in Figma, or pastes a canvas reference such as "Name › button “Send”".
 ---
 
 # Design canvas
@@ -139,8 +139,14 @@ Sent and copied annotations stay on the canvas as sent pins and disappear on the
 
 ## 5. Share and keep results
 
-The canvas runs only on this machine.
+The canvas runs on this machine. To let other people try it, share it as a file.
 
+- **Share as a file.** When the person wants others to try the canvas, or wants it in Figma, run `bash ~/.agents/skills/design-canvas/scripts/share.sh <canvas-folder>`. It builds the canvas into one HTML file, `<canvas-folder>/shared/<name>-<date>.html`, and prints its path and size. Give the person the path; on a Mac, `open -R <file>` shows it in Finder. A second argument writes the file somewhere else.
+  - The file opens with a double-click in any browser, with no server, the app, or an agent. Every item, theme, pan and zoom, and Alt-click reference works. It leaves out annotations and sending to the agent. Each viewer's layout stays in their own browser.
+  - In Figma, people drag the file onto a canvas. It becomes a code layer; they press its play button or view it full screen.
+  - It is a snapshot. Share again after changes, and say which items changed.
+  - The file holds the canvas's built code and every item's data, and it leaves this machine. Before sharing, check that the items follow the rules in "Add content": made-up data, no secrets, no analytics.
+  - If it warns that files from the app's public folder will not load, import those files in their items so the build includes them, then share again.
 - `frame.html?item=<id>` shows one item alone at its real size, without canvas chrome. People open it from the icon beside each item name. A `viewport` item keeps its own width there even in a wide tab. For a screenshot, set the browser viewport to the item's width and height first, so the item fills the page exactly.
 - Present screenshots the way the user reviews UI, for example an inline comparison, a shared page, or their issue tracker.
 - To put an item in a design tool, point that tool's capture or import at the item's frame page. Say which items you sent.
