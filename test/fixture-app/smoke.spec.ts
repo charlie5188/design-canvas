@@ -249,6 +249,7 @@ test('Share downloads the canvas as one file, without reloading the canvas', asy
   // A panel confirms the download and says how to pass the file on; Escape closes it.
   const panel = page.getByRole('dialog', { name: `Downloaded ${file.suggestedFilename()}` })
   await expect(panel).toContainText('Figma')
+  await expect(panel).toContainText('Notion')
   await page.keyboard.press('Escape')
   await expect(panel).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Share as an HTML file' })).toBeFocused()

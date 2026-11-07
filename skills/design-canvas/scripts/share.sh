@@ -38,4 +38,5 @@ cat <<EOF
 Shared file: $out ($size)
 It opens with a double-click, with no server. Annotations and sending to the agent are left out.
 In Figma, drag the file onto the canvas to make a code layer, then press its play button or view it full screen.
+In Notion, drag the file into a page to embed it as a live page.
 EOF

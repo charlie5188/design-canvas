@@ -81,6 +81,7 @@ export const labels = {
     ["Open", "Double-click it. No setup needed."],
     ["Send", "Like any file: Slack, email, or Drive."],
     ["Figma", "Drag it onto a canvas, then press play. Full screen works too."],
+    ["Notion", "Drag it into a page to embed it."],
   ] as const,
   shareFailed: (reason: string) => `Couldn't make the file: ${reason}`,
   agentFinished: "The agent finished",
