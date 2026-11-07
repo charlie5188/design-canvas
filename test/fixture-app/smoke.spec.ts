@@ -89,6 +89,68 @@ test('annotations go straight to a listening agent', async ({ page, baseURL }) =
   expect(errors).toEqual([])
 })
 
+test('the toolbar shows the agent working until it listens again', async ({ page, baseURL }) => {
+  const errors = collectErrors(page)
+  const listen = () => {
+    const child = spawn('bash', [LISTEN, baseURL!])
+    return { child, exited: new Promise<number | null>((resolve) => child.on('exit', resolve)) }
+  }
+  const first = listen()
+  let again: ReturnType<typeof listen> | undefined
+  try {
+    await page.goto('/')
+    await page.getByRole('button', { name: 'Annotate', exact: true }).click()
+    await page.locator('.canvas-preview h2').click()
+    const note = page.getByRole('dialog', { name: /^Annotation on/ })
+    await note.getByRole('textbox').fill('Shorter title')
+    await note.getByRole('button', { name: 'Save' }).click()
+    await page.getByRole('button', { name: 'Send 1 to agent' }).click()
+    expect(await first.exited).toBe(0)
+    const status = page.locator('.canvas-agent-status')
+    await expect(status).toHaveText('Agent working')
+    // listen.sh again: the agent handled what it printed.
+    again = listen()
+    await expect(status).toHaveCount(0)
+    await expect(page.locator('.canvas-toast')).toContainText('The agent finished')
+  } finally {
+    first.child.kill()
+    again?.child.kill()
+  }
+  expect(errors).toEqual([])
+})
+
+test('a kept listener stays working until the agent says done', async ({ page, request }) => {
+  const errors = collectErrors(page)
+  await page.goto('/')
+  // The Codex listener's side: it listens with keep=1 and reconnects right after each message.
+  const kept = () => request.get('/__design-canvas/agent/listen?timeout=30&keep=1')
+  const firstPoll = kept()
+  await expect(page.getByRole('button', { name: 'Annotate', exact: true })).toBeVisible()
+  await expect.poll(async () => (await (await request.get('/__design-canvas/agent')).json()).state).toBe('listening')
+  await page.getByRole('button', { name: 'Annotate', exact: true }).click()
+  await page.locator('.canvas-preview h2').click()
+  const note = page.getByRole('dialog', { name: /^Annotation on/ })
+  await note.getByRole('textbox').fill('Shorter title')
+  await note.getByRole('button', { name: 'Save' }).click()
+  await page.getByRole('button', { name: 'Send 1 to agent' }).click()
+  expect((await firstPoll).status()).toBe(200)
+  const secondPoll = kept()
+  const status = page.locator('.canvas-agent-status')
+  await expect.poll(async () => (await (await request.get('/__design-canvas/agent')).json()).state).toBe('listening')
+  await expect(status).toHaveText('Agent working')
+  // Only the agent may say done, never a web page.
+  const fromPage = await request.post('/__design-canvas/agent/done', { headers: { Origin: 'http://evil.test' } })
+  expect(fromPage.status()).toBe(403)
+  await expect(status).toHaveText('Agent working')
+  expect((await request.post('/__design-canvas/agent/done')).status()).toBe(204)
+  await expect(status).toHaveCount(0)
+  await expect(page.locator('.canvas-toast')).toContainText('The agent finished')
+  // A newer listener takes over and ends the kept poll.
+  await request.get('/__design-canvas/agent/listen?timeout=1')
+  await secondPoll
+  expect(errors).toEqual([])
+})
+
 test('only the agent can listen, and only the canvas page can send', async ({ request }) => {
   const listen = await request.get('/__design-canvas/agent/listen?timeout=1', { headers: { Origin: 'http://evil.test' } })
   expect(listen.status()).toBe(403)

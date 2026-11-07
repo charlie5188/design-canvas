@@ -47,6 +47,6 @@ case "${status%% *}" in
     die "the canvas at $url/ is not running. Start its dev server, then listen again."
     ;;
   *)
-    die "the canvas answered $status: $(head -c 200 "$body")"
+    die "the canvas answered $status: $(head -c 200 "$body"). Restart the canvas dev server, then listen again; if it happens again, tell the person to use Copy."
     ;;
 esac

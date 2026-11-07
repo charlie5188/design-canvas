@@ -11,6 +11,11 @@
 // - After a delivery or a quiet timeout the agent is "working": it is expected
 //   back soon, and the page queues what the person sends meanwhile. After
 //   BUSY_MS without a new listener it counts as gone.
+// - `handling` is separate: the agent has the person's notes and has not said
+//   it is done. The page shows it, so people know their notes arrived and when
+//   the agent finished. listen.sh says done by listening again. The Codex
+//   listener listens again right after it queues a message (`keep=1`), so
+//   there the agent says done with a POST to `<AGENT_PATH>/done`.
 // - Only the canvas page itself may send, and browsers may not listen.
 //   Otherwise any web page open in the browser could instruct the agent, or
 //   read what was meant for it, through this port.
@@ -19,6 +24,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Plugin } from "vite";
 
 export type AgentState = "off" | "listening" | "working";
+/** What the page hears: `finished` only on the update that ends `handling` because the agent said done. */
+export type AgentStatus = { state: AgentState; handling: boolean; finished?: boolean };
 export const AGENT_PATH = "/__design-canvas/agent";
 /** Vite's HMR channel carries state changes to open pages. */
 export const AGENT_EVENT = "design-canvas:agent";
@@ -68,9 +75,33 @@ export function agentChannel(): Plugin {
       let listener: { response: ServerResponse; timer: Timer } | undefined;
       let busyUntil = 0;
       let busyTimer: Timer | undefined;
+      let handling = false;
+      let handlingTimer: Timer | undefined;
 
       const state = (): AgentState => (listener ? "listening" : Date.now() < busyUntil ? "working" : "off");
-      const broadcast = () => server.ws.send(AGENT_EVENT, { state: state() });
+      const status = (finished = false): AgentStatus => {
+        const now = state();
+        // A gone agent handles nothing, so the page never shows a stale "working".
+        if (now === "off") setHandling(false);
+        return finished ? { state: now, handling, finished } : { state: now, handling };
+      };
+      const broadcast = (finished = false) => server.ws.send(AGENT_EVENT, status(finished));
+      // An agent that never says done stops showing as working after BUSY_MS.
+      function setHandling(next: boolean) {
+        clearTimeout(handlingTimer);
+        handling = next;
+        if (next)
+          handlingTimer = setTimeout(() => {
+            handling = false;
+            broadcast();
+          }, BUSY_MS);
+      }
+      /** The agent finished the notes it had; the page says so once. */
+      const finish = () => {
+        if (!handling) return false;
+        setHandling(false);
+        return true;
+      };
       const setBusy = (busy: boolean) => {
         clearTimeout(busyTimer);
         busyUntil = busy ? Date.now() + BUSY_MS : 0;
@@ -91,12 +122,14 @@ export function agentChannel(): Plugin {
 
         if (request.method === "GET" && url.pathname === "/") {
           if (!localHost(request)) return send(response, 403, "Not allowed");
-          return sendJson(response, { state: state() });
+          return sendJson(response, status());
         }
 
         if (request.method === "GET" && url.pathname === "/listen") {
           if (!localHost(request) || fromBrowser(request)) return send(response, 403, "Only the agent listens");
           const seconds = Number(url.searchParams.get("timeout"));
+          // listen.sh listens again only after handling what it printed; a kept listener reconnects right away.
+          const finished = url.searchParams.get("keep") !== "1" && finish();
           const wait = Number.isFinite(seconds) && seconds >= 1 && seconds <= DEFAULT_WAIT_S ? seconds : DEFAULT_WAIT_S;
           // 409 tells the older session to stop, so two sessions never take turns replacing each other.
           release(409, "replaced", false);
@@ -114,7 +147,13 @@ export function agentChannel(): Plugin {
             setBusy(false);
             broadcast();
           });
-          return broadcast();
+          return broadcast(finished);
+        }
+
+        if (request.method === "POST" && url.pathname === "/done") {
+          if (!localHost(request) || fromBrowser(request)) return send(response, 403, "Only the agent says done");
+          broadcast(finish());
+          return send(response, 204, "");
         }
 
         if (request.method === "POST" && url.pathname === "/send") {
@@ -130,7 +169,8 @@ export function agentChannel(): Plugin {
               if (typeof text !== "string" || !text.trim()) return send(response, 400, "Expected { text }");
               const delivered = !!listener;
               release(200, text, true);
-              sendJson(response, { delivered, state: state() });
+              if (delivered) setHandling(true);
+              sendJson(response, { delivered, ...status() });
               broadcast();
             },
             () => send(response, 413, "Too large"),

@@ -1,0 +1,26 @@
+# Installed copies compare skills/design-canvas/VERSION with main to tell
+# people a newer version is out (scripts/check-version.sh). A skill change
+# without a higher VERSION reaches nobody until the next one, so the PR gets a
+# warning. Not every change needs one, so it does not fail.
+name: Version
+
+on:
+  pull_request:
+    paths: ['skills/design-canvas/**']
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Check that VERSION went up
+        shell: bash
+        run: |
+          # Before VERSION reaches the base branch, git show fails; count that as 0.
+          base="$(git show "origin/${{ github.base_ref }}:skills/design-canvas/VERSION" 2>/dev/null | tr -dc '0-9' || true)"
+          head="$(tr -dc '0-9' < skills/design-canvas/VERSION)"
+          if (( 10#${head:-0} <= 10#${base:-0} )); then
+            echo "::warning file=skills/design-canvas/VERSION::This PR changes the skill but VERSION is still ${base:-0}. If installed copies should update, raise it to $(( 10#${base:-0} + 1 ))."
+          fi

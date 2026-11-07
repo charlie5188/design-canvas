@@ -18,7 +18,7 @@ dir="${dir%/}"
 # Check before replacing anything. A shell ported to another framework has no
 # Canvas.tsx; port shell changes into it by hand.
 [[ -f "$dir/registry.tsx" && -f "$dir/canvas/Canvas.tsx" ]] ||
-  die "$dir is not a canvas with the React shell (expected registry.tsx and canvas/Canvas.tsx)"
+  die "$dir is not a canvas with the React shell (expected registry.tsx and canvas/Canvas.tsx). Pass the canvas folder, usually <app>/design-canvas/<name>. A shell ported to another framework takes shell changes by hand."
 
 # TESTING.md is not installed, and Finder's .DS_Store is not part of the shell.
 skip() { [[ "$1" == TESTING.md || "$(basename "$1")" == .DS_Store ]]; }
@@ -44,9 +44,9 @@ channel_note() {
 
 if [[ -z "$changes" ]]; then
   echo "The canvas is already up to date: $dir"
-  channel_note
-  exit 0
+else
+  rsync -a --delete --exclude TESTING.md --exclude .DS_Store "$shell/" "$dir/canvas/"
+  printf 'Updated the canvas shell in %s:\n%s' "$dir" "$changes"
 fi
-rsync -a --delete --exclude TESTING.md --exclude .DS_Store "$shell/" "$dir/canvas/"
-printf 'Updated the canvas shell in %s:\n%s' "$dir" "$changes"
 channel_note
+bash "$skill_dir/scripts/check-version.sh" || true

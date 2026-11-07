@@ -59,6 +59,9 @@ export const labels = {
   sentToAgent: (n: number) => `Sent ${n} annotation${n === 1 ? "" : "s"} to the agent`,
   queuedForAgent: (n: number) => `Queued ${n} annotation${n === 1 ? "" : "s"}. The agent gets ${n === 1 ? "it" : "them"} when it's free.`,
   agentGoneCopied: (n: number) => `The agent stopped listening. Copied ${n} annotation${n === 1 ? "" : "s"} instead.`,
+  /** In the toolbar while the agent handles the notes it was sent. */
+  agentWorking: "Agent working",
+  agentFinished: "The agent finished",
   agentGoneQueued: (n: number) => `The agent stopped listening, so ${n} annotation${n === 1 ? " wasn't" : "s weren't"} sent`,
   clearAnnotations: "Clear annotations",
   clearedAnnotations: (n: number) => `Cleared ${n} annotation${n === 1 ? "" : "s"}`,

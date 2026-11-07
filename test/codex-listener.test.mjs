@@ -158,6 +158,8 @@ test("keeps each long poll under Node's 300-second header timeout", async (t) =>
   const f = await fixture(t, { env: { DESIGN_CANVAS_LISTEN_SECONDS: "3600" } });
   await f.ready();
   assert.equal(f.lastListen.searchParams.get("timeout"), "240");
+  // Reconnecting after a queue is not the agent finishing; the canvas keeps showing it working.
+  assert.equal(f.lastListen.searchParams.get("keep"), "1");
 });
 
 test("queue failure preserves a private recovery copy and never retries an ambiguous delivery", async (t) => {

@@ -11,7 +11,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { sendToAgent, useAgentState } from "./agent";
+import { sendToAgent, useAgentStatus } from "./agent";
 import { frameUrl, NAVIGATE_EVENT, postToFrame, readFrameMessage } from "./bridge";
 import {
   type Annotation,
@@ -793,8 +793,10 @@ export function Canvas({
   const pending = visibleAnnotations.filter((a) => !a.sent && !a.queued);
   const unsentCount = pending.filter((a) => a.text.trim()).length;
   // Listening, or busy with the last message and expected back: either way the
-  // toolbar sends instead of copying.
-  const agent = useAgentState();
+  // toolbar sends instead of copying. While the agent handles sent notes the
+  // toolbar says so, and a notice says when it finished, so nobody has to watch
+  // the chat to know their notes arrived and were handled.
+  const { state: agent, handling: agentHandling } = useAgentStatus(() => notify(labels.agentFinished));
   const agentRef = useRef(agent);
   agentRef.current = agent;
   const agentOn = agent === "listening" || agent === "working";
@@ -2014,6 +2016,12 @@ export function Canvas({
           <AnnotateIcon />
           {labels.annotate}
         </button>
+        {agentHandling && (
+          <span className="canvas-agent-status">
+            <span className="canvas-agent-dot" aria-hidden="true" />
+            {labels.agentWorking}
+          </span>
+        )}
         {unsentCount > 0 && (
           <button type="button" className="canvas-button canvas-button-primary" onClick={() => void sendAnnotations()}>
             {agentOn ? <SendIcon /> : <CopyIcon />}

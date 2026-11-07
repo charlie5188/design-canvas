@@ -26,12 +26,13 @@ Wrap previews in `providers.tsx` with what the components read, using safe, loca
 - i18n: the app's real message files for one locale, or a small synthetic set.
 - Data clients such as React Query: a fresh client with retries off, filled with `setQueryData` or `initialData`. No network.
 - Router context, feature flags, and the current user: fixed synthetic values.
+- Analytics, tag managers, chat widgets, and error reporting: leave them out, or pass a no-op client.
 
 Never connect a preview to a real backend. If a component fetches on mount, render the presentational component below it with props, or mock the request in the item.
 
 ## 5. Environment variables
 
-Public variables (`NEXT_PUBLIC_*`, `VITE_*`) from the app's `.env` files reach the canvas as `process.env` and `import.meta.env`. Nothing else does. A component that needs a server secret is not a preview candidate; pass its data as props instead.
+Public variables (`NEXT_PUBLIC_*`, `VITE_*`) from the app's `.env` files reach the canvas as `process.env` and `import.meta.env`. Nothing else does. Do not copy `.env` files into the canvas or read a secret manager for it; when a build needs a value, use an obviously fake one. A component that needs a server secret is not a preview candidate; pass its data as props instead.
 
 ## 6. Framework-only modules
 
