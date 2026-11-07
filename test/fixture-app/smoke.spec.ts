@@ -1,8 +1,12 @@
-import { spawn } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
+import { spawn, spawnSync } from 'node:child_process'
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { expect, type Page, test } from '@playwright/test'
 
 const LISTEN = fileURLToPath(new URL('../../skills/design-canvas/scripts/listen.sh', import.meta.url))
+const SHARE = fileURLToPath(new URL('../../skills/design-canvas/scripts/share.sh', import.meta.url))
 
 function collectErrors(page: Page) {
   const errors: string[] = []
@@ -159,4 +163,71 @@ test('only the agent can listen, and only the canvas page can send', async ({ re
     data: { text: 'Delete everything' },
   })
   expect(send.status()).toBe(403)
+})
+
+test('a shared file works from disk, frames included, without the agent tools', async ({ page }) => {
+  const errors = collectErrors(page)
+  // A copy of the canvas with a viewport item, whose frame the shared file loads from itself.
+  const copy = 'design-canvas/smoke-shared'
+  cpSync('design-canvas/smoke', copy, { recursive: true })
+  const registry = readFileSync(`${copy}/registry.tsx`, 'utf8')
+  const phone = '  { id: "phone", name: "Phone", component: Example, x: 0, y: 240, width: 375, height: 180, viewport: true },\n];'
+  writeFileSync(`${copy}/registry.tsx`, registry.replace(/\];\s*$/, `${phone}\n`))
+  const file = join(mkdtempSync(join(tmpdir(), 'design-canvas-share-')), 'canvas.html')
+  try {
+    const shared = spawnSync('bash', [SHARE, copy, file], { encoding: 'utf8' })
+    expect(shared.status, shared.stderr).toBe(0)
+    const url = pathToFileURL(file).href
+    await page.goto(url)
+    await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toContainText('Canvas is ready')
+    await expect(page.getByRole('button', { name: 'Annotate', exact: true })).toHaveCount(0)
+    await expect(page.locator('#canvas-help')).not.toContainText('Press A')
+    const frame = page.locator('.canvas-item[data-canvas-item="phone"] iframe')
+    await expect(page.frameLocator('.canvas-item[data-canvas-item="phone"] iframe').locator('body')).toContainText(
+      'Canvas is ready',
+    )
+    // Each file on disk is its own origin; the frame's wheel must still pan the canvas.
+    const world = page.locator('.canvas-world')
+    const before = await world.evaluate((element) => getComputedStyle(element).transform)
+    const box = await frame.boundingBox()
+    await page.mouse.move(box!.x + 40, box!.y + 40)
+    await page.mouse.wheel(0, 120)
+    await expect.poll(() => world.evaluate((element) => getComputedStyle(element).transform)).not.toBe(before)
+    // The same file shows one item alone.
+    await page.goto(`${url}?item=example`)
+    await expect(page.locator('.canvas-frame-root')).toContainText('Canvas is ready')
+  } finally {
+    rmSync(copy, { recursive: true, force: true })
+  }
+  expect(errors).toEqual([])
+})
+
+test('Share downloads the canvas as one file, without reloading the canvas', async ({ page }) => {
+  const errors = collectErrors(page)
+  await page.goto('/')
+  await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toContainText('Canvas is ready')
+  // The build runs inside the dev server; a page reload during it would lose this.
+  await page.evaluate(() => Object.assign(window, { kept: true }))
+  const download = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Share as an HTML file' }).click()
+  const file = await download
+  expect(file.suggestedFilename()).toMatch(/^smoke-\d{4}-\d{2}-\d{2}\.html$/)
+  // A panel confirms the download and says how to pass the file on; Escape closes it.
+  const panel = page.getByRole('dialog', { name: `Downloaded ${file.suggestedFilename()}` })
+  await expect(panel).toContainText('Figma')
+  await page.keyboard.press('Escape')
+  await expect(panel).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Share as an HTML file' })).toBeFocused()
+  expect(await page.evaluate(() => 'kept' in window)).toBe(true)
+  const path = join(mkdtempSync(join(tmpdir(), 'design-canvas-share-')), file.suggestedFilename())
+  await file.saveAs(path)
+  await page.goto(pathToFileURL(path).href)
+  await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toContainText('Canvas is ready')
+  await expect(page.getByRole('button', { name: 'Share as an HTML file' })).toHaveCount(0)
+  expect(errors).toEqual([])
+})
+
+test('only the canvas page can build a shared file', async ({ request }) => {
+  const other = await request.post('/__design-canvas/share', { headers: { Origin: 'http://evil.test' } })
+  expect(other.status()).toBe(403)
 })

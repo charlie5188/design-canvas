@@ -20,6 +20,7 @@ Instead of asking the agent to build a canvas from scratch for every project, th
 - **Your themes.** Light and dark (or any themes the app has) switch from the toolbar, across every item.
 - **Stays on the canvas.** Links, form submits, and router calls inside previews never navigate away; they show where they would have gone.
 - **One item alone.** Open any item in its own tab at its real size, ready for a screenshot or a design-tool import.
+- **Share as one file.** Click Share on the toolbar, or ask the agent, to get one HTML file that anyone can open with a double-click, with no server or setup. Drag the file into Figma to get a code layer you can play full screen. Annotations and sending to the agent stay out of the shared file.
 - **A quiet workspace.** Drag items by their name, pan, zoom, fit all, and reload without losing the layout.
 
 ## Compared with Claude Design, Paper, and Figma
@@ -62,22 +63,34 @@ Then ask your agent, for example:
 - "Add a version of the inbox with grouped notifications next to the current one."
 - "Show the settings page on a phone and on desktop."
 
+## Share a canvas
+
+Click Share (the share icon) in the canvas toolbar, or ask the agent to share the canvas. You get one HTML file, `<canvas-name>-<date>.html`.
+
+- **Open it.** Double-click the file. It runs in any browser, with no setup, server, or agent.
+- **Send it.** Share it like any file, in Slack, email, or Drive.
+- **Put it in Figma.** Drag the file onto a Figma canvas. It becomes a code layer: press play to use it, or play it full screen.
+
+The file is a snapshot, so share again after changes. It holds every item's data, so keep items on made-up data. Annotations and sending to the agent are not in the file.
+
 ## How it works
 
 - `skills/design-canvas/shell/`: the canvas itself, in React. It is copied into each canvas and never rebuilt by the agent.
 - `skills/design-canvas/kits/react-vite/`: a Vite page that sits beside your app, reuses its aliases, styles, environment, and Vite plugins, and swaps Next.js-only modules for stand-ins.
 - `skills/design-canvas/scripts/install.sh`: copies the shell and kit into `<app>/design-canvas/<name>/` and detects what it can.
 - `skills/design-canvas/scripts/update.sh`: brings an existing canvas's shell up to date with the skill. The agent runs it when it picks up a canvas, so older canvases get new features. Your items and kit settings stay as they are.
+- `skills/design-canvas/scripts/share.sh`: builds a canvas into one self-contained HTML file in `<canvas>/shared/`, with every script, style, image, and font inside it, including files from the app's public folder. The toolbar's Share button builds the same file through the dev server and downloads it.
 - `skills/design-canvas/scripts/check-version.sh`: when a canvas is installed or updated, reads the skill's version number from this repository on GitHub, and the agent tells you when a newer version is out. Set `DESIGN_CANVAS_NO_UPDATE_CHECK=1` to turn it off.
 - `skills/design-canvas/references/making-a-kit.md`: the checklist the agent follows to finish fitting your app, and how to save that fit as a private kit in `~/.agents/design-canvas-kits/` so the next install needs none.
 
-Canvases are prototypes. Commit one only when you want to share it.
+Canvases are prototypes. Commit one only when teammates need to change it; to let people try it, share it as a file.
 
 ## Limits
 
 - The shell is React. For other frameworks, the agent ports it using `shell/TESTING.md` as the acceptance list.
 - Server components, server actions, and anything that needs a server secret cannot render on the canvas; preview the client component beneath them instead.
 - Inside `viewport` frames, middle-button pan and touch pinch do not reach the canvas.
+- A shared file is a snapshot of the canvas. Files loaded by a path built at runtime, such as `/avatars/${id}.png`, are not inside it; import them in the item instead.
 
 ## Credits
 
@@ -107,6 +120,7 @@ React アプリの実際のコンポーネントを、パン・ズームでき�
 - **アプリのテーマ。** ライト・ダーク（またはアプリが持つ任意のテーマ）をツールバーから切り替えられ、すべてのアイテムに反映されます。
 - **キャンバスから離れない。** プレビュー内のリンク、フォーム送信、ルーター呼び出しでページが遷移することはありません。遷移先は通知で表示されます。
 - **アイテム単体で開く。** どのアイテムも実寸のまま別タブで開けます。スクリーンショットやデザインツールへの取り込みにそのまま使えます。
+- **1 つのファイルで共有。** ツールバーの Share をクリックするか、エージェントに頼むと、1 つの HTML ファイルができます。サーバーや準備は不要で、誰でもダブルクリックで開けます。Figma にドラッグすると、フルスクリーンで操作できるコードレイヤーになります。注釈とエージェントへの送信は、共有ファイルには含まれません。
 - **静かな作業スペース。** 名前をドラッグしてアイテムを移動し、パン、ズーム、全体表示ができます。再読み込みしてもレイアウトは保たれます。
 
 ### Claude Design、Paper、Figma との違い
@@ -149,22 +163,34 @@ npx skills add charlie5188/design-canvas
 - 「通知をグループ化した受信箱を、今のものの隣に追加して」
 - 「設定ページをスマートフォンとデスクトップで並べて見せて」
 
+### キャンバスを共有する
+
+キャンバスのツールバーの Share（共有アイコン）をクリックするか、エージェントに共有を頼みます。`<キャンバス名>-<日付>.html` という 1 つの HTML ファイルができます。
+
+- **開く。** ファイルをダブルクリックします。準備、サーバー、エージェントなしで、どのブラウザでも動きます。
+- **送る。** Slack、メール、Drive など、普通のファイルと同じように共有できます。
+- **Figma に置く。** ファイルを Figma のキャンバスにドラッグすると、コードレイヤーになります。再生ボタンを押すと操作でき、フルスクリーンでも再生できます。
+
+ファイルはその時点のスナップショットなので、変更したらもう一度共有してください。すべてのアイテムのデータが含まれるので、アイテムには架空のデータを使ってください。注釈とエージェントへの送信は含まれません。
+
 ### しくみ
 
 - `skills/design-canvas/shell/`：React で書かれたキャンバス本体です。各キャンバスにコピーされ、エージェントが作り直すことはありません。
 - `skills/design-canvas/kits/react-vite/`：アプリの隣に置かれる Vite のページです。アプリのエイリアス、スタイル、環境変数、Vite プラグインを再利用し、Next.js 専用のモジュールは代替品に置き換えます。
 - `skills/design-canvas/scripts/install.sh`：本体とキットを `<app>/design-canvas/<name>/` にコピーし、検出できるものを自動で設定します。
 - `skills/design-canvas/scripts/update.sh`：既存のキャンバスの本体を、スキルの最新版に更新します。エージェントが既存のキャンバスを使うときに実行するので、古いキャンバスにも新しい機能が入ります。アイテムとキットの設定はそのまま残ります。
+- `skills/design-canvas/scripts/share.sh`：キャンバスを、スクリプト、スタイル、画像、フォント（アプリの public フォルダのファイルも含む）をすべて含む 1 つの HTML ファイルにして、`<canvas>/shared/` に保存します。ツールバーの Share ボタンは、開発サーバーで同じファイルを作ってダウンロードします。
 - `skills/design-canvas/scripts/check-version.sh`：キャンバスのインストール時と更新時に、GitHub 上のこのリポジトリからスキルのバージョン番号を読み取ります。新しいバージョンが出ていれば、エージェントが知らせます。オフにするには `DESIGN_CANVAS_NO_UPDATE_CHECK=1` を設定します。
 - `skills/design-canvas/references/making-a-kit.md`：アプリへの設定を仕上げるためにエージェントが使うチェックリストです。仕上がった設定を `~/.agents/design-canvas-kits/` にプライベートキットとして保存し、次回からは設定なしでインストールする方法も書かれています。
 
-キャンバスはプロトタイプです。共有したいときだけコミットしてください。
+キャンバスはプロトタイプです。チームメンバーが変更する必要があるときだけコミットしてください。試してもらうだけなら、ファイルとして共有できます。
 
 ### 制限
 
 - 本体は React です。ほかのフレームワークでは、エージェントが `shell/TESTING.md` を受け入れ基準として移植します。
 - サーバーコンポーネント、サーバーアクション、サーバー側の秘密情報が必要なものは、キャンバス上で表示できません。代わりに、その下にあるクライアントコンポーネントをプレビューしてください。
 - `viewport` フレームの上では、中ボタンでのパンとタッチのピンチ操作がキャンバスに届きません。
+- 共有ファイルは、その時点のキャンバスのスナップショットです。実行時に組み立てるパス（`/avatars/${id}.png` など）で読み込むファイルは含まれません。アイテム内で import してください。
 
 ### クレジット
 

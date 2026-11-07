@@ -11,8 +11,9 @@ import {
   useRef,
   useState,
 } from "react";
-import { sendToAgent, useAgentStatus } from "./agent";
-import { frameUrl, NAVIGATE_EVENT, postToFrame, readFrameMessage } from "./bridge";
+import { downloadSharedFile, sendToAgent, useAgentStatus } from "./agent";
+import { frameUrl, fromThisCanvas, NAVIGATE_EVENT, postToFrame, readFrameMessage, shared } from "./bridge";
+import { FrameHost } from "./FrameHost";
 import {
   type Annotation,
   fingerprintItem,
@@ -207,6 +208,17 @@ const QueuedIcon = () => (
   </svg>
 );
 
+const ShareIcon = () => (
+  <ToolIcon>
+    <path d="M8 10V2.5M5 5.5l3-3 3 3" />
+    <path d="M4.5 7.5h-1v6h9v-6h-1" />
+  </ToolIcon>
+);
+const CloseIcon = () => (
+  <ToolIcon>
+    <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
+  </ToolIcon>
+);
 const HelpIcon = () => (
   <ToolIcon>
     <circle cx="8" cy="8" r="5.75" />
@@ -620,6 +632,50 @@ function TrashPopover({
   );
 }
 
+/**
+ * After Share downloads the file: its name, any file it could not hold, and the
+ * ways to pass it on. It confirms the download too, so no notice shows.
+ */
+function SharePanel({ file, missing, onClose }: { file: string; missing: string[]; onClose: () => void }) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => closeRef.current?.focus({ preventScroll: true }), []);
+  return (
+    <div
+      className="canvas-share-popover"
+      role="dialog"
+      aria-label={labels.shared(file)}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+      }}
+    >
+      <div className="canvas-share-head">
+        <span className="canvas-share-title">{labels.shared(file)}</span>
+        <button
+          ref={closeRef}
+          type="button"
+          className="canvas-button canvas-icon-button"
+          aria-label={labels.dismiss}
+          onClick={onClose}
+        >
+          <CloseIcon />
+        </button>
+      </div>
+      {missing.length > 0 && <p className="canvas-share-missing">{labels.sharedMissing(missing)}</p>}
+      <ul className="canvas-share-ways">
+        {labels.shareWays.map(([way, how]) => (
+          <li key={way}>
+            <span className="canvas-share-way">{way}</span>
+            <span>{how}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 type Toast = { kind: "copied" | "failed" | "notice"; text: string; action?: { label: string; run: () => void } };
 /**
  * The open annotation, and how it and its item's other annotations were before
@@ -629,16 +685,26 @@ type OpenAnnotation = { id: string; original: Annotation; versions: Map<string, 
 /** The part of Vite's `import.meta.hot` the canvas uses; absent outside the dev server. */
 type HotUpdates = { on(event: string, listener: () => void): void; off?(event: string, listener: () => void): void };
 
-export function Canvas({
-  items,
-  storageKey,
-  theme,
-}: {
+// A shared file has no annotations, so its help leaves out annotate mode.
+const HELP_LINES = shared ? labels.helpLines.filter((line) => line !== labels.annotateHelp) : labels.helpLines;
+
+type CanvasProps = {
   items: CanvasItem[];
   storageKey: string;
   /** The project's themes. Leave out when the project has a single theme. */
   theme?: ThemeStore;
-}) {
+};
+
+/**
+ * The canvas page. A shared file (scripts/share.sh) is one page for everything,
+ * so there it also shows single items and item frames, at ?item=<id>.
+ */
+export function Canvas(props: CanvasProps) {
+  if (shared && new URLSearchParams(window.location.search).has("item")) return <FrameHost {...props} />;
+  return <CanvasBoard {...props} />;
+}
+
+function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const worldRef = useRef<HTMLDivElement>(null);
   const zoomLabelRef = useRef<HTMLSpanElement>(null);
@@ -762,15 +828,35 @@ export function Canvas({
     [announce],
   );
   const notify = useCallback(
-    (text: string, action?: Toast["action"]) => {
+    (text: string, action?: Toast["action"], long = false) => {
       window.clearTimeout(toastTimer.current);
       setToast({ kind: "notice", text, action });
       announce(text);
-      // A notice with an action stays long enough to reach the button.
-      toastTimer.current = window.setTimeout(() => setToast(null), action ? TOAST_ACTION_MS : TOAST_MS);
+      // A notice with an action, or a long one, stays long enough to read and reach.
+      toastTimer.current = window.setTimeout(() => setToast(null), action || long ? TOAST_ACTION_MS : TOAST_MS);
     },
     [announce],
   );
+  // Share: the dev server builds the canvas into one HTML file and the browser downloads it.
+  const [sharing, setSharing] = useState(false);
+  const [sharedFile, setSharedFile] = useState<{ name: string; missing: string[] } | null>(null);
+  const shareButtonRef = useRef<HTMLButtonElement>(null);
+  const share = useCallback(async () => {
+    setSharing(true);
+    try {
+      const file = await downloadSharedFile();
+      // The panel opens where notices and the trash show.
+      window.clearTimeout(toastTimer.current);
+      setToast(null);
+      setTrashOpen(false);
+      setSharedFile(file);
+    } catch (error) {
+      const reason = (error instanceof Error ? error.message : String(error)).split("\n")[0].slice(0, 160);
+      notify(labels.shareFailed(reason), undefined, true);
+    } finally {
+      setSharing(false);
+    }
+  }, [notify]);
   useEffect(() => () => window.clearTimeout(toastTimer.current), []);
 
   // Annotations. Annotate mode turns clicks in previews into numbered pins. The
@@ -778,14 +864,17 @@ export function Canvas({
   // message and marks them sent; a sent one leaves once its item renders
   // differently after a code update. The open annotation's text is live state,
   // so switching elements never loses typing.
-  const [annotations, setAnnotations] = useState<Annotation[]>(() => loadAnnotations(storageKey, ids));
+  // A shared file has no annotation tools, so it neither shows nor stores any.
+  const [annotations, setAnnotations] = useState<Annotation[]>(() => (shared ? [] : loadAnnotations(storageKey, ids)));
   const annotationsRef = useRef(annotations);
   annotationsRef.current = annotations;
   const [openAnnotation, setOpenAnnotation] = useState<OpenAnnotation | null>(null);
   const openRef = useRef(openAnnotation);
   const [annotating, setAnnotating] = useState(false);
   const annotatingRef = useRef(false);
-  useEffect(() => saveAnnotations(storageKey, annotations), [annotations, storageKey]);
+  useEffect(() => {
+    if (!shared) saveAnnotations(storageKey, annotations);
+  }, [annotations, storageKey]);
   // Annotations on trashed items wait, unseen and unsent, until it is put back.
   const visibleAnnotations = useMemo(() => annotations.filter((a) => shownIds.has(a.itemId)), [annotations, shownIds]);
   // Pins number the next message: unsent annotations in order. Sent ones show a
@@ -1275,6 +1364,21 @@ export function Canvas({
     },
     [closeAnnotation, notify, putBack, setTrash],
   );
+  const closeSharePanel = useCallback(() => {
+    setSharedFile(null);
+    shareButtonRef.current?.focus({ preventScroll: true });
+  }, []);
+  // Like the trash, the share panel closes on a press outside it.
+  useEffect(() => {
+    if (!sharedFile) return;
+    const onDown = (event: PointerEvent) => {
+      if (event.target instanceof Element && event.target.closest(".canvas-share-popover, .canvas-share-button")) return;
+      setSharedFile(null);
+    };
+    window.addEventListener("pointerdown", onDown, true);
+    return () => window.removeEventListener("pointerdown", onDown, true);
+  }, [sharedFile]);
+
   const closeTrash = useCallback(() => {
     setTrashOpen(false);
     trashButtonRef.current?.focus({ preventScroll: true });
@@ -1645,7 +1749,7 @@ export function Canvas({
         event.target === viewport ||
         event.target === document.body ||
         (event.target instanceof Element && event.target.closest(".canvas-toolbar, .canvas-pin-bubble") !== null);
-      if (plain && canvasFocus && (event.key === "a" || event.key === "A") && !event.repeat) {
+      if (!shared && plain && canvasFocus && (event.key === "a" || event.key === "A") && !event.repeat) {
         event.preventDefault();
         setAnnotateMode(!annotatingRef.current);
         if (annotatingRef.current && pointer.x >= 0) showPick(document.elementFromPoint(pointer.x, pointer.y));
@@ -1704,7 +1808,7 @@ export function Canvas({
 
     // Item frames forward the gestures and picks they receive.
     const onMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) return;
+      if (!fromThisCanvas(event)) return;
       const message = readFrameMessage(event.data);
       if (!message) return;
       const frameElement = [...world.querySelectorAll<HTMLIFrameElement>("iframe[data-canvas-frame]")].find(
@@ -2001,44 +2105,53 @@ export function Canvas({
           <FitIcon />
           {labels.fitAll}
         </button>
-        <button type="button" className="canvas-button" onClick={resetCamera}>
-          <ResetIcon />
-          {labels.resetCamera}
-        </button>
-        <span className="canvas-separator" aria-hidden="true" />
         <button
           type="button"
-          className="canvas-button"
-          aria-pressed={annotating}
-          data-tip={labels.annotateHint}
-          onClick={() => setAnnotateMode(!annotatingRef.current)}
+          className="canvas-button canvas-icon-button"
+          aria-label={labels.resetCamera}
+          data-tip={labels.resetCamera}
+          onClick={resetCamera}
         >
-          <AnnotateIcon />
-          {labels.annotate}
+          <ResetIcon />
         </button>
-        {agentHandling && (
-          <span className="canvas-agent-status">
-            <span className="canvas-agent-dot" aria-hidden="true" />
-            {labels.agentWorking}
-          </span>
-        )}
-        {unsentCount > 0 && (
-          <button type="button" className="canvas-button canvas-button-primary" onClick={() => void sendAnnotations()}>
-            {agentOn ? <SendIcon /> : <CopyIcon />}
-            {agentOn ? labels.sendAnnotations(unsentCount) : labels.copyAnnotations(unsentCount)}
-          </button>
-        )}
-        {visibleAnnotations.some((a) => a.text.trim()) && (
+        {!shared && (
           <>
+            <span className="canvas-separator" aria-hidden="true" />
             <button
               type="button"
-              className="canvas-button canvas-icon-button"
-              aria-label={labels.clearAnnotations}
-              data-tip={labels.clearAnnotations}
-              onClick={clearAnnotations}
+              className="canvas-button"
+              aria-pressed={annotating}
+              data-tip={labels.annotateHint}
+              onClick={() => setAnnotateMode(!annotatingRef.current)}
             >
-              <EraserIcon />
+              <AnnotateIcon />
+              {labels.annotate}
             </button>
+            {agentHandling && (
+              <span className="canvas-agent-status">
+                <span className="canvas-agent-dot" aria-hidden="true" />
+                {labels.agentWorking}
+              </span>
+            )}
+            {unsentCount > 0 && (
+              <button type="button" className="canvas-button canvas-button-primary" onClick={() => void sendAnnotations()}>
+                {agentOn ? <SendIcon /> : <CopyIcon />}
+                {agentOn ? labels.sendAnnotations(unsentCount) : labels.copyAnnotations(unsentCount)}
+              </button>
+            )}
+            {visibleAnnotations.some((a) => a.text.trim()) && (
+              <>
+                <button
+                  type="button"
+                  className="canvas-button canvas-icon-button"
+                  aria-label={labels.clearAnnotations}
+                  data-tip={labels.clearAnnotations}
+                  onClick={clearAnnotations}
+                >
+                  <EraserIcon />
+                </button>
+              </>
+            )}
           </>
         )}
         <span className="canvas-separator" aria-hidden="true" />
@@ -2053,8 +2166,9 @@ export function Canvas({
               aria-controls={trashOpen ? "canvas-trash" : undefined}
               data-tip={labels.trashHeading}
               onClick={() => {
-                // The trash opens where notices show.
+                // The trash opens where notices and the share panel show.
                 setToast(null);
+                setSharedFile(null);
                 setTrashOpen((open) => !open);
               }}
             >
@@ -2087,6 +2201,24 @@ export function Canvas({
             <span className="canvas-separator" aria-hidden="true" />
           </>
         )}
+        {!shared && (
+          <>
+            {/* While the file builds, the icon pulses and the button takes no second click. */}
+            <button
+              ref={shareButtonRef}
+              type="button"
+              className="canvas-button canvas-icon-button canvas-share-button"
+              disabled={sharing}
+              aria-busy={sharing}
+              aria-label={sharing ? labels.sharing : labels.share}
+              data-tip={sharing ? labels.sharing : labels.share}
+              onClick={() => void share()}
+            >
+              <ShareIcon />
+            </button>
+            <span className="canvas-separator" aria-hidden="true" />
+          </>
+        )}
         {/* Instructions stay one hover or focus away instead of filling the toolbar. */}
         <span className="canvas-help">
           <button
@@ -2098,12 +2230,13 @@ export function Canvas({
             <HelpIcon />
           </button>
           <span id="canvas-help" role="tooltip" className="canvas-help-popover">
-            {labels.helpLines.map((line) => (
+            {HELP_LINES.map((line) => (
               <span key={line}>{line}</span>
             ))}
           </span>
         </span>
       </div>
+      {sharedFile && <SharePanel file={sharedFile.name} missing={sharedFile.missing} onClose={closeSharePanel} />}
       {trashOpen && (
         <TrashPopover
           items={trashedItems}

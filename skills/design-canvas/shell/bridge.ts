@@ -1,6 +1,14 @@
 // Messages from an item frame to the canvas page. Frames are same-origin
 // pages of this canvas; the page checks origin, source, and every field.
 
+/**
+ * A canvas that scripts/share.sh built into one HTML file marks its root
+ * element. The file has no frame.html, so item frames load the file itself
+ * with ?item=, and the annotation tools, which need the agent and the dev
+ * server, are hidden.
+ */
+export const shared = document.documentElement.dataset.designCanvas === "shared";
+
 export const FRAME_PAGE = "frame.html";
 
 /**
@@ -10,9 +18,20 @@ export const FRAME_PAGE = "frame.html";
 export type FrameContext = "canvas" | "page";
 
 export const frameUrl = (id: string, context?: FrameContext) =>
-  `${FRAME_PAGE}?item=${encodeURIComponent(id)}${context ? `&in=${context}` : ""}`;
+  `${shared ? "" : FRAME_PAGE}?item=${encodeURIComponent(id)}${context ? `&in=${context}` : ""}`;
 
 const SOURCE = "design-canvas";
+
+// Opened from disk, as a shared file usually is, every file is its own opaque
+// origin, so a frame's messages to "file://" are dropped. There, both sides
+// address each other with "*" and rely on event.source, which every listener
+// already checks, instead of the origin.
+const fromDisk = window.location.protocol === "file:";
+const messageTarget = fromDisk ? "*" : window.location.origin;
+
+/** Whether a message comes from a page of this canvas. Listeners also check event.source. */
+export const fromThisCanvas = (event: MessageEvent) =>
+  fromDisk ? event.origin === "null" || event.origin === "file://" : event.origin === window.location.origin;
 const MAX_LABEL = 200;
 const MAX_HREF = 2000;
 
@@ -30,7 +49,7 @@ export type FrameMessage =
   | { type: "escape" };
 
 export function postToCanvas(message: FrameMessage) {
-  window.parent.postMessage({ source: SOURCE, ...message }, window.location.origin);
+  window.parent.postMessage({ source: SOURCE, ...message }, messageTarget);
 }
 
 const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
@@ -67,7 +86,7 @@ export type CanvasMessage =
   | { type: "annotate-mode"; on: boolean };
 
 export function postToFrame(frame: Window, message: CanvasMessage) {
-  frame.postMessage({ source: SOURCE, ...message }, window.location.origin);
+  frame.postMessage({ source: SOURCE, ...message }, messageTarget);
 }
 
 export function readCanvasMessage(data: unknown): CanvasMessage | undefined {

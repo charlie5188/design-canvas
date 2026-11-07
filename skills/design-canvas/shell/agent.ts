@@ -1,8 +1,9 @@
 // The page's side of the agent channel (agent-channel.ts): whether an agent is
-// listening or handling the person's notes, and sending it a message.
+// listening or handling the person's notes, sending it a message, and
+// downloading the canvas as a shared file.
 
 import { useEffect, useRef, useState } from "react";
-import { AGENT_EVENT, AGENT_PATH, type AgentState, type AgentStatus } from "./agent-channel";
+import { AGENT_EVENT, AGENT_PATH, type AgentState, type AgentStatus, SHARE_PATH, type SharedFile } from "./agent-channel";
 
 export type { AgentState, AgentStatus };
 
@@ -83,4 +84,23 @@ export async function sendToAgent(text: string): Promise<{ delivered: boolean; s
   } catch {
     return { delivered: false, state: "off" };
   }
+}
+
+/**
+ * Has the dev server build the canvas into one HTML file and downloads it.
+ * Rejects with the server's reason when the build fails.
+ */
+export async function downloadSharedFile(): Promise<{ name: string; missing: string[] }> {
+  const response = await fetch(SHARE_PATH, { method: "POST" });
+  // A canvas whose vite.config lacks agentChannel() has no such endpoint.
+  if (!response.ok) throw new Error(response.status === 404 ? "the canvas's vite config lacks agentChannel()" : await response.text());
+  const file = (await response.json()) as SharedFile;
+  const url = URL.createObjectURL(new Blob([file.html], { type: "text/html" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = file.name;
+  link.click();
+  // The download has started from the object URL by the next task.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+  return { name: file.name, missing: file.missing };
 }

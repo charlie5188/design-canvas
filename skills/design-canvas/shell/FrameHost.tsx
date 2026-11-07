@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
-import { frameUrl, NAVIGATE_EVENT, postToCanvas, readCanvasMessage } from "./bridge";
+import { frameUrl, fromThisCanvas, NAVIGATE_EVENT, postToCanvas, readCanvasMessage } from "./bridge";
 import { describeElement, isEditable, nestedCanScroll, pickElement, previewLink, wheelPixels } from "./dom";
 import { labels } from "./labels";
 import { loadTheme } from "./layout";
@@ -42,7 +42,7 @@ export function FrameHost({
   useEffect(() => {
     if (!inCanvas || !theme) return;
     const onMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin || event.source !== window.parent) return;
+      if (!fromThisCanvas(event) || event.source !== window.parent) return;
       const message = readCanvasMessage(event.data);
       if (message?.type === "theme") theme.set(message.id);
     };
@@ -123,7 +123,7 @@ export function FrameHost({
       else postToCanvas({ type: "annotate", label, x: event.clientX, y: event.clientY });
     };
     const onCanvasMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin || event.source !== window.parent) return;
+      if (!fromThisCanvas(event) || event.source !== window.parent) return;
       const message = readCanvasMessage(event.data);
       if (message?.type !== "annotate-mode") return;
       annotating = message.on;

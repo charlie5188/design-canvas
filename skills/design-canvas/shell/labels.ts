@@ -1,16 +1,20 @@
 // Canvas chrome copy. Edit here to change the language of the controls.
+const ANNOTATE_HELP = "Press A to annotate several elements, then send or copy them all at once";
+
 export const labels = {
   region: "Design canvas",
   toolbar: "Canvas view",
   theme: "Theme",
   help: "Canvas controls",
+  /** The help line a shared file leaves out, since it has no annotations. */
+  annotateHelp: ANNOTATE_HELP,
   helpLines: [
     "Drag empty space to pan",
     "Drag an item's name or grip to move it",
     "⌘/Ctrl + scroll or pinch to zoom",
     "Hold Space or the middle button and drag to pan anywhere",
     "Hold ⌥/Alt and click an element to copy a reference to it",
-    "Press A to annotate several elements, then send or copy them all at once",
+    ANNOTATE_HELP,
     "Hover an item's name to open it alone or move it to the trash",
     "With the canvas focused: arrow keys pan, + and − zoom, 0 resets, 1 fits all",
   ],
@@ -19,7 +23,7 @@ export const labels = {
   zoomIn: "Zoom in",
   zoomOut: "Zoom out",
   fitAll: "Fit all",
-  resetCamera: "Reset",
+  resetCamera: "Reset view (actual size)",
   copyNameHint: "Click to copy · drag to move",
   openAlone: (name: string) => `Open ${name} in a new tab`,
   openAloneHint: "Open in new tab",
@@ -61,6 +65,19 @@ export const labels = {
   agentGoneCopied: (n: number) => `The agent stopped listening. Copied ${n} annotation${n === 1 ? "" : "s"} instead.`,
   /** In the toolbar while the agent handles the notes it was sent. */
   agentWorking: "Agent working",
+  share: "Share as an HTML file",
+  sharing: "Preparing the file…",
+  shared: (file: string) => `Downloaded ${file}`,
+  /** The first two files the shared file could not hold, and how many more. */
+  sharedMissing: (missing: string[]) =>
+    `Missing from the file: ${missing.slice(0, 2).join(", ")}${missing.length > 2 ? ` and ${missing.length - 2} more` : ""}`,
+  /** After a download: each way to pass the file on, and how. */
+  shareWays: [
+    ["Open", "Double-click it. No setup needed."],
+    ["Send", "Like any file: Slack, email, or Drive."],
+    ["Figma", "Drag it onto a canvas, then press play. Full screen works too."],
+  ] as const,
+  shareFailed: (reason: string) => `Couldn't make the file: ${reason}`,
   agentFinished: "The agent finished",
   agentGoneQueued: (n: number) => `The agent stopped listening, so ${n} annotation${n === 1 ? " wasn't" : "s weren't"} sent`,
   clearAnnotations: "Clear annotations",

@@ -26,6 +26,7 @@ body,
 .canvas-toolbar,
 .canvas-toast,
 .canvas-trash-popover,
+.canvas-share-popover,
 .canvas-frame-missing {
   font-family: var(--canvas-font, system-ui, -apple-system, "Segoe UI", sans-serif);
 }
@@ -262,6 +263,14 @@ body,
   white-space: nowrap;
   cursor: default;
 }
+/* Share while the file builds: dimmed, its icon pulses, and it takes no second click. */
+.canvas-button:disabled {
+  color: var(--canvas-subtle-color);
+  cursor: progress;
+}
+.canvas-button[aria-busy="true"] svg {
+  animation: canvas-agent-pulse 1.4s ease-in-out infinite;
+}
 .canvas-icon-button {
   justify-content: center;
   inline-size: 30px;
@@ -345,7 +354,8 @@ body,
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .canvas-agent-dot {
+  .canvas-agent-dot,
+  .canvas-button[aria-busy="true"] svg {
     animation: none;
   }
 }
@@ -673,4 +683,55 @@ html[data-canvas-annotating] .canvas-frame-root * {
   .canvas-trash-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+
+/* After Share: the file's name and the ways to pass it on, where the trash opens. */
+.canvas-share-popover {
+  position: fixed;
+  inset-block-end: 64px;
+  inset-inline-start: 50%;
+  translate: -50% 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-sizing: border-box;
+  inline-size: min(400px, calc(100vw - 32px));
+  padding: 10px 10px 14px 16px;
+  border: 1px solid var(--canvas-border-color);
+  border-radius: 12px;
+  background: var(--canvas-surface-color);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 14%);
+  color: var(--canvas-text-color);
+}
+.canvas-share-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.canvas-share-title {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.canvas-share-missing {
+  margin: 0;
+  color: var(--canvas-subtle-color);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.canvas-share-ways {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.canvas-share-ways li {
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  gap: 8px;
+  line-height: 1.4;
+}
+.canvas-share-way {
+  color: var(--canvas-subtle-color);
 }
