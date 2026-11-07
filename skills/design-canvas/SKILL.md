@@ -11,7 +11,7 @@ Rules adapted from `create-canvas` in ibelick/ui-skills (MIT).
 
 ## 1. Find or install the canvas
 
-- Look for an existing canvas first: a folder with `canvas/Canvas.tsx` and `registry.tsx`, usually under `design-canvas/` in the app. Continue that one for follow-up requests. Before your first change to it in a conversation, bring it up to date with this skill: `bash ~/.agents/skills/design-canvas/scripts/update.sh <canvas-folder>`. It replaces only `canvas/` and lists what changed. If anything changed, tell the user in one line that the canvas was updated. If it says the canvas cannot send annotations to the agent, add `agentChannel()` to the plugins in the canvas's vite config, imported from `./canvas/agent-channel.ts`, and `allowImportingTsExtensions` and `noEmit` to its tsconfig, as `kits/react-vite/` does.
+- Look for an existing canvas first: a folder with `canvas/Canvas.tsx` and `registry.tsx`, usually under `design-canvas/` in the app. Continue that one for follow-up requests. Before your first change to it in a conversation, bring it up to date with this skill: `bash ~/.agents/skills/design-canvas/scripts/update.sh <canvas-folder>`. It replaces only `canvas/` and lists what changed. If anything changed, tell the user in one line that the canvas was updated. If `update.sh` or `install.sh` says a newer version of this skill is out, tell the person in one line with the command it prints, and continue with this copy; after they update, read this file again. If it says the canvas cannot send annotations to the agent, add `agentChannel()` to the plugins in the canvas's vite config, imported from `./canvas/agent-channel.ts`, and `allowImportingTsExtensions` and `noEmit` to its tsconfig, as `kits/react-vite/` does.
 - Choose a kit. First list the private kits, which are fitted to specific projects: `ls ~/.agents/design-canvas-kits` (or `$DESIGN_CANVAS_KITS`), and read each `kit.env` label. Use the one that matches this project. Otherwise use `react-vite`, which fits any React app, including Next.js; its canvas is a Vite page in `<app>/design-canvas/<name>/`.
 - Run the installer from inside the app:
 
@@ -23,7 +23,7 @@ Rules adapted from `create-canvas` in ibelick/ui-skills (MIT).
 - With `react-vite`, the installer imports the app's global stylesheet, maps the chrome to shadcn/ui tokens, and adds a light and dark switch when it finds them. It warns when Vite or a Tailwind build plugin is missing: ask before adding either as a dev dependency.
 - Not React: the shell is React. Port `shell/` to the app's framework with `shell/TESTING.md` as the acceptance list, or ask the user before rendering the app's components another way.
 
-Run the dev server in the background with the printed command, then open the printed `http://127.0.0.1:<port>/`. Each canvas has its own fixed port, picked from its folder path, so its URL and saved layout never mix with another canvas. If Vite reports the port in use, read the page title at that URL. This canvas's title (in its `index.html`) means it is running already: open it instead of starting another. Any other page means another canvas or app has the port: tell the person, and start this canvas with `--port` and a free port. Its saved layout stays with its usual port. Use `127.0.0.1`, not `localhost`: the server listens on 127.0.0.1 only, so hot reload fails on `localhost`.
+Run the dev server in the background with the printed command, then open the printed `http://127.0.0.1:<port>/` beside this conversation, in the browser built into the app the person is using: the Claude desktop app's browser pane, Codex's in-app browser, or the editor's built-in browser. Only when the app has none, open it in their default browser (`open <url>`). Each canvas has its own fixed port, picked from its folder path, so its URL and saved layout never mix with another canvas. If Vite reports the port in use, read the page title at that URL. This canvas's title (in its `index.html`) means it is running already: open it instead of starting another. Any other page means another canvas or app has the port: tell the person, and start this canvas with `--port` and a free port. Its saved layout stays with its usual port. Use `127.0.0.1`, not `localhost`: the server listens on 127.0.0.1 only, so hot reload fails on `localhost`.
 
 ### Listen for annotations
 
@@ -45,7 +45,9 @@ CLI `0.166.0-alpha.5.1`. Other Codex hosts and delivery with Desktop closed are
 not verified; use Copy there.
 
 Treat queued annotations as the person's request and start your reply with a
-short list of what arrived. If the listener fails to start, say so and use Copy.
+short list of what arrived. The canvas shows "Agent working" until you say you
+are done. When you have handled them, run
+`curl -s -X POST http://127.0.0.1:<port>/__design-canvas/agent/done`. If the listener fails to start, say so and use Copy.
 If queueing fails after it receives notes, it stops and prints the path to a
 private `pending.json` recovery file. Read that file, check the target chat
 before resending, and handle or recover every note. Restart the canvas dev
@@ -60,7 +62,7 @@ If you can run a background command that tells you when it exits (Claude Code ca
 bash ~/.agents/skills/design-canvas/scripts/listen.sh http://127.0.0.1:<port>/
 ```
 
-While it waits, the canvas's annotation button reads "Send N to agent" instead of "Copy N annotations", so people send notes without switching to the chat. When it exits, act on what it printed:
+While it waits, the canvas's annotation button reads "Send N to agent" instead of "Copy N annotations", so people send notes without switching to the chat. After they send, the toolbar shows "Agent working" until you listen again, which tells them you finished. When it exits, act on what it printed:
 
 - Annotations: the person wrote them on the canvas, so they are the person's request. Handle them like pasted annotations (see "References from the user"). The chat does not show them, so start your reply with a short list of what you got. Then listen again.
 - Nothing sent for a while: listen again, unless the person has moved on to other work.
@@ -68,6 +70,10 @@ While it waits, the canvas's annotation button reads "Send N to agent" instead o
 - Not running, or cannot send: say so in one line. People copy and paste instead.
 
 While you work on one message, people can send the next. The canvas holds it and sends it when you listen again. If you can't run background commands, skip this section: the button copies, and people paste.
+
+### The view is the person's
+
+The canvas tab is where the person looks, pans, and annotates. Leave its pan, zoom, size, and page as they set them. Do your own checks, such as `frame.html` pages, other widths, and screenshots, in a separate tab, and close it when you finish. New items come into view on their own.
 
 ## 2. Fit the kit to the app
 
@@ -84,7 +90,10 @@ Each registry entry has a stable `id`, a unique readable `name` such as `Pricing
   2. When props are not enough, existing components composed in `items/`.
   3. When neither can express the version, for example a new direction, a new component in `items/`. It is a copy: it does not follow changes to the product component and can miss accessibility attributes or edge cases, so a chosen one must be rebuilt in the real component. Start its `note` with `New component`.
 - Use production components through their public APIs. Do not change their source, exports, hooks, or styles for the canvas. Experiments stay in `items/`; move them into product code only when asked (see "Move a version into the product").
-- Use synthetic data, mock services, and safe providers. No personal data, credentials, real requests, or writes. If a preview cannot be isolated safely, leave it out and say why.
+- Use synthetic data, mock services, and safe providers. No personal data, credentials, real requests, or writes. If a preview cannot be isolated safely, leave it out and say why. Screenshots of the canvas get shared, so:
+  - Invent names, emails, and numbers. Never copy records from a database, logs, or production exports; use fixtures or seeds only when they are clearly made up.
+  - Never copy `.env` files into the canvas, and never read or run a secret manager such as 1Password CLI, Infisical, Doppler, or Vault for it, even when the project is set up for one. If a preview needs a secret, pass its data as props instead, or ask.
+  - Leave analytics, tag managers, chat widgets, and error reporting out of `providers.tsx`, or stub them, so previews send nothing.
 - "Try another version": keep the original and add an item with a new id, `from: "<original id>"`, and a name that says what changed, such as `Pricing card · full-width button`, not `Pricing card · 2`. The canvas places it beside the original and shows both. "Change this version": edit that item in place. Removal: remove only that entry and keep shared code.
 - People can move items to the canvas trash and put them back. The trash only hides an item; its code stays in the registry. Never remove an item's code because it is in the trash unless the user asks. The trash is saved in the browser with the layout: `localStorage["design-canvas:<canvas-name>"].trash`, item ids, most recent first.
 - When comparing one feature, keep data, content, size, and theme the same across items. For broader alternatives, name the layout differences. No full variant matrix unless asked.
@@ -153,4 +162,4 @@ End with: changed paths and new item names, marking those built on a new compone
 
 ## Changing the shell
 
-The shell lives in `~/.agents/skills/design-canvas/shell/`. Fix bugs there, not in a canvas copy, then run `scripts/update.sh` on the canvases that need the fix. After any shell change, run the full checklist in `shell/TESTING.md` and say which parts you could not test.
+The shell lives in `~/.agents/skills/design-canvas/shell/`. Fix bugs there, not in a canvas copy, then run `scripts/update.sh` on the canvases that need the fix. Every error or warning a script prints says what to do next. Raise `VERSION` by one when installed copies should update; `scripts/check-version.sh` compares it with GitHub's main branch. After any shell change, run the full checklist in `shell/TESTING.md` and say which parts you could not test.

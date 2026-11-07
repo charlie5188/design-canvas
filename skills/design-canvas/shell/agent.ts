@@ -1,10 +1,10 @@
 // The page's side of the agent channel (agent-channel.ts): whether an agent is
-// listening, and sending it a message.
+// listening or handling the person's notes, and sending it a message.
 
-import { useEffect, useState } from "react";
-import { AGENT_EVENT, AGENT_PATH, type AgentState } from "./agent-channel";
+import { useEffect, useRef, useState } from "react";
+import { AGENT_EVENT, AGENT_PATH, type AgentState, type AgentStatus } from "./agent-channel";
 
-export type { AgentState };
+export type { AgentState, AgentStatus };
 
 /** The part of Vite's `import.meta.hot` this uses; absent outside the dev server. */
 type HotChannel = {
@@ -16,25 +16,39 @@ const readState = (data: unknown): AgentState => {
   const state = (data as { state?: unknown } | null)?.state;
   return state === "listening" || state === "working" ? state : "off";
 };
+const readStatus = (data: unknown): AgentStatus => {
+  const state = readState(data);
+  const { handling, finished } = (data ?? {}) as { handling?: unknown; finished?: unknown };
+  return { state, handling: state !== "off" && handling === true, finished: finished === true };
+};
 
 /**
- * The agent's state, kept current by the dev server. Undefined until known, so
- * nothing acts on a default "off" before the first answer.
+ * The agent's state, kept current by the dev server. `state` is undefined until
+ * known, so nothing acts on a default "off" before the first answer.
+ * `onFinished` runs when the agent says it is done with the notes it had.
  */
-export function useAgentState(): AgentState | undefined {
-  const [state, setState] = useState<AgentState>();
+export function useAgentStatus(onFinished?: () => void): { state: AgentState | undefined; handling: boolean } {
+  const [status, setStatus] = useState<{ state: AgentState | undefined; handling: boolean }>({
+    state: undefined,
+    handling: false,
+  });
+  const finishedRef = useRef(onFinished);
+  finishedRef.current = onFinished;
   useEffect(() => {
     const hot = (import.meta as ImportMeta & { hot?: HotChannel }).hot;
     // A build has no dev server, so no agent.
     if (!hot) {
-      setState("off");
+      setStatus({ state: "off", handling: false });
       return;
     }
     let live = true;
     let pushed = false;
     const onPush = (data: unknown) => {
       pushed = true;
-      if (live) setState(readState(data));
+      if (!live) return;
+      const next = readStatus(data);
+      setStatus({ state: next.state, handling: next.handling });
+      if (next.finished) finishedRef.current?.();
     };
     // A stopped dev server sends nothing more; the page reloads once it is back.
     const onDisconnect = () => onPush(null);
@@ -43,9 +57,9 @@ export function useAgentState(): AgentState | undefined {
     // A canvas whose vite.config lacks agentChannel() answers with its page, which reads as "off".
     fetch(AGENT_PATH)
       .then((response) => response.json())
-      .then(readState, () => "off" as const)
+      .then(readStatus, () => readStatus(null))
       .then((initial) => {
-        if (live && !pushed) setState(initial);
+        if (live && !pushed) setStatus({ state: initial.state, handling: initial.handling });
       });
     return () => {
       live = false;
@@ -53,7 +67,7 @@ export function useAgentState(): AgentState | undefined {
       hot.off?.("vite:ws:disconnect", onDisconnect);
     };
   }, []);
-  return state;
+  return status;
 }
 
 /** Hands a message to the listening agent. Not delivered: nobody listened, and `state` says why. */

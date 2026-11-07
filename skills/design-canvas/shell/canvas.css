@@ -322,6 +322,33 @@ body,
   font-variant-numeric: tabular-nums;
   font-size: 13px;
 }
+/* The agent has the person's notes. Quiet, so it never competes with Send. */
+.canvas-agent-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-block-size: 30px;
+  padding: 0 10px;
+  color: var(--canvas-subtle-color);
+  white-space: nowrap;
+}
+.canvas-agent-dot {
+  inline-size: 6px;
+  block-size: 6px;
+  border-radius: 50%;
+  background: var(--canvas-focus-color);
+  animation: canvas-agent-pulse 1.4s ease-in-out infinite;
+}
+@keyframes canvas-agent-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .canvas-agent-dot {
+    animation: none;
+  }
+}
 .canvas-live {
   position: absolute;
   inline-size: 1px;
@@ -368,6 +395,12 @@ body,
   }
   .canvas-toolbar .canvas-zoom {
     min-inline-size: 36px;
+  }
+  /* Only the dot stays; its label still reaches screen readers. */
+  .canvas-toolbar .canvas-agent-status {
+    padding: 0 8px;
+    font-size: 0;
+    gap: 0;
   }
 }
 /* Annotations. In annotate mode previews take a crosshair and stop reacting;

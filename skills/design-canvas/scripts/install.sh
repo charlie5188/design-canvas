@@ -18,7 +18,7 @@ title="${3:-$name}"
 # Most machines have no private kits folder; a failing ls would end the script under pipefail.
 kits="$( (ls "$skill_dir/kits"; ls "$private_kits" 2>/dev/null || true) | sort -u | tr '\n' ' ')"
 [[ -n "$kit" && -n "$name" ]] || die "usage: install.sh <kit> <canvas-name> [title]  (kits: $kits)"
-[[ "$name" =~ ^[a-z0-9][a-z0-9-]{0,47}$ ]] || die "canvas name must be lowercase kebab-case, up to 48 characters"
+[[ "$name" =~ ^[a-z0-9][a-z0-9-]{0,47}$ ]] || die "canvas name must be lowercase kebab-case, up to 48 characters, such as pricing-card"
 
 kit_dir="$private_kits/$kit"
 [[ -f "$kit_dir/kit.env" ]] || kit_dir="$skill_dir/kits/$kit"
@@ -73,3 +73,4 @@ Run from $app:
   $run
 Then open http://127.0.0.1:$port/
 EOF
+bash "$skill_dir/scripts/check-version.sh" || true

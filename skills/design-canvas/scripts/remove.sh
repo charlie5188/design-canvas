@@ -10,7 +10,7 @@ die() { echo "design-canvas: $*" >&2; exit 1; }
 kit="${1:-}"
 name="${2:-}"
 [[ -n "$kit" && -n "$name" ]] || die "usage: remove.sh <kit> <canvas-name>"
-[[ "$name" =~ ^[a-z0-9][a-z0-9-]{0,47}$ ]] || die "invalid canvas name"
+[[ "$name" =~ ^[a-z0-9][a-z0-9-]{0,47}$ ]] || die "canvas name must be lowercase kebab-case, such as pricing-card"
 kit_dir="$private_kits/$kit"
 [[ -f "$kit_dir/kit.env" ]] || kit_dir="$skill_dir/kits/$kit"
 [[ -f "$kit_dir/kit.env" ]] || die "unknown kit '$kit'"
@@ -26,6 +26,6 @@ else
 fi
 
 dest="$app/$KIT_PARENT/$name"
-[[ -f "$dest/canvas/Canvas.tsx" ]] || die "$dest is not a design canvas"
+[[ -f "$dest/canvas/Canvas.tsx" ]] || die "$dest is not a design canvas; check the kit and canvas name against the folders in $(dirname "$dest")"
 rm -rf "$dest"
 echo "Removed $dest"

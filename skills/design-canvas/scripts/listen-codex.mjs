@@ -58,7 +58,9 @@ async function main() {
         }
         if (!status.ok) throw new Error(`Canvas status returned HTTP ${status.status}.`);
         await status.body?.cancel();
-        return await get(`/listen?timeout=${wait}`, (wait + 60) * 1000);
+        // keep=1: this listener reconnects right after queueing, which is not the
+        // agent saying it is done; the agent says that with POST /done.
+        return await get(`/listen?timeout=${wait}&keep=1`, (wait + 60) * 1000);
       } catch (error) {
         if (shutdown.signal.aborted) return null;
         // Only retry dropped connections, as listen.sh does on a Vite restart.
