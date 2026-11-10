@@ -16,7 +16,7 @@ const ARRAY: Record<DirectKind, string> = { note: "notes", section: "sections", 
 const FIELDS: Record<DirectKind, Record<string, "number" | "string">> = {
   note: { x: "number", y: "number", width: "number", height: "number", text: "string" },
   section: { x: "number", y: "number", width: "number", height: "number", title: "string" },
-  item: { x: "number", y: "number", note: "string" },
+  item: { x: "number", y: "number", width: "number", height: "number", note: "string" },
 };
 const COORD_LIMIT = 100_000;
 const MAX_TEXT = 1000;

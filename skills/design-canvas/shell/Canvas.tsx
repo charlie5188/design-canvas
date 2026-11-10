@@ -586,6 +586,7 @@ function CanvasItemView({
   onFront,
   onTitlePointerDown,
   onHandleKey,
+  onResize,
   announce,
   pins,
   openAnnotation,
@@ -605,6 +606,8 @@ function CanvasItemView({
   onFront: (id: string) => void;
   onTitlePointerDown: (event: ReactPointerEvent<HTMLElement>, item: CanvasItem) => void;
   onHandleKey: (item: CanvasItem, dx: number, dy: number) => void;
+  /** Absent where nothing can be saved or while annotating. */
+  onResize?: (event: ReactPointerEvent<HTMLElement>, item: CanvasItem, corner: Corner) => void;
   announce: (text: string) => void;
   /** This item's annotations with their list numbers. */
   pins: { annotation: Annotation; number?: number }[];
@@ -693,6 +696,16 @@ function CanvasItemView({
         >
           {item.viewport ? <ItemFrame item={item} /> : <Preview component={item.component} />}
         </div>
+        {onResize &&
+          (["nw", "ne", "sw", "se"] as const).map((corner) => (
+            <span
+              key={corner}
+              className="canvas-resize canvas-item-resize"
+              data-corner={corner}
+              aria-hidden="true"
+              onPointerDown={(event) => onResize(event, item, corner)}
+            />
+          ))}
         {pins.length > 0 && (
           <div className="canvas-pins">
             {pins.map(({ annotation, number }) => (
@@ -904,7 +917,28 @@ export function Canvas(props: CanvasProps) {
 }
 
 function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: sectionsProp = NO_SECTIONS, storageKey, theme }: CanvasProps) {
-  const items = useStableList(itemsProp);
+  const itemsRaw = useStableList(itemsProp);
+  // A resize shows at once and is written to registry.tsx once the person pauses.
+  // `bw`/`bh` are the registry's size when the override began: when the registry
+  // changes (the save landed, an undo, an edit by the agent) the override is stale and dropped.
+  const [sizes, setSizes] = useState<Record<string, { w: number; h: number; bw: number; bh: number }>>({});
+  const sizesRef = useRef(sizes);
+  sizesRef.current = sizes;
+  const itemsRawRef = useRef(itemsRaw);
+  itemsRawRef.current = itemsRaw;
+  const items = useMemo(
+    () => (shared ? itemsRaw : itemsRaw.map((item) => (sizes[item.id] ? { ...item, width: sizes[item.id]!.w, height: sizes[item.id]!.h } : item))),
+    [itemsRaw, sizes],
+  );
+  useEffect(() => {
+    setSizes((prev) => {
+      const keep = Object.entries(prev).filter(([id, s]) => {
+        const raw = itemsRaw.find((item) => item.id === id);
+        return raw && raw.width === s.bw && raw.height === s.bh;
+      });
+      return keep.length === Object.keys(prev).length ? prev : Object.fromEntries(keep);
+    });
+  }, [itemsRaw]);
   const notes = useStableList(notesProp);
   const sections = useStableList(sectionsProp);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -1289,6 +1323,8 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
   unsentMovesRef.current = unsentMoves;
   const movedItemsRef = useRef(movedItems);
   movedItemsRef.current = movedItems;
+  // The size last sent for each resized item, so one resize is one write.
+  const sentSizes = useRef<Record<string, string>>({});
 
   // Moves, resizes, and text changes of existing notes, sections, and items, and
   // new notes and sections once they have text, are written into registry.tsx
@@ -1318,6 +1354,8 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       const s = moveStatesRef.current[m.id];
       return !(s && s.x === m.x && s.y === m.y);
     });
+    // A resized item is pending until its size has been sent once.
+    const pendingSizes = Object.entries(sizesRef.current).filter(([id, s]) => sentSizes.current[id] !== `${s.w}x${s.h}`);
     const edits: DirectEdit[] = [];
     const markIds = new Set<string>();
     // The edit that puts each entry back as it was, and where items go back to in the browser.
@@ -1352,6 +1390,15 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
         backPositions[m.id] = { x: registered.x, y: registered.y };
       }
     }
+    for (const [id, s] of pendingSizes) {
+      sentSizes.current[id] = `${s.w}x${s.h}`;
+      const same = edits.find((e) => e.kind === "item" && e.id === id);
+      if (same) same.set = { ...same.set, width: s.w, height: s.h };
+      else edits.push({ kind: "item", id, set: { width: s.w, height: s.h } });
+      const back = inverse.get(id);
+      if (back) back.set = { ...back.set, width: s.bw, height: s.bh };
+      else inverse.set(id, { kind: "item", id, set: { width: s.bw, height: s.bh } });
+    }
     const adds: DirectAdd[] = pendingNew.map((m) => ({
       kind: m.kind,
       text: m.text,
@@ -1360,7 +1407,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       ...(m.w ? { width: m.w } : {}),
       ...(m.h ? { height: m.h } : {}),
     }));
-    if (!markIds.size && !pendingNew.length && !pendingMoves.length) return;
+    if (!markIds.size && !pendingNew.length && !pendingMoves.length && !pendingSizes.length) return;
     // A new mark is applied once the registry holds one more entry of its kind, in request order.
     const targets = sentTargets(pendingNew, countsRef.current);
     // Marked in flight first, so a second save does not start for the same change.
@@ -1425,7 +1472,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
   useEffect(() => {
     const timer = window.setTimeout(() => void flushDirect(), 300);
     return () => window.clearTimeout(timer);
-  }, [flushDirect, marks, positions]);
+  }, [flushDirect, marks, positions, sizes]);
   // An item whose position matches the registry again is applied, or was put back.
   useEffect(() => {
     const moved = new Set(movedItems.map((m) => m.id));
@@ -2236,6 +2283,44 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       }
     },
   };
+
+  // Drag a corner of an item to resize it. The corner opposite the grip stays
+  // where it is, so a north or west grip also moves the item (the move saves
+  // itself like any other). Width and height are what `viewport` items use
+  // for their breakpoints, so the frame re-lays-out as it is dragged.
+  const resizeItemImpl = useRef<(event: ReactPointerEvent<HTMLElement>, item: CanvasItem, corner: Corner) => void>(() => {});
+  resizeItemImpl.current = (event, item, corner) => {
+    if (event.button !== 0 || spaceArmed.current || boardToolRef.current) return;
+    event.stopPropagation();
+    event.preventDefault();
+    const origin = positionsRef.current[item.id] ?? { x: item.x, y: item.y };
+    const w0 = item.width;
+    const h0 = item.height;
+    const least = item.viewport ? { w: 200, h: 120 } : { w: 80, h: 40 };
+    const east = corner.endsWith("e");
+    const south = corner.startsWith("s");
+    dragBoard(
+      event,
+      () => {},
+      (dx, dy) => {
+        const w = Math.round(Math.max(least.w, w0 + (east ? dx : -dx)));
+        const h = Math.round(Math.max(least.h, h0 + (south ? dy : -dy)));
+        const raw = itemsRawRef.current.find((entry) => entry.id === item.id);
+        if (!raw) return;
+        setSizes((prev) => ({ ...prev, [item.id]: { w, h, bw: raw.width, bh: raw.height } }));
+        if (!east || !south) {
+          const x = east ? origin.x : origin.x + w0 - w;
+          const y = south ? origin.y : origin.y + h0 - h;
+          setPositions((prev) => ({ ...prev, [item.id]: { x, y } }));
+        }
+      },
+      queueSave,
+    );
+  };
+  const onResizeItem = useCallback(
+    (event: ReactPointerEvent<HTMLElement>, item: CanvasItem, corner: Corner) => resizeItemImpl.current(event, item, corner),
+    [],
+  );
 
   const boundsOf = useCallback(
     (targets: CanvasItem[]) => {
@@ -3308,6 +3393,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
               onFront={setFrontId}
               onTitlePointerDown={onTitlePointerDown}
               onHandleKey={onHandleKey}
+              onResize={!shared && !annotating ? onResizeItem : undefined}
               announce={announce}
               pins={visibleAnnotations.flatMap((annotation) =>
                 annotation.itemId === item.id

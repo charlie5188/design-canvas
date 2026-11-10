@@ -25,6 +25,7 @@ a device or input you do not have.
 ## Items
 
 - Dragging the grip or the name moves an item at every zoom level, with mouse and touch; arrow keys on the focused grip move it, Shift for larger steps. Moving never remounts a preview or clears its input.
+- Four corner grips appear while the pointer or focus is on an item (always on touch screens), and not while annotating or in a shared file. Dragging one resizes the item at every zoom level; the opposite corner stays put, a north or west grip also moves the item, and a `viewport` item's layout follows its width as it is dragged. The new width, height, and position land in `registry.tsx` once the person pauses, and ⌘/Ctrl + Z puts them back. Not verified by keyboard or touch: the grips take a pointer only.
 - Clicking, Enter, or Space on a name copies the exact name and shows "Copied"; a press that drags never copies. Hover alone never copies. When the clipboard fails, a selectable field appears.
 - The open and trash icons appear when the title is hovered or the icon has keyboard focus, and are always visible on touch devices. The open icon opens `frame.html?item=<id>` in a new tab without changing the canvas. Pressing either never starts a move.
 - A pan or move that ends over a control does not click it.

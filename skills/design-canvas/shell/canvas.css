@@ -1004,6 +1004,22 @@ html[data-canvas-alt] .canvas-frame-root * {
   transform-origin: center;
 }
 
+/* An item's grips show while the pointer or focus is on the item, and always on
+   touch screens, where there is no hover. */
+.canvas-item-resize {
+  opacity: 0;
+  transition: opacity 120ms;
+}
+.canvas-item:hover .canvas-item-resize,
+.canvas-item:focus-within .canvas-item-resize {
+  opacity: 1;
+}
+@media (hover: none) {
+  .canvas-item-resize {
+    opacity: 1;
+  }
+}
+
 /* While a Note or Section tool is armed, the whole canvas takes the press, and
    the cursor says so. */
 .canvas-viewport[data-board-tool],

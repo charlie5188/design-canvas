@@ -5,7 +5,7 @@ description: Build or update a local design canvas of live, real product compone
 
 # Design canvas
 
-A freeform canvas of live previews: the app's real components, synthetic data, no backend. People pan, zoom, drag items by their name or grip, click a name to copy it, open an item alone in a new tab, move items to the trash and put them back, switch the app's themes, Alt/Option-click any element to copy a reference for the conversation, send you annotations straight from the canvas, add notes and sections that explain the canvas to whoever you share it with, and download the canvas as one HTML file to share. You change content in source files. The canvas shell is already built and tested, so never rebuild it.
+A freeform canvas of live previews: the app's real components, synthetic data, no backend. People pan, zoom, drag items by their name or grip, drag an item's corners to resize it (the new width and height are saved into `registry.tsx`), click a name to copy it, open an item alone in a new tab, move items to the trash and put them back, switch the app's themes, Alt/Option-click any element to copy a reference for the conversation, send you annotations straight from the canvas, add notes and sections that explain the canvas to whoever you share it with, and download the canvas as one HTML file to share. You change content in source files. The canvas shell is already built and tested, so never rebuild it.
 
 Rules adapted from `create-canvas` in ibelick/ui-skills (MIT).
 
@@ -84,6 +84,8 @@ Before adding items, make one real app component render. Work through `reference
 Edit `registry.tsx` and `items/`. Leave `canvas/` as installed; shell fixes belong in the skill (see "Changing the shell").
 
 Each registry entry has a stable `id`, a unique readable `name` such as `Pricing card · compact`, an optional one-line `note`, `component`, `x`, `y`, `width`, `height`, and optional `viewport` and `from`.
+
+Write each entry out by hand, in `registry`, `notes`, and `sections` alike. Its `id`, `x`, `y`, `width`, and `height` must be plain literals (`id: "pricing-compact"`, `x: 440`), not built by a loop, `map`, spread, template string, variable, or arithmetic. The canvas saves moves and resizes by finding the entry's literal `id` in `registry.tsx` and replacing those numbers in place; anything computed cannot be found, so the change is not saved and waits for the agent ("no plain id, or a computed value"). When several items are alike, write each one out instead of generating them.
 
 - Build each version from the app's components, in this order:
   1. An existing component with different props, such as `<PricingCard variant="compact" />`. The canvas renders product code, so a chosen version moves into the product as it is.
