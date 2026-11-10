@@ -1,10 +1,14 @@
 // Canvas chrome copy. Edit here to change the language of the controls.
 const ANNOTATE_HELP =
-  "Press A to annotate: click an element, drag across an area, or click an item's name for the whole item, then send or copy them all at once";
+  "Press A to annotate: click an element, drag across an area, or click an item's name for the whole item; add a note or a section; then apply or copy them all at once";
 
 export const labels = {
   region: "Design canvas",
   toolbar: "Canvas view",
+  toolsBar: "Tools",
+  viewBar: "View",
+  canvasBar: "Canvas",
+  changesBar: "Changes not applied yet",
   theme: "Theme",
   help: "Canvas controls",
   /** The help line a shared file leaves out, since it has no annotations. */
@@ -61,13 +65,14 @@ export const labels = {
   newVersion: "Apply to a new version",
   saveAnnotation: "Save",
   deleteAnnotation: "Delete annotation",
-  copyAnnotations: (n: number) => `Copy ${n} annotation${n === 1 ? "" : "s"}`,
-  copiedAnnotations: (n: number) => `Copied ${n} annotation${n === 1 ? "" : "s"}`,
+  // The toolbar button says what it does for the person: the canvas is source files, so nothing shows up until the agent applies it.
+  copyAnnotations: (n: number) => `Copy ${n} change${n === 1 ? "" : "s"}`,
+  copiedAnnotations: (n: number) => `Copied ${n} change${n === 1 ? "" : "s"}`,
   /** Shown in place of the copy button while an agent listens to the canvas. */
-  sendAnnotations: (n: number) => `Send ${n} to agent`,
-  sentToAgent: (n: number) => `Sent ${n} annotation${n === 1 ? "" : "s"} to the agent`,
-  queuedForAgent: (n: number) => `Queued ${n} annotation${n === 1 ? "" : "s"}. The agent gets ${n === 1 ? "it" : "them"} when it's free.`,
-  agentGoneCopied: (n: number) => `The agent stopped listening. Copied ${n} annotation${n === 1 ? "" : "s"} instead.`,
+  sendAnnotations: (n: number) => `Apply ${n} change${n === 1 ? "" : "s"}`,
+  sentToAgent: (n: number) => `Sent ${n} change${n === 1 ? "" : "s"} to the agent`,
+  queuedForAgent: (n: number) => `Queued ${n} change${n === 1 ? "" : "s"}. The agent gets ${n === 1 ? "it" : "them"} when it's free.`,
+  agentGoneCopied: (n: number) => `The agent stopped listening. Copied ${n} change${n === 1 ? "" : "s"} instead.`,
   /** In the toolbar while the agent handles the notes it was sent. */
   agentWorking: "Agent working",
   share: "Share as an HTML file",
@@ -85,13 +90,54 @@ export const labels = {
   ] as const,
   shareFailed: (reason: string) => `Couldn't make the file: ${reason}`,
   agentFinished: "The agent finished",
-  agentGoneQueued: (n: number) => `The agent stopped listening, so ${n} annotation${n === 1 ? " wasn't" : "s weren't"} sent`,
-  clearAnnotations: "Clear annotations",
-  clearedAnnotations: (n: number) => `Cleared ${n} annotation${n === 1 ? "" : "s"}`,
+  agentGoneQueued: (n: number) => `The agent stopped listening, so ${n} change${n === 1 ? " wasn't" : "s weren't"} sent`,
+  /** Shown when annotate mode ends with changes still waiting, so they are not forgotten. */
+  unapplied: (n: number) => `${n} change${n === 1 ? " isn't" : "s aren't"} applied yet`,
+  applyNow: "Apply now",
+  copyNow: "Copy now",
+  // Everything not applied yet, so the name matches "Apply changes".
+  discardChanges: "Discard changes",
+  discardShort: "Discard",
+  waitingForAgent: (n: number) => `${n} sent · waiting for the agent`,
+  discardedChanges: (n: number) => `Discarded ${n} change${n === 1 ? "" : "s"}`,
   clearedSent: (n: number) => `Cleared ${n} sent annotation${n === 1 ? "" : "s"} on updated items`,
   clearedVersioned: (n: number) => `Cleared ${n} sent annotation${n === 1 ? "" : "s"}: new version added`,
   undo: "Undo",
   annotationsHeading: (n: number) => `Annotations from the design canvas (${n}):`,
   /** The message's last line when some items should get a new version, e.g. "Card (1, 2); Menu (3)". */
   newVersionLine: (items: string) => `Keep the original and add a new version: ${items}`,
+  // Notes and sections: marks the person adds, applied by the agent.
+  noteTool: "Note",
+  noteToolHint: "Note (N): click empty canvas",
+  sectionTool: "Section",
+  sectionToolHint: "Section (S): drag across empty canvas",
+  notePlaceholder: "Write a note",
+  sectionPlaceholder: "Section title",
+  boardNotApplied: "Not applied yet",
+  boardSent: "Sent · waiting for the agent",
+  boardQueued: "Queued · waiting for the agent",
+  boardEditHint: "Double-click to edit",
+  boardResize: "Resize",
+  boardMoveLabel: (what: string) => `Move ${what}`,
+  selectTool: "Select",
+  selectToolHint: "Select (V)",
+  // One name for the button on every pending change: a note, a section, a moved item.
+  discardChange: "Discard this change",
+  boardNoteLabel: "Note",
+  boardSectionLabel: (title: string) => `Section ${title}`,
+  movesHeading: (n: number) => `Items moved on the design canvas (${n}):`,
+  moveItem: (name: string, id: string, where: string) => `Move “${name}” (id ${id}) to ${where}`,
+  movesHowTo: "Set each item's `x` and `y` in registry.tsx to the position shown, so the shared file keeps this arrangement.",
+  boardHeading: (n: number) => `Notes and sections from the design canvas (${n}):`,
+  boardAddNote: (where: string, dims: string, text: string) => `Add a note at ${where}${dims ? `, ${dims}` : ""}: ${text}`,
+  boardAddSection: (title: string, where: string, dims: string, items: string[]) =>
+    `Add a section ${title} at ${where}${dims ? `, size ${dims}` : ""}${items.length ? `. Inside it, at their positions on the canvas now: ${items.join("; ")}` : ""}`,
+  /** A change to a note or section already in the registry; `parts` say what changed. */
+  boardChange: (kind: string, id: string, parts: string[]) => `Change ${kind} “${id}”: ${parts.join("; ")}`,
+  boardPartText: (kind: string, text: string) => `${kind === "note" ? "text" : "title"} to ${text}`,
+  boardPartMove: (where: string) => `move to ${where}`,
+  boardPartSize: (dims: string) => `resize to ${dims}`,
+  boardPartItems: (items: string[]) => `items inside, at their positions on the canvas now: ${items.join("; ")}`,
+  boardHowTo:
+    "Write notes into `notes` and sections into `sections` in registry.tsx. For a change, edit that entry: `x`, `y`, `width`, `height` (a note's height is its minimum), `text` or `title`. For each item listed inside a section, set its x and y in the registry to the position shown, so the shared file keeps this arrangement.",
 };

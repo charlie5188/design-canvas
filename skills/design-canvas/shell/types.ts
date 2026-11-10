@@ -25,3 +25,33 @@ export type CanvasItem = {
    */
   from?: string;
 };
+
+/**
+ * A sticky note that explains something to whoever opens the canvas or its
+ * shared file, for example why a version was dropped. Fixed on the canvas:
+ * the agent places and edits it in source.
+ */
+export type CanvasNote = {
+  id: string;
+  text: string;
+  x: number;
+  y: number;
+  /** Defaults to 220. */
+  width?: number;
+  /** A minimum: the note grows when its text needs more room. */
+  height?: number;
+};
+
+/**
+ * A titled frame behind the items it surrounds, for grouping, for example the
+ * versions that were set aside. Items keep their own positions: a section only
+ * draws the frame, so the agent places items inside its bounds.
+ */
+export type CanvasSection = {
+  id: string;
+  title: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};

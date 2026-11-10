@@ -14,13 +14,14 @@ Instead of asking the agent to build a canvas from scratch for every project, th
 - **Know what can ship.** The agent builds versions from your components' props first, so they are product code already. A version that needs a new component says so on the canvas. When you ask to ship one, the agent moves it into the product and checks it in your running app.
 - **Talk about what you see.** Click an item's name to copy it. Hold ⌥/Alt and click any element to copy a reference such as `Pricing card · compact › button “Upgrade”`, then paste it into the conversation.
 - **Annotate many things, send once.** Press A or the Annotate button, then click an element, drag across an area, or click an item's name for the whole item, and write a note on each. Send them all to the agent as one numbered message, straight from the canvas; the toolbar shows "Agent working" until the agent finishes, and each pin clears itself once the agent has changed its item. Agents that can't listen in the background, such as ones without background commands, get the same message by copy and paste.
+- **Explain it to whoever opens the file.** Add a sticker note anywhere on the canvas, or draw a folder-style section around the versions you set aside and give it a title. Move them, resize them, and edit their text like objects on any canvas. Each change waits as a dashed "Not applied yet" ghost, goes to the agent with your other annotations when you press Apply, and becomes part of the shared file once the agent has written it in. Moving an item works the same way, since the shared file uses the positions in your code.
 - **New versions beside the original.** Each note asks for a new version by default, so the agent keeps the original and adds the change next to it, and you compare both. Uncheck it to change the item in place.
 - **A trash you can undo.** Move a version you don't want to the trash. The trash shows small live previews, and one click puts an item back where it was. Its code stays until you ask the agent to remove it.
 - **Real viewports.** Mark an item `viewport: true` and it renders in a frame of its own width, so breakpoints and media queries behave as on a real phone or desktop.
-- **Your themes.** Light and dark (or any themes the app has) switch from the toolbar, across every item.
+- **Your themes.** Light and dark (or any themes the app has) switch from the top right, across every item.
 - **Stays on the canvas.** Links, form submits, and router calls inside previews never navigate away; they show where they would have gone.
 - **One item alone.** Open any item in its own tab at its real size, ready for a screenshot or a design-tool import.
-- **Share as one file.** Click Share on the toolbar, or ask the agent, to get one HTML file that anyone can open with a double-click, with no server or setup. Drag the file into Figma to get a code layer you can play full screen. Annotations and sending to the agent stay out of the shared file.
+- **Share as one file.** Click Share at the top right, or ask the agent, to get one HTML file that anyone can open with a double-click, with no server or setup. Drag the file into Figma to get a code layer you can play full screen. Notes and sections come with it; annotations and sending to the agent stay out of the shared file.
 - **A quiet workspace.** Drag items by their name, pan, zoom, fit all, and reload without losing the layout.
 
 ## Compared with Claude Design, Paper, and Figma
@@ -65,7 +66,7 @@ Then ask your agent, for example:
 
 ## Share a canvas
 
-Click Share (the share icon) in the canvas toolbar, or ask the agent to share the canvas. You get one HTML file, `<canvas-name>-<date>.html`.
+Click Share (the share icon) at the top right of the canvas, or ask the agent to share the canvas. You get one HTML file, `<canvas-name>-<date>.html`.
 
 - **Open it.** Double-click the file. It runs in any browser, with no setup, server, or agent.
 - **Send it.** Share it like any file, in Slack, email, or Drive.
@@ -115,13 +116,14 @@ React アプリの実際のコンポーネントを、パン・ズームでき�
 - **そのままリリースできる案がわかる。** エージェントはまず既存コンポーネントの props で案を作るので、その案はそのままプロダクトのコードです。新しいコンポーネントが必要な案は、キャンバス上にそう表示されます。案をプロダクトに入れるよう頼むと、エージェントが組み込み、実際のアプリで確認します。
 - **見ているものをそのまま会話に。** アイテム名をクリックすると名前をコピーできます。⌥/Alt を押しながら要素をクリックすると、`Pricing card · compact › button “Upgrade”` のような参照をコピーでき、そのまま会話に貼り付けられます。
 - **まとめて注釈して、一度で送信。** A キーか Annotate ボタンで注釈モードにし、要素をクリックするか、範囲をドラッグで囲むか、アイテム名をクリックしてアイテム全体を選び、それぞれにメモを書きます。すべてを番号付きの 1 つのメッセージとして、キャンバスから直接エージェントに送れます。エージェントが作業を終えるまでツールバーに「Agent working」と表示され、エージェントがそのアイテムを変更すると、ピンは自動で消えます。バックグラウンドで待機できないエージェント（バックグラウンドコマンドがないものなど）には、同じメッセージをコピーして貼り付けます。
+- **開いた人に説明を添える。** 付箋のノートをキャンバスのどこにでも置いたり、見送った案をフォルダ型のセクションで囲んでタイトルを付けたりできます。移動、サイズ変更、文字の編集もできます。エージェントが反映するまでは「Not applied yet」の破線のゴーストとして残り、Apply を押すと他の注釈と一緒に送られます。エージェントが書き込むと、共有ファイルの一部になります。アイテムを動かした場合も同じです。共有ファイルはコード内の位置を使うためです。
 - **新しい案は元の案の隣に。** 注釈は初期設定で新しい案を求めます。エージェントは元の案を残したまま変更を隣に追加するので、2 つを見比べられます。チェックを外すと、そのアイテム自体を変更します。
 - **元に戻せるゴミ箱。** いらない案はゴミ箱に移せます。ゴミ箱では小さなライブプレビューが表示され、クリックすると元の位置に戻ります。コードは、エージェントに削除を頼むまで残ります。
 - **本物のビューポート。** アイテムに `viewport: true` を指定すると、そのアイテムの幅を持つフレーム内で表示されます。ブレークポイントやメディアクエリが、実際のスマートフォンやデスクトップと同じように動きます。
-- **アプリのテーマ。** ライト・ダーク（またはアプリが持つ任意のテーマ）をツールバーから切り替えられ、すべてのアイテムに反映されます。
+- **アプリのテーマ。** ライト・ダーク（またはアプリが持つ任意のテーマ）を右上から切り替えられ、すべてのアイテムに反映されます。
 - **キャンバスから離れない。** プレビュー内のリンク、フォーム送信、ルーター呼び出しでページが遷移することはありません。遷移先は通知で表示されます。
 - **アイテム単体で開く。** どのアイテムも実寸のまま別タブで開けます。スクリーンショットやデザインツールへの取り込みにそのまま使えます。
-- **1 つのファイルで共有。** ツールバーの Share をクリックするか、エージェントに頼むと、1 つの HTML ファイルができます。サーバーや準備は不要で、誰でもダブルクリックで開けます。Figma にドラッグすると、フルスクリーンで操作できるコードレイヤーになります。注釈とエージェントへの送信は、共有ファイルには含まれません。
+- **1 つのファイルで共有。** 右上の Share をクリックするか、エージェントに頼むと、1 つの HTML ファイルができます。サーバーや準備は不要で、誰でもダブルクリックで開けます。Figma にドラッグすると、フルスクリーンで操作できるコードレイヤーになります。ノートとセクションは共有ファイルに含まれます。注釈とエージェントへの送信は含まれません。
 - **静かな作業スペース。** 名前をドラッグしてアイテムを移動し、パン、ズーム、全体表示ができます。再読み込みしてもレイアウトは保たれます。
 
 ### Claude Design、Paper、Figma との違い
@@ -166,7 +168,7 @@ npx skills add charlie5188/design-canvas
 
 ### キャンバスを共有する
 
-キャンバスのツールバーの Share（共有アイコン）をクリックするか、エージェントに共有を頼みます。`<キャンバス名>-<日付>.html` という 1 つの HTML ファイルができます。
+キャンバス右上の Share（共有アイコン）をクリックするか、エージェントに共有を頼みます。`<キャンバス名>-<日付>.html` という 1 つの HTML ファイルができます。
 
 - **開く。** ファイルをダブルクリックします。準備、サーバー、エージェントなしで、どのブラウザでも動きます。
 - **送る。** Slack、メール、Drive など、普通のファイルと同じように共有できます。
