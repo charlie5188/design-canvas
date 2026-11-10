@@ -10,7 +10,7 @@ a device or input you do not have.
 - Drag empty space pans. Space + drag and middle-button drag pan anywhere, including over previews and `viewport` frames (middle-button over a frame is a known limit).
 - ⌘/Ctrl + wheel and trackpad pinch zoom around the pointer, over empty space, previews, and frames, in both directions without jumps or drift.
 - A canvas opened in a background or zero-size tab fits all items once it has a real size, never at minimum zoom.
-- Toolbar zoom buttons and `+`, `-` zoom around the viewport center. `0` resets the camera only. `1` and "show all" fit every item, including titles and handles.
+- Toolbar zoom buttons and `+`, `-` step between fixed levels (10, 25, 50, 100, 200, 300%) around the viewport center: from 100% a press goes to 200% or 50%, from a level between two (94% after a fit) to the next one in that direction, and the ends hold. Wheel and pinch stay continuous. `0` resets the camera only. `1` and "show all" fit every item, including titles and handles.
 - Wheel over a nested scroll area scrolls it until its end, then pans. The same inside a frame.
 - Horizontal trackpad swipes never trigger browser Back or Forward.
 - Arrow keys pan when the canvas has focus. Tabbing to an offscreen control moves the camera to show it.

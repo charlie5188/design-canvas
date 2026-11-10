@@ -29,7 +29,7 @@ export const labels = {
     "Hover an item's name to open it alone or move it to the trash",
     SAVE_HELP,
     EDIT_HELP,
-    "With the canvas focused: arrow keys pan, + and − zoom, 0 resets, 1 fits all",
+    "With the canvas focused: arrow keys pan, + and − step the zoom (25, 50, 100, 200%), 0 resets, 1 fits all",
   ],
   linkBlocked: (target: string) => `Links stay on the canvas: ${target}`,
   formBlocked: "Forms don't submit on the canvas",

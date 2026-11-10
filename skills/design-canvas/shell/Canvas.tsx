@@ -63,6 +63,7 @@ import {
   clampZoom,
   fitBounds,
   loadLayout,
+  nextZoomStop,
   type Position,
   sanitizeCamera,
   sanitizePosition,
@@ -76,7 +77,6 @@ import type { DirectAdd, DirectEdit, DirectRemove } from "./registry-edit.ts";
 import "./canvas.css";
 
 const DEFAULT_CAMERA: Camera = { x: 48, y: 120, z: 1 };
-const BUTTON_ZOOM = 1.2;
 const WHEEL_ZOOM = 0.0025;
 const KEY_PAN = 48;
 const MOVE_STEP = 8;
@@ -2474,11 +2474,13 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
 
   const resetCamera = useCallback(() => setCamera(DEFAULT_CAMERA), [setCamera]);
 
-  const zoomBy = useCallback(
-    (factor: number) => {
+  // The buttons and + and − step between fixed levels (see ZOOM_STOPS), around the centre of the view.
+  const zoomStep = useCallback(
+    (direction: 1 | -1) => {
       const viewport = viewportRef.current;
       if (!viewport) return;
-      setCamera(zoomAt(camera.current, factor, viewport.clientWidth / 2, viewport.clientHeight / 2));
+      const z = camera.current.z;
+      setCamera(zoomAt(camera.current, nextZoomStop(z, direction) / z, viewport.clientWidth / 2, viewport.clientHeight / 2));
     },
     [setCamera],
   );
@@ -3030,10 +3032,10 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
         setCamera({ ...camera.current, x: camera.current.x + pan[0]!, y: camera.current.y + pan[1]! });
       } else if (event.key === "+" || event.key === "=") {
         event.preventDefault();
-        zoomBy(BUTTON_ZOOM);
+        zoomStep(1);
       } else if (event.key === "-") {
         event.preventDefault();
-        zoomBy(1 / BUTTON_ZOOM);
+        zoomStep(-1);
       } else if (event.key === "0") {
         event.preventDefault();
         resetCamera();
@@ -3201,7 +3203,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     select,
     startAnnotation,
     suppressNextClick,
-    zoomBy,
+    zoomStep,
   ]);
 
   // The grip and the name both move an item. A press that never travels past
@@ -3460,7 +3462,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
           className="canvas-button canvas-icon-button"
           aria-label={labels.zoomOut}
           data-tip={labels.zoomOut}
-          onClick={() => zoomBy(1 / BUTTON_ZOOM)}
+          onClick={() => zoomStep(-1)}
         >
           <MinusIcon />
         </button>
@@ -3472,7 +3474,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
           className="canvas-button canvas-icon-button"
           aria-label={labels.zoomIn}
           data-tip={labels.zoomIn}
-          onClick={() => zoomBy(BUTTON_ZOOM)}
+          onClick={() => zoomStep(1)}
         >
           <PlusIcon />
         </button>

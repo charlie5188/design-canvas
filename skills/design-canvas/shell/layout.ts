@@ -18,6 +18,21 @@ const inRange = (value: number) => Math.abs(value) <= COORD_LIMIT;
 
 export const clampZoom = (z: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
 
+/**
+ * The levels the zoom buttons and the + and − keys step between, as design tools
+ * do, so a press lands on 50% or 100% rather than 94% or 144%. Wheel and pinch
+ * stay continuous. The ends are the zoom limits.
+ */
+export const ZOOM_STOPS = [ZOOM_MIN, 0.25, 0.5, 1, 2, ZOOM_MAX];
+
+/** The next level above (direction 1) or below (-1) `z`; from between two levels, the nearer one in that direction. */
+export function nextZoomStop(z: number, direction: 1 | -1): number {
+  const margin = 0.005;
+  const stops = direction > 0 ? ZOOM_STOPS : [...ZOOM_STOPS].reverse();
+  const next = stops.find((stop) => (direction > 0 ? stop > z + margin : stop < z - margin));
+  return next ?? stops[stops.length - 1]!;
+}
+
 export function sanitizeCamera(camera: Camera): Camera {
   const clamp = (v: number) => Math.min(COORD_LIMIT, Math.max(-COORD_LIMIT, finite(v) ? v : 0));
   return { x: clamp(camera.x), y: clamp(camera.y), z: clampZoom(finite(camera.z) ? camera.z : 1) };
