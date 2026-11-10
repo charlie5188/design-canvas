@@ -41,7 +41,8 @@ a device or input you do not have.
 
 ## Toolbar
 
-- Zoom out, zoom level, zoom in, show all, reset view, annotate, share, and help sit centered at the bottom; zoom, reset view, share, and help are icon buttons with tooltips; copy (send, while an agent listens) appears only while there are unsent annotations, clear (eraser) while there are any, and trash while it holds items. The help list opens on hover or keyboard focus and describes the canvas region for screen readers.
+- Controls sit in four places: tools (Select, Annotate, Note, Section) at the bottom centre; zoom out, zoom level, zoom in, show all, and reset view at the bottom right; theme, share, and help at the top right; trash at the bottom left while it holds items. All are icon buttons with tooltips that open away from the screen edge and stay on screen. A bar at the top centre appears only while a change is waiting: Discard and, while any change is unsent, Copy (or Apply, while an agent listens). Nothing shifts under the pointer when it appears or goes. The help list opens on hover or keyboard focus, below the top bar, and describes the canvas region for screen readers.
+- Narrow windows (375px): the view bar stacks above the tools bar, the changes bar drops under the top bar, notices clear both, and no bar covers another. Show all and revealed items stop short of the top bars and the bottom bars.
 - At narrow widths (375 px) the text labels and separators drop and every control stays on screen, with annotations and trashed items present.
 
 ## Themes
@@ -94,7 +95,7 @@ Run `scripts/listen.sh <canvas-url>` in a terminal as the agent would.
 ## Trash
 
 - Moving an item to the trash hides it at once with "Moved <name> to the trash" and Undo, keeps focus on the canvas, and leaves other items in place. Its unsent annotations are hidden, not copied, and not cleared; they return with it.
-- The trash button shows the count. It opens above the toolbar with the most recently trashed item first; each entry shows a live, scaled-down preview (a `viewport` item at its own width) and its name, and takes no clicks, focus, or Alt-picks inside the preview.
+- The trash button shows the count. It opens above the trash button, at the bottom left, with the most recently trashed item first; each entry shows a live, scaled-down preview (a `viewport` item at its own width) and its name, and takes no clicks, focus, or Alt-picks inside the preview.
 - Opening the trash focuses its first entry; Escape closes it and returns focus to the button, and pressing outside it closes it. At 375 px it shows two columns inside the window.
 - Picking an entry closes the trash and puts the item back where it was, or beside its row if that spot is now taken, then brings it into view and to the front. The trash button goes away when the trash is empty.
 - Show all and links to `#<item-id>` ignore trashed items. The trash survives reload; ids no longer in the registry drop out.
@@ -119,7 +120,7 @@ Run `scripts/share.sh` on a canvas with a `viewport` item, and open the file fro
 - The open-alone icon opens the same file with `?item=<id>`, which shows that item alone.
 - Reload keeps the layout.
 - On the dev server, the Share icon button (tooltip "Share as an HTML file") dims, pulses, and takes no second click while the file builds, then downloads `<canvas-name>-<date>.html` without reloading the page.
-- After the download, a panel above the toolbar names the file, any file it could not include, and how to open it, send it, or put it in Figma or Notion. Escape, its close button, or a press outside closes it and returns focus to Share; opening the trash closes it too.
+- After the download, a panel under the Share button names the file, any file it could not include, and how to open it, send it, or put it in Figma or Notion. Escape, its close button, or a press outside closes it and returns focus to Share; opening the trash closes it too.
 
 ## Layout
 
@@ -131,3 +132,27 @@ Run `scripts/share.sh` on a canvas with a `viewport` item, and open the file fro
 ## Performance
 
 Before claiming smooth performance, profile a canvas with a realistic number of items during pan, zoom, and move. Record the item count, browser, and device, and look for long tasks, repeated layout, and preview rerenders.
+
+## Tools, notes, and sections
+
+- The tools bar has Select, Annotate, Note, and Section; exactly one is pressed. Select is the default. Escape or V returns to Select from any of them, A toggles Annotate, N and S pick the Note and Section tools, none of these while typing in a field.
+- Note and Section work without annotate mode. While one is armed the cursor is a crosshair everywhere and every press, also over items, notes, and sections, goes to the canvas; it puts itself down after one use. Picking Annotate or Select puts it down too.
+- Note: one click places a sticker ghost with its field focused; typing works at once. Escape or a press elsewhere keeps the text; an empty note goes away.
+- Section: a drag draws the outline, then a ghost folder with its title field focused on the tab; Enter keeps it. A drag under 80×60 canvas units makes nothing and keeps the tool.
+- A section looks like a folder: its title is on a raised tab joined to the frame, in tints of the canvas colors in both themes. A note is a sticker with a cut, folded bottom-right corner in fixed colors in both themes.
+- In Select, dragging a note, or a section's tab, moves it at every zoom; a press that never travels stays a click and selects it. A selected one shows four corner grips; dragging one resizes it with the opposite edge fixed, to a minimum size. A section carries the items inside it. Arrow keys move the focused one (Shift for larger steps), Enter or a double-click edits it.
+- Moving, resizing, or editing a note or section from the registry hides it and shows its ghost, which keeps moving; putting it back where it began removes the ghost.
+- Ghosts are dashed and tagged "Not applied yet", turn "Sent · waiting for the agent" or "Queued" after sending, stay across a reload, and a ghost section stays behind its items. Moving a sent ghost makes it a new request.
+- The button in the changes bar counts notes, sections, and annotations together and says "Apply N changes" with a listening agent, "Copy N changes" without. Leaving annotate mode with changes waiting shows "N changes aren't applied yet" with a button that applies or copies them.
+- The message lists the changes in words (add, move, resize, text or title) and, for a section, the items inside it with their current positions.
+- Adding a note or section to the registry replaces its sent ghost; a change's ghost leaves once the entry matches its text, position, and size.
+- Discard changes (the eraser) drops annotations, ghosts, and moved items' new positions in one step, with Undo for all of it; its toast counts what the Apply button counted.
+- Registry notes and sections draw in the shared file, sections behind items, with no tools, grips, or ghosts. Fit all includes them.
+- A section shows the grip an item's name has on its tab, and its frame lights up under the pointer; pulling the tab or any edge of the frame moves it, and a press inside the frame still pans.
+
+## Moved items
+
+- Dragging an item to a position the registry does not have shows "Not applied yet" and a ↺ button above its top-right corner, and the changes bar counts it. A shared file shows neither.
+- The message lists "Move “Name” (id x) to x,y". After sending, the tag says "Sent · waiting for the agent" ("Queued" while the agent is busy); moving the item again makes it new again.
+- ↺ puts the item back where the registry has it and ends the change. An item whose registry position changes to match loses its tag on its own.
+- Items inside a section that is waiting for the agent are one change with it: no tag, not counted twice.

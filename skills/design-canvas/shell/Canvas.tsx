@@ -12,6 +12,26 @@ import {
   useState,
 } from "react";
 import { downloadSharedFile, sendToAgent, useAgentStatus } from "./agent";
+import { type BoardHandlers, type BoardRef, type Corner, DiscardButton, MarkView, NoteView, SectionView } from "./Board";
+import {
+  type BoardContext,
+  type BoardKind,
+  type BoardMark,
+  formatBoard,
+  formatMoves,
+  isApplied,
+  isUnchanged,
+  limitMarkText,
+  loadMarks,
+  loadMoves,
+  type MovedItem,
+  type MoveStates,
+  NOTE_WIDTH,
+  newMarkId,
+  saveMarks,
+  saveMoves,
+  sentTargets,
+} from "./marks";
 import { frameUrl, fromThisCanvas, NAVIGATE_EVENT, postToFrame, readFrameMessage, shared } from "./bridge";
 import { FrameHost } from "./FrameHost";
 import {
@@ -48,7 +68,7 @@ import {
   zoomAt,
 } from "./layout";
 import { type ThemeStore, useThemeId } from "./theme";
-import type { CanvasItem } from "./types";
+import type { CanvasItem, CanvasNote, CanvasSection } from "./types";
 import "./canvas.css";
 
 const DEFAULT_CAMERA: Camera = { x: 48, y: 120, z: 1 };
@@ -68,6 +88,18 @@ const REVEAL_MARGIN = 48;
 /** The notice row that opens just above the toolbar. */
 const TOAST_ROW = 64;
 const MIN_FIT_SIZE = 100;
+/** Room the top bars take, so a revealed or fitted item never sits under them. */
+const CHROME_TOP = 72;
+const FIT_PADDING = 72;
+/** Two presses this close, without moving, are a double-click. */
+const DOUBLE_TAP_MS = 400;
+/** About the height of an item's title above its preview, for telling which items a section holds. */
+const ITEM_HEAD = 48;
+/** Room a section's title takes above its frame, in canvas units. */
+const SECTION_TITLE_ROOM = 32;
+/** The smallest section a drag makes; anything smaller reads as a stray click. */
+const SECTION_MIN_W = 80;
+const SECTION_MIN_H = 60;
 
 /** Previews never rerender because of the camera, a move, or a copy. */
 const Preview = memo(function Preview({ component: Component }: { component: ComponentType }) {
@@ -171,6 +203,23 @@ const THEME_ICONS: Partial<Record<string, () => ReactNode>> = { light: SunIcon, 
 const AnnotateIcon = () => (
   <ToolIcon>
     <path d="M3 3.5h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H7l-3 2.5v-2.5H3a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1Z" />
+  </ToolIcon>
+);
+const SelectIcon = () => (
+  <ToolIcon>
+    <path d="M3.5 2.5 12.5 7l-4 1.2L7 12.5Z" />
+  </ToolIcon>
+);
+const NoteIcon = () => (
+  <ToolIcon>
+    <path d="M3 2.5h10v7.5l-3.5 3.5H3Z" />
+    <path d="M13 10H9.5v3.5" />
+  </ToolIcon>
+);
+const SectionIcon = () => (
+  <ToolIcon>
+    <rect x="2" y="3.5" width="12" height="9.5" rx="1.5" strokeDasharray="2.5 2" />
+    <path d="M2 1.75h4" />
   </ToolIcon>
 );
 const CopyIcon = () => (
@@ -456,6 +505,8 @@ function CanvasItemView({
   openAnnotation,
   annotationHandlers,
   onTrash,
+  move,
+  onUndoMove,
 }: {
   item: CanvasItem;
   position: Position;
@@ -471,6 +522,9 @@ function CanvasItemView({
   openAnnotation: string | null;
   annotationHandlers: AnnotationHandlers;
   onTrash: (item: CanvasItem) => void;
+  /** Set while the item sits somewhere the registry does not have it. */
+  move?: "new" | "sent" | "queued";
+  onUndoMove: (item: CanvasItem) => void;
 }) {
   const ref = useCallback((element: HTMLDivElement | null) => register(item.id, element), [item.id, register]);
   return (
@@ -483,6 +537,12 @@ function CanvasItemView({
       onPointerDownCapture={() => onFront(item.id)}
       onFocus={() => onFront(item.id)}
     >
+      {move && (
+        <span className="canvas-ghost-tag canvas-item-tag" data-state={move}>
+          {move === "sent" ? labels.boardSent : move === "queued" ? labels.boardQueued : labels.boardNotApplied}
+          <DiscardButton onClick={() => onUndoMove(item)} />
+        </span>
+      )}
       <div className="canvas-item-head">
         <span className="canvas-item-title" onPointerDown={(event) => onTitlePointerDown(event, item)}>
           <button
@@ -707,8 +767,15 @@ type HotUpdates = { on(event: string, listener: () => void): void; off?(event: s
 // A shared file has no annotations, so its help leaves out annotate mode.
 const HELP_LINES = shared ? labels.helpLines.filter((line) => line !== labels.annotateHelp) : labels.helpLines;
 
+const NO_NOTES: CanvasNote[] = [];
+const NO_SECTIONS: CanvasSection[] = [];
+
 type CanvasProps = {
   items: CanvasItem[];
+  /** Notes that explain the canvas to whoever opens it; see CanvasNote. */
+  notes?: CanvasNote[];
+  /** Titled frames that group items; see CanvasSection. */
+  sections?: CanvasSection[];
   storageKey: string;
   /** The project's themes. Leave out when the project has a single theme. */
   theme?: ThemeStore;
@@ -723,7 +790,7 @@ export function Canvas(props: CanvasProps) {
   return <CanvasBoard {...props} />;
 }
 
-function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
+function CanvasBoard({ items, notes = NO_NOTES, sections = NO_SECTIONS, storageKey, theme }: CanvasProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const worldRef = useRef<HTMLDivElement>(null);
   const zoomLabelRef = useRef<HTMLSpanElement>(null);
@@ -901,7 +968,7 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
   // Pins number the next message: unsent annotations in order. Sent ones show a
   // check, queued ones a clock.
   const pending = visibleAnnotations.filter((a) => !a.sent && !a.queued);
-  const unsentCount = pending.filter((a) => a.text.trim()).length;
+  const unsentAnnotations = pending.filter((a) => a.text.trim()).length;
   // Listening, or busy with the last message and expected back: either way the
   // toolbar sends instead of copying. While the agent handles sent notes the
   // toolbar says so, and a notice says when it finished, so nobody has to watch
@@ -1030,42 +1097,323 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
     }),
     [cancelAnnotation, closeAnnotation, openExisting, setOpen],
   );
+  // Notes and sections. A mark the person adds is a request to the agent, like
+  // an annotation: it shows as a dashed ghost, goes out in the same message, and
+  // leaves once the registry shows the real thing. The canvas is source files,
+  // so nothing can show up before the agent applies it.
+  const [marks, setMarks] = useState<BoardMark[]>(() => (shared ? [] : loadMarks(storageKey)));
+  const marksRef = useRef(marks);
+  marksRef.current = marks;
+  useEffect(() => {
+    if (!shared) saveMarks(storageKey, marks);
+  }, [marks, storageKey]);
+  const [openMark, setOpenMark] = useState<string | null>(null);
+  const openMarkRef = useRef(openMark);
+  const [boardTool, setBoardToolState] = useState<BoardKind | null>(null);
+  const boardToolRef = useRef<BoardKind | null>(null);
+  const setBoardTool = useCallback((tool: BoardKind | null) => {
+    boardToolRef.current = tool;
+    setBoardToolState(tool);
+  }, []);
+  const counts = useMemo(() => ({ note: notes.length, section: sections.length }), [notes, sections]);
+  // Which items sit inside a new section is read from the layout when sending,
+  // so the function is filled in once item boxes are measurable.
+  const insideRef = useRef<BoardContext["inside"]>(() => []);
+  const boardContext = useMemo<BoardContext>(
+    () => ({
+      entryOf: (kind, id) => {
+        if (kind === "note") {
+          const n = notes.find((entry) => entry.id === id);
+          return n && { x: n.x, y: n.y, w: n.width ?? NOTE_WIDTH, ...(n.height ? { h: n.height } : {}), text: n.text };
+        }
+        const section = sections.find((entry) => entry.id === id);
+        return section && { x: section.x, y: section.y, w: section.width, h: section.height, text: section.title };
+      },
+      inside: (bounds) => insideRef.current(bounds),
+    }),
+    [notes, sections],
+  );
+  // The selected note or section, by "g:" (a ghost) or "e:" (an entry) and its kind and id.
+  const [selected, setSelected] = useState<string | null>(null);
+  const selectedRef = useRef(selected);
+  const isUnsent = (m: BoardMark) => m.sent === undefined && !m.queued && !!m.text.trim();
+  const unsentMarks = marks.filter(isUnsent);
+  // Items moved on the canvas. Their positions live in the browser, but the
+  // shared file uses the registry's, so a moved item is a change to apply too.
+  const [moveStates, setMoveStates] = useState<MoveStates>(() => (shared ? {} : loadMoves(storageKey)));
+  const moveStatesRef = useRef(moveStates);
+  moveStatesRef.current = moveStates;
+  useEffect(() => {
+    if (!shared) saveMoves(storageKey, moveStates);
+  }, [moveStates, storageKey]);
+  const movedItems = useMemo(() => {
+    if (shared) return [];
+    const nearby = (a: number, b: number) => Math.abs(a - b) <= 1;
+    // A section that is itself waiting for the agent already lists the items inside it, so they are one change.
+    const frames = marks.filter((m) => m.kind === "section" && m.w && m.h && m.text.trim());
+    return shown.flatMap<MovedItem>((item) => {
+      const p = positions[item.id];
+      if (!p || (nearby(p.x, item.x) && nearby(p.y, item.y))) return [];
+      const cx = p.x + item.width / 2;
+      const cy = p.y + (ITEM_HEAD + item.height) / 2;
+      const covered = frames.some((f) => cx >= f.x && cx <= f.x + (f.w ?? 0) && cy >= f.y && cy <= f.y + (f.h ?? 0));
+      return covered ? [] : [{ id: item.id, name: item.name, x: p.x, y: p.y }];
+    });
+  }, [marks, positions, shown]);
+  /** "new" until sent at this position; moving it again makes it new again. */
+  const moveStateOf = (m: MovedItem) => {
+    const sent = moveStates[m.id];
+    return sent && sent.x === m.x && sent.y === m.y ? sent.state : "new";
+  };
+  const unsentMoves = movedItems.filter((m) => moveStateOf(m) === "new");
+  const unsentMovesRef = useRef(unsentMoves);
+  unsentMovesRef.current = unsentMoves;
+  const movedItemsRef = useRef(movedItems);
+  movedItemsRef.current = movedItems;
+  // An item whose position matches the registry again is applied, or was put back.
+  useEffect(() => {
+    const moved = new Set(movedItems.map((m) => m.id));
+    setMoveStates((prev) => {
+      const keep = Object.entries(prev).filter(([id]) => moved.has(id));
+      return keep.length === Object.keys(prev).length ? prev : Object.fromEntries(keep);
+    });
+  }, [movedItems]);
+  const setMarkOpen = useCallback((id: string | null) => {
+    openMarkRef.current = id;
+    setOpenMark(id);
+  }, []);
+  /** Closes the open mark: an empty one, or an edit that changed nothing, goes away. */
+  const closeMark = useCallback(() => {
+    const id = openMarkRef.current;
+    if (!id) return;
+    setMarkOpen(null);
+    setMarks((prev) =>
+      prev.filter((m) => {
+        if (m.id !== id) return true;
+        if (!m.text.trim()) return false;
+        return !(isUnchanged(m) && m.sent === undefined);
+      }),
+    );
+  }, [setMarkOpen]);
+  const startMark = useCallback(
+    (kind: BoardKind, x: number, y: number, size?: { w: number; h: number }) => {
+      closeAnnotation();
+      closeMark();
+      const mark: BoardMark = { id: newMarkId(), kind, x: Math.round(x), y: Math.round(y), text: "", ...(size ?? {}) };
+      setMarks((prev) => [...prev, mark]);
+      setMarkOpen(mark.id);
+    },
+    [closeAnnotation, closeMark, setMarkOpen],
+  );
+  const keyOfRef = (ref: BoardRef) => `${ref.ghost ? "g" : "e"}:${ref.kind}:${ref.id}`;
+  const select = useCallback((ref: BoardRef | null) => {
+    const key = ref ? keyOfRef(ref) : null;
+    selectedRef.current = key;
+    setSelected(key);
+  }, []);
+  /**
+   * The mark that changes a real note or section, made from the entry as it is
+   * now the first time something changes. Until then nothing is pending.
+   */
+  const ensureMark = useCallback(
+    (kind: BoardKind, id: string): string => {
+      const existing = marksRef.current.find((m) => m.kind === kind && m.target === id);
+      if (existing) return existing.id;
+      const entry = boardContext.entryOf(kind, id);
+      if (!entry) return "";
+      const mark: BoardMark = {
+        id: newMarkId(),
+        kind,
+        target: id,
+        from: entry,
+        x: entry.x,
+        y: entry.y,
+        ...(entry.w ? { w: entry.w } : {}),
+        ...(entry.h ? { h: entry.h } : {}),
+        text: entry.text,
+      };
+      // The ref is updated now too: a second change in the same event must find it.
+      marksRef.current = [...marksRef.current, mark];
+      setMarks(marksRef.current);
+      return mark.id;
+    },
+    [boardContext],
+  );
+  /** Moving, resizing, and typing all change a mark; a sent or queued one becomes a new request. */
+  const updateMark = useCallback((id: string, patch: Partial<Pick<BoardMark, "x" | "y" | "w" | "h">>) => {
+    setMarks((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch, sent: undefined, queued: undefined } : m)));
+  }, []);
+  /** Opens a note's text or a section's title for editing, as a change to the entry if it is a real one. */
+  const editBoard = useCallback(
+    (ref: BoardRef) => {
+      closeAnnotation();
+      closeMark();
+      const id = ref.ghost ? ref.id : ensureMark(ref.kind, ref.id);
+      if (!id) return;
+      select({ kind: ref.kind, id, ghost: true });
+      setMarkOpen(id);
+    },
+    [closeAnnotation, closeMark, ensureMark, select, setMarkOpen],
+  );
+  const markHandlers = useMemo(
+    () => ({
+      // Editing a sent or queued mark makes it a new request, so it goes out again.
+      onText: (id: string, text: string) =>
+        setMarks((prev) => prev.map((m) => (m.id === id ? { ...m, text: limitMarkText(text), sent: undefined, queued: undefined } : m))),
+      onClose: closeMark,
+      onDelete: (id: string) => {
+        if (openMarkRef.current === id) setMarkOpen(null);
+        setMarks((prev) => prev.filter((m) => m.id !== id));
+      },
+    }),
+    [closeMark, setMarkOpen],
+  );
+  // Leaving annotate mode with changes still waiting is where they get
+  // forgotten, so say so, with the way to apply them.
+  const sendRef = useRef<() => Promise<void>>(async () => {});
   const setAnnotateMode = useCallback(
-    (on: boolean) => {
+    (on: boolean, quiet = false) => {
       annotatingRef.current = on;
       setAnnotating(on);
-      if (!on) closeAnnotation();
+      // Switching to the Note or Section tool is not leaving to finish: nothing is lost or forgotten.
+      if (!on && quiet) closeAnnotation();
+      if (!on && !quiet) {
+        closeAnnotation();
+        closeMark();
+        setBoardTool(null);
+        const waiting =
+          annotationsRef.current.filter((a) => shownIds.has(a.itemId) && !a.sent && !a.queued && a.text.trim()).length +
+          marksRef.current.filter(isUnsent).length +
+          unsentMovesRef.current.length;
+        if (waiting) {
+          const listening = agentRef.current === "listening" || agentRef.current === "working";
+          notify(labels.unapplied(waiting), { label: listening ? labels.applyNow : labels.copyNow, run: () => void sendRef.current() }, true);
+          return;
+        }
+      }
       announce(on ? labels.annotateModeOn : labels.annotateModeOff);
     },
-    [announce, closeAnnotation],
+    [announce, closeAnnotation, closeMark, notify, setBoardTool, shownIds],
   );
-  // Clears what is on the canvas; annotations on trashed items wait for them.
-  const clearAnnotations = useCallback(() => {
+  /**
+   * The toolbar's tools: Select (the default, nothing armed), Annotate, and the
+   * one-shot Note and Section. Only one is on at a time, and Escape returns to Select.
+   */
+  const chooseTool = useCallback(
+    (tool: "select" | "annotate" | BoardKind) => {
+      if (tool === "select") {
+        setBoardTool(null);
+        if (annotatingRef.current) setAnnotateMode(false);
+        return;
+      }
+      if (tool === "annotate") {
+        setBoardTool(null);
+        setAnnotateMode(!annotatingRef.current);
+        return;
+      }
+      if (annotatingRef.current) setAnnotateMode(false, true);
+      setBoardTool(boardToolRef.current === tool ? null : tool);
+    },
+    [setAnnotateMode, setBoardTool],
+  );
+  const unsentCount = unsentAnnotations + unsentMarks.length + unsentMoves.length;
+  // What the bar of waiting changes shows: anything to discard, and what has gone out but is not applied yet.
+  const hasChanges =
+    !shared &&
+    (visibleAnnotations.some((a) => a.text.trim()) || marks.some((m) => m.text.trim()) || movedItems.length > 0);
+  const waitingCount =
+    visibleAnnotations.filter((a) => a.sent || a.queued).length +
+    marks.filter((m) => m.sent !== undefined || m.queued).length +
+    movedItems.filter((m) => moveStateOf(m) !== "new").length;
+  // A press anywhere but on a note or section lets go of the selection.
+  useEffect(() => {
+    if (!selected) return;
+    const onDown = (event: PointerEvent) => {
+      if (event.target instanceof Element && event.target.closest(".canvas-note-card, .canvas-section-tab, .canvas-section-edge, .canvas-resize")) return;
+      select(null);
+    };
+    window.addEventListener("pointerdown", onDown, true);
+    return () => window.removeEventListener("pointerdown", onDown, true);
+  }, [select, selected]);
+  // A mark leaves once the registry shows it.
+  useEffect(() => {
+    const done = new Set(marksRef.current.filter((m) => isApplied(m, counts, boardContext)).map((m) => m.id));
+    if (!done.size) return;
+    if (openMarkRef.current && done.has(openMarkRef.current)) setMarkOpen(null);
+    setMarks((prev) => prev.filter((m) => !done.has(m.id)));
+  }, [boardContext, counts, setMarkOpen]);
+  // Discards every change not applied yet: annotations, notes and sections, and
+  // moved items, which go back to the registry's positions. Annotations on
+  // trashed items wait for them. Undo brings all of it back.
+  const discardChanges = useCallback(() => {
     const before = annotationsRef.current.filter((a) => shownIds.has(a.itemId) && a.text.trim());
-    setOpen(null);
-    setAnnotations((prev) => prev.filter((a) => !shownIds.has(a.itemId)));
-    notify(labels.clearedAnnotations(before.length), {
-      label: labels.undo,
-      run: () => setAnnotations((now) => [...before, ...now.filter((a) => !before.some((old) => old.id === a.id))]),
+    const beforeMarks = marksRef.current.filter((m) => m.text.trim());
+    const beforePositions = positionsRef.current;
+    const beforeMoves = moveStatesRef.current;
+    const moved = shown.filter((item) => {
+      const p = beforePositions[item.id];
+      return p && (Math.abs(p.x - item.x) > 1 || Math.abs(p.y - item.y) > 1);
     });
-  }, [notify, setOpen, shownIds]);
+    // Carried items count with their section, as they do in the toolbar.
+    const count = before.length + beforeMarks.length + movedItemsRef.current.length;
+    setOpen(null);
+    setMarkOpen(null);
+    setAnnotations((prev) => prev.filter((a) => !shownIds.has(a.itemId)));
+    setMarks([]);
+    if (moved.length) {
+      const next = { ...beforePositions };
+      for (const item of moved) next[item.id] = sanitizePosition({ x: item.x, y: item.y });
+      positionsRef.current = next;
+      setPositions(next);
+      queueSave();
+    }
+    notify(labels.discardedChanges(count), {
+      label: labels.undo,
+      run: () => {
+        setAnnotations((now) => [...before, ...now.filter((a) => !before.some((old) => old.id === a.id))]);
+        setMarks((now) => [...beforeMarks, ...now.filter((m) => !beforeMarks.some((old) => old.id === m.id))]);
+        if (moved.length) {
+          const back = { ...positionsRef.current };
+          for (const item of moved) back[item.id] = beforePositions[item.id]!;
+          positionsRef.current = back;
+          setPositions(back);
+          setMoveStates(beforeMoves);
+          queueSave();
+        }
+      },
+    });
+  }, [notify, queueSave, setMarkOpen, setOpen, shown, shownIds]);
+  /** One message: annotations, then notes and sections, then moved items. */
   const message = useCallback(
-    (list: Annotation[]) => formatAnnotations(list, (itemId) => items.find((item) => item.id === itemId)?.name ?? itemId),
-    [items],
+    (list: Annotation[], markList: BoardMark[] = [], moveList: MovedItem[] = []) =>
+      [
+        list.length ? formatAnnotations(list, (itemId) => items.find((item) => item.id === itemId)?.name ?? itemId) : "",
+        markList.length ? formatBoard(markList, boardContext) : "",
+        moveList.length ? formatMoves(moveList) : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    [boardContext, items],
   );
   const markSent = useCallback(
-    (list: Annotation[]) => {
+    (list: Annotation[], markList: BoardMark[] = [], moveList: MovedItem[] = []) => {
       const sentIds = new Set(list.map((a) => a.id));
+      if (moveList.length) {
+        setMoveStates((prev) => ({ ...prev, ...Object.fromEntries(moveList.map((m) => [m.id, { x: m.x, y: m.y, state: "sent" as const }])) }));
+      }
       // "?" when the item is not rendered yet (a loading frame); the first check sets it.
       setAnnotations((prev) =>
         prev.map((a) => (sentIds.has(a.id) ? { ...a, queued: undefined, sent: sentPrint(a) ?? "?" } : a)),
       );
+      if (!markList.length) return;
+      const targets = sentTargets(markList, counts);
+      setMarks((prev) => prev.map((m) => (targets.has(m.id) ? { ...m, queued: undefined, sent: targets.get(m.id) } : m)));
     },
-    [sentPrint],
+    [counts, sentPrint],
   );
   const copyAnnotations = useCallback(
-    async (list: Annotation[], done: (n: number) => string) => {
-      const text = message(list);
+    async (list: Annotation[], done: (n: number) => string, markList: BoardMark[] = [], moveList: MovedItem[] = []) => {
+      const text = message(list, markList, moveList);
       window.clearTimeout(toastTimer.current);
       try {
         await writeClipboard(text);
@@ -1074,8 +1422,8 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
         setToast({ kind: "failed", text });
         return;
       }
-      markSent(list);
-      notify(done(list.length));
+      markSent(list, markList, moveList);
+      notify(done(list.length + markList.length + moveList.length));
     },
     [markSent, message, notify],
   );
@@ -1086,27 +1434,35 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
    */
   const sendAnnotations = useCallback(async () => {
     closeAnnotation();
+    closeMark();
     const list = annotationsRef.current.filter((a) => shownIds.has(a.itemId) && !a.sent && !a.queued && a.text.trim());
-    if (!list.length) return;
+    const markList = marksRef.current.filter(isUnsent);
+    const moveList = unsentMovesRef.current;
+    const total = list.length + markList.length + moveList.length;
+    if (!total) return;
     const offered = agentRef.current === "listening" || agentRef.current === "working";
     let state = agentRef.current;
     if (state === "listening") {
-      const result = await sendToAgent(message(list));
+      const result = await sendToAgent(message(list, markList, moveList));
       if (result.delivered) {
-        markSent(list);
-        notify(labels.sentToAgent(list.length));
+        markSent(list, markList, moveList);
+        notify(labels.sentToAgent(total));
         return;
       }
       state = result.state;
     }
     if (state === "working") {
       const queuedIds = new Set(list.map((a) => a.id));
+      const queuedMarks = new Set(markList.map((m) => m.id));
       setAnnotations((prev) => prev.map((a) => (queuedIds.has(a.id) ? { ...a, queued: true } : a)));
-      notify(labels.queuedForAgent(list.length));
+      setMarks((prev) => prev.map((m) => (queuedMarks.has(m.id) ? { ...m, queued: true } : m)));
+      setMoveStates((prev) => ({ ...prev, ...Object.fromEntries(moveList.map((m) => [m.id, { x: m.x, y: m.y, state: "queued" as const }])) }));
+      notify(labels.queuedForAgent(total));
       return;
     }
-    await copyAnnotations(list, offered ? labels.agentGoneCopied : labels.copiedAnnotations);
-  }, [closeAnnotation, copyAnnotations, markSent, message, notify, shownIds]);
+    await copyAnnotations(list, offered ? labels.agentGoneCopied : labels.copiedAnnotations, markList, moveList);
+  }, [closeAnnotation, closeMark, copyAnnotations, markSent, message, notify, shownIds]);
+  sendRef.current = sendAnnotations;
 
   // Queued annotations go out as one message once the agent listens again, and
   // turn back into unsent ones if it stops listening, so nothing waits for an
@@ -1116,19 +1472,29 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
     if (agent === undefined || agent === "working") return;
     if (agent === "off") {
       const queued = annotationsRef.current.filter((a) => a.queued);
-      if (!queued.length) return;
+      const queuedMarks = marksRef.current.filter((m) => m.queued);
+      const queuedMoves = Object.entries(moveStatesRef.current).filter(([, m]) => m.state === "queued");
+      if (!queued.length && !queuedMarks.length && !queuedMoves.length) return;
       setAnnotations((prev) => prev.map((a) => (a.queued ? { ...a, queued: undefined } : a)));
-      notify(labels.agentGoneQueued(queued.length));
+      setMarks((prev) => prev.map((m) => (m.queued ? { ...m, queued: undefined } : m)));
+      // A queued move that never went out is simply not sent: it is a move to apply again.
+      setMoveStates((prev) => Object.fromEntries(Object.entries(prev).filter(([, m]) => m.state !== "queued")));
+      notify(labels.agentGoneQueued(queued.length + queuedMarks.length + queuedMoves.length));
       return;
     }
     const queued = annotationsRef.current.filter((a) => a.queued && shownIds.has(a.itemId));
-    if (!queued.length || flushing.current) return;
+    const queuedMarks = marksRef.current.filter((m) => m.queued);
+    const queuedMoves = movedItemsRef.current.filter((m) => {
+      const sent = moveStatesRef.current[m.id];
+      return sent?.state === "queued" && sent.x === m.x && sent.y === m.y;
+    });
+    if ((!queued.length && !queuedMarks.length && !queuedMoves.length) || flushing.current) return;
     flushing.current = true;
-    void sendToAgent(message(queued)).then((result) => {
+    void sendToAgent(message(queued, queuedMarks, queuedMoves)).then((result) => {
       flushing.current = false;
       if (!result.delivered) return;
-      markSent(queued);
-      notify(labels.sentToAgent(queued.length));
+      markSent(queued, queuedMarks, queuedMoves);
+      notify(labels.sentToAgent(queued.length + queuedMarks.length + queuedMoves.length));
     });
   }, [agent, markSent, message, notify, shownIds]);
 
@@ -1228,6 +1594,205 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
     return { x: p.x, y: p.y, w: element.offsetWidth, h: element.offsetHeight };
   }, []);
 
+  // Items whose centre is inside a section, at the positions they have now,
+  // which the agent writes back to source so the shared file keeps the arrangement.
+  const itemsInside = (bounds: { x: number; y: number; w: number; h: number }) =>
+    shown.flatMap((item) => {
+      const r = rectOf(item);
+      if (!r) return [];
+      const cx = r.x + r.w / 2;
+      const cy = r.y + r.h / 2;
+      return cx >= bounds.x && cx <= bounds.x + bounds.w && cy >= bounds.y && cy <= bounds.y + bounds.h
+        ? [{ id: item.id, name: item.name, x: r.x, y: r.y }]
+        : [];
+    });
+  insideRef.current = itemsInside;
+
+  // Moving and resizing notes and sections. The first change to a real one
+  // makes its mark; from then on the ghost is what moves. Everything runs on the
+  // viewport with pointer capture, because the real element is replaced by its
+  // ghost mid-drag and a capture on it would be lost.
+  const boardImpl = useRef<Omit<BoardHandlers, "select">>({ move: () => {}, resize: () => {}, edit: () => {}, nudge: () => {} });
+  const boardHandlers = useMemo<BoardHandlers>(
+    () => ({
+      select,
+      move: (event, ref) => boardImpl.current.move(event, ref),
+      resize: (event, ref, corner) => boardImpl.current.resize(event, ref, corner),
+      edit: (ref) => boardImpl.current.edit(ref),
+      nudge: (ref, dx, dy) => boardImpl.current.nudge(ref, dx, dy),
+    }),
+    [select],
+  );
+  /** What a ref points at now: its mark if it is a ghost, else its registry entry. */
+  const boardOrigin = (ref: BoardRef) => {
+    if (ref.ghost) {
+      const m = marksRef.current.find((mark) => mark.id === ref.id);
+      return m && { x: m.x, y: m.y, w: m.w, h: m.h };
+    }
+    const e = boardContext.entryOf(ref.kind, ref.id);
+    return e && { x: e.x, y: e.y, w: e.w, h: e.h };
+  };
+  const shiftItems = (carried: { id: string; x: number; y: number }[], dx: number, dy: number) => {
+    if (!carried.length) return;
+    const next = { ...positionsRef.current };
+    for (const c of carried) next[c.id] = sanitizePosition({ x: c.x + dx, y: c.y + dy });
+    positionsRef.current = next;
+    setPositions(next);
+  };
+  /** A change that ended where it began is no change. */
+  const pruneUnchanged = () =>
+    setMarks((prev) => prev.filter((m) => !(isUnchanged(m) && m.sent === undefined && m.id !== openMarkRef.current)));
+  // A double-click is two quick presses that never travel. The browser's own
+  // dblclick goes to the viewport, which holds the pointer capture during a press,
+  // so it never reaches a note or tab.
+  const lastTap = useRef<{ key: string; time: number } | null>(null);
+  /** Runs `step` for each pointer move of this drag after the drag threshold, `done` once it ends, and `tap` instead if it never moved. */
+  const dragBoard = (
+    event: ReactPointerEvent<HTMLElement>,
+    first: () => void,
+    step: (dx: number, dy: number) => void,
+    done: () => void,
+    tap?: () => void,
+  ) => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const pointerId = event.pointerId;
+    const start = { x: event.clientX, y: event.clientY };
+    let moved = false;
+    try {
+      viewport.setPointerCapture(pointerId);
+    } catch {
+      // The pointer may already be gone.
+    }
+    const move = (e: PointerEvent) => {
+      if (e.pointerId !== pointerId) return;
+      if (!moved) {
+        if (Math.hypot(e.clientX - start.x, e.clientY - start.y) <= DRAG_THRESHOLD) return;
+        moved = true;
+        first();
+      }
+      const z = camera.current.z;
+      step((e.clientX - start.x) / z, (e.clientY - start.y) / z);
+    };
+    const end = (e: PointerEvent) => {
+      if (e.pointerId !== pointerId) return;
+      viewport.removeEventListener("pointermove", move);
+      viewport.removeEventListener("pointerup", end);
+      viewport.removeEventListener("pointercancel", end);
+      if (!moved) {
+        if (e.type === "pointerup") tap?.();
+        return;
+      }
+      suppressNextClick();
+      done();
+    };
+    viewport.addEventListener("pointermove", move);
+    viewport.addEventListener("pointerup", end);
+    viewport.addEventListener("pointercancel", end);
+  };
+  boardImpl.current = {
+    move: (event, ref) => {
+      if (event.button !== 0 || spaceArmed.current || boardToolRef.current) return;
+      if (event.target instanceof Element && event.target.closest("textarea, button, .canvas-resize")) return;
+      const origin = boardOrigin(ref);
+      if (!origin) return;
+      event.stopPropagation();
+      // Stops text selection while dragging.
+      event.preventDefault();
+      select(ref);
+      let id = ref.ghost ? ref.id : "";
+      // A section carries the items inside it, so the frame never leaves its contents behind.
+      const carried = ref.kind === "section" && origin.w && origin.h ? itemsInside({ x: origin.x, y: origin.y, w: origin.w, h: origin.h }) : [];
+      dragBoard(
+        event,
+        () => {
+          if (id) return;
+          id = ensureMark(ref.kind, ref.id);
+          select({ kind: ref.kind, id, ghost: true });
+        },
+        (dx, dy) => {
+          if (!id) return;
+          const x = Math.round(origin.x + dx);
+          const y = Math.round(origin.y + dy);
+          updateMark(id, { x, y });
+          shiftItems(carried, x - origin.x, y - origin.y);
+        },
+        () => {
+          if (carried.length) queueSave();
+          pruneUnchanged();
+        },
+        () => {
+          const key = `${ref.kind}:${ref.id}`;
+          const now = performance.now();
+          if (lastTap.current?.key === key && now - lastTap.current.time < DOUBLE_TAP_MS) {
+            lastTap.current = null;
+            editBoard(ref);
+          } else lastTap.current = { key, time: now };
+        },
+      );
+    },
+    resize: (event, ref, corner: Corner) => {
+      if (event.button !== 0 || spaceArmed.current) return;
+      const origin = boardOrigin(ref);
+      if (!origin) return;
+      event.stopPropagation();
+      event.preventDefault();
+      // A note's height follows its text until it is resized, so its drawn size is the start.
+      const drawn = worldRef.current?.querySelector<HTMLElement>(
+        ref.ghost ? `[data-board-ghost="${CSS.escape(ref.id)}"]` : `[data-board-id="${CSS.escape(ref.id)}"]`,
+      );
+      const w0 = origin.w ?? drawn?.offsetWidth ?? NOTE_WIDTH;
+      const h0 = origin.h ?? drawn?.offsetHeight ?? 80;
+      const least = ref.kind === "section" ? { w: 120, h: 80 } : { w: 120, h: 60 };
+      const east = corner.endsWith("e");
+      const south = corner.startsWith("s");
+      let id = ref.ghost ? ref.id : "";
+      dragBoard(
+        event,
+        () => {
+          if (id) return;
+          id = ensureMark(ref.kind, ref.id);
+          select({ kind: ref.kind, id, ghost: true });
+        },
+        (dx, dy) => {
+          if (!id) return;
+          const w = Math.max(least.w, w0 + (east ? dx : -dx));
+          const h = Math.max(least.h, h0 + (south ? dy : -dy));
+          // The edge opposite the grip stays where it was.
+          updateMark(id, {
+            x: Math.round(east ? origin.x : origin.x + w0 - w),
+            y: Math.round(south ? origin.y : origin.y + h0 - h),
+            w: Math.round(w),
+            h: Math.round(h),
+          });
+        },
+        pruneUnchanged,
+      );
+    },
+    edit: editBoard,
+    nudge: (ref, dx, dy) => {
+      const origin = boardOrigin(ref);
+      if (!origin) return;
+      const id = ref.ghost ? ref.id : ensureMark(ref.kind, ref.id);
+      if (!id) return;
+      const carried = ref.kind === "section" && origin.w && origin.h ? itemsInside({ x: origin.x, y: origin.y, w: origin.w, h: origin.h }) : [];
+      updateMark(id, { x: Math.round(origin.x + dx), y: Math.round(origin.y + dy) });
+      shiftItems(carried, dx, dy);
+      queueSave();
+      if (!ref.ghost) {
+        // The real element is replaced by its ghost; keyboard focus follows it.
+        select({ kind: ref.kind, id, ghost: true });
+        requestAnimationFrame(() =>
+          worldRef.current
+            ?.querySelector<HTMLElement>(
+              `[data-board-ghost="${CSS.escape(id)}"].canvas-note-card, [data-board-ghost="${CSS.escape(id)}"] .canvas-section-tab`,
+            )
+            ?.focus({ preventScroll: true }),
+        );
+      }
+    },
+  };
+
   const boundsOf = useCallback(
     (targets: CanvasItem[]) => {
       let bounds: Bounds | null = null;
@@ -1251,9 +1816,27 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
 
   const fitAll = useCallback(() => {
     const viewport = viewportRef.current;
-    const bounds = boundsOf(shown);
-    if (viewport && bounds) setCamera(fitBounds(bounds, viewport.clientWidth, viewport.clientHeight));
-  }, [boundsOf, setCamera, shown]);
+    let bounds = boundsOf(shown);
+    // Sections and notes belong to the picture too. A section's title sits above its frame.
+    const extra: Bounds[] = [
+      ...sections.map((s) => ({ minX: s.x, minY: s.y - SECTION_TITLE_ROOM, maxX: s.x + s.width, maxY: s.y + s.height })),
+      ...notes.map((n) => {
+        const height = worldRef.current?.querySelector<HTMLElement>(`[data-board-id="${CSS.escape(n.id)}"]`)?.offsetHeight ?? 80;
+        return { minX: n.x, minY: n.y, maxX: n.x + (n.width ?? NOTE_WIDTH), maxY: n.y + height };
+      }),
+    ];
+    for (const box of extra) {
+      bounds = bounds
+        ? {
+            minX: Math.min(bounds.minX, box.minX),
+            minY: Math.min(bounds.minY, box.minY),
+            maxX: Math.max(bounds.maxX, box.maxX),
+            maxY: Math.max(bounds.maxY, box.maxY),
+          }
+        : box;
+    }
+    if (viewport && bounds) setCamera(fitBounds(bounds, viewport.clientWidth, viewport.clientHeight, FIT_PADDING));
+  }, [boundsOf, notes, sections, setCamera, shown]);
   const fitAllRef = useRef(fitAll);
   fitAllRef.current = fitAll;
 
@@ -1271,9 +1854,10 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
       // otherwise cover a new version just as it arrives.
       const toolbar = viewport.parentElement?.querySelector(".canvas-toolbar")?.getBoundingClientRect();
       const bottom = toolbar ? Math.max(m, viewport.getBoundingClientRect().bottom - toolbar.top + TOAST_ROW) : m;
+      const top = Math.max(m, CHROME_TOP);
       const visible =
         bounds.minX * z + x >= m &&
-        bounds.minY * z + y >= m &&
+        bounds.minY * z + y >= top &&
         bounds.maxX * z + x <= w - m &&
         bounds.maxY * z + y <= h - bottom;
       if (visible) return;
@@ -1282,12 +1866,12 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
         Math.min(
           z,
           (w - m * 2) / Math.max(1, bounds.maxX - bounds.minX),
-          (h - m - bottom) / Math.max(1, bounds.maxY - bounds.minY),
+          (h - top - bottom) / Math.max(1, bounds.maxY - bounds.minY),
         ),
       );
       setCamera({
         x: w / 2 - ((bounds.minX + bounds.maxX) / 2) * next,
-        y: (m + h - bottom) / 2 - ((bounds.minY + bounds.maxY) / 2) * next,
+        y: (top + h - bottom) / 2 - ((bounds.minY + bounds.maxY) / 2) * next,
         z: next,
       });
     },
@@ -1560,6 +2144,80 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
     if ((current.kind === "pan" || current.kind === "move") && current.moved > DRAG_THRESHOLD) suppressNextClick();
   }, [queueSave, suppressNextClick]);
 
+  // The Note and Section tools place marks on empty canvas. Held in a ref so the
+  // gesture effect below, which sets up once, always runs the current version.
+  const boardPressRef = useRef<(event: PointerEvent) => boolean>(() => false);
+  boardPressRef.current = (event) => {
+    const tool = boardToolRef.current;
+    const viewport = viewportRef.current;
+    const world = worldRef.current;
+    if (!tool || !viewport || !world) return false;
+    if (event.button !== 0 || event.pointerType === "touch" || spaceArmed.current) return false;
+    if (event.target !== viewport && event.target !== world) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    // The new mark's field takes focus; without this the press's own focus change would blur it at once.
+    window.addEventListener("mousedown", (e) => e.preventDefault(), { capture: true, once: true });
+    const toWorld = (clientX: number, clientY: number) => {
+      const rect = viewport.getBoundingClientRect();
+      const { x, y, z } = camera.current;
+      return { x: (clientX - rect.left - x) / z, y: (clientY - rect.top - y) / z };
+    };
+    if (tool === "note") {
+      const point = toWorld(event.clientX, event.clientY);
+      startMark("note", point.x, point.y);
+      setBoardTool(null);
+      return true;
+    }
+    const start = { x: event.clientX, y: event.clientY };
+    const box = drawRef.current;
+    const dragged = (e: PointerEvent) => ({
+      left: Math.min(start.x, e.clientX),
+      top: Math.min(start.y, e.clientY),
+      right: Math.max(start.x, e.clientX),
+      bottom: Math.max(start.y, e.clientY),
+    });
+    try {
+      viewport.setPointerCapture(event.pointerId);
+    } catch {
+      // The pointer may already be gone.
+    }
+    const move = (e: PointerEvent) => {
+      if (e.pointerId !== event.pointerId || !box) return;
+      const r = dragged(e);
+      Object.assign(box.style, {
+        left: `${r.left}px`,
+        top: `${r.top}px`,
+        width: `${r.right - r.left}px`,
+        height: `${r.bottom - r.top}px`,
+      });
+      box.hidden = false;
+    };
+    const end = (e: PointerEvent) => {
+      if (e.pointerId !== event.pointerId) return;
+      viewport.removeEventListener("pointermove", move);
+      viewport.removeEventListener("pointerup", end);
+      viewport.removeEventListener("pointercancel", end);
+      if (box) box.hidden = true;
+      if (e.type === "pointercancel") return;
+      const r = dragged(e);
+      const a = toWorld(r.left, r.top);
+      const b = toWorld(r.right, r.bottom);
+      if (b.x - a.x < SECTION_MIN_W || b.y - a.y < SECTION_MIN_H) return;
+      suppressNextClick();
+      startMark("section", a.x, a.y, { w: Math.round(b.x - a.x), h: Math.round(b.y - a.y) });
+      setBoardTool(null);
+    };
+    viewport.addEventListener("pointermove", move);
+    viewport.addEventListener("pointerup", end);
+    viewport.addEventListener("pointercancel", end);
+    return true;
+  };
+  // The tool turns previews and notes inert and the cursor into a crosshair (canvas.css).
+  useEffect(() => {
+    viewportRef.current?.toggleAttribute("data-board-tool", !!boardTool);
+  }, [boardTool]);
+
   useEffect(() => {
     const viewport = viewportRef.current;
     const world = worldRef.current;
@@ -1603,6 +2261,7 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
     };
 
     const onPointerDown = (event: PointerEvent) => {
+      if (boardPressRef.current(event)) return;
       if (event.pointerType === "touch") {
         touches.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
         if (touches.current.size === 2) {
@@ -1854,15 +2513,33 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
       const canvasFocus =
         event.target === viewport ||
         event.target === document.body ||
-        (event.target instanceof Element && event.target.closest(".canvas-toolbar, .canvas-pin-bubble") !== null);
+        (event.target instanceof Element && event.target.closest(".canvas-toolbar, .canvas-pin-bubble") !== null) ||
+        // A focused note or section itself, not the field inside a ghost.
+        (event.target instanceof Element && event.target.matches(".canvas-note-card, .canvas-section-tab"));
       if (!shared && plain && canvasFocus && (event.key === "a" || event.key === "A") && !event.repeat) {
         event.preventDefault();
-        setAnnotateMode(!annotatingRef.current);
+        chooseTool("annotate");
         if (annotatingRef.current && pointer.x >= 0) showPick(document.elementFromPoint(pointer.x, pointer.y));
         return;
       }
-      if (event.key === "Escape" && annotatingRef.current && !openRef.current && canvasFocus) {
+      // V puts every tool down, N and S pick the Note and Section tools.
+      const toolKey = shared || !plain || !canvasFocus || event.repeat ? undefined : { v: "select", n: "note", s: "section" }[event.key.toLowerCase()];
+      if (toolKey) {
+        event.preventDefault();
+        chooseTool(toolKey as "select" | BoardKind);
+        return;
+      }
+      // Escape puts a Note or Section tool down first, then leaves annotate mode.
+      if (event.key === "Escape" && boardToolRef.current && canvasFocus) {
+        setBoardTool(null);
+        return;
+      }
+      if (event.key === "Escape" && annotatingRef.current && !openRef.current && !openMarkRef.current && canvasFocus) {
         setAnnotateMode(false);
+        return;
+      }
+      if (event.key === "Escape" && selectedRef.current && !openMarkRef.current && canvasFocus) {
+        select(null);
         return;
       }
       if (event.code === "Space" && !event.repeat) {
@@ -2048,6 +2725,8 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
     resetCamera,
     setCamera,
     setAnnotateMode,
+    chooseTool,
+    select,
     startAnnotation,
     suppressNextClick,
     zoomBy,
@@ -2058,7 +2737,7 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
   const onTitlePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLElement>, item: CanvasItem) => {
       const target = event.target as Element;
-      if (event.button !== 0 || gesture.current || target.closest(".canvas-item-action, input")) return;
+      if (event.button !== 0 || gesture.current || target.closest(".canvas-item-action, .canvas-item-tag, input")) return;
       // Stops text selection while dragging; the click still fires.
       event.preventDefault();
       const pointerId = event.pointerId;
@@ -2096,6 +2775,17 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
     [endGesture],
   );
 
+  /** Puts an item back where the registry has it. */
+  const undoMove = useCallback(
+    (item: CanvasItem) => {
+      const next = { ...positionsRef.current, [item.id]: sanitizePosition({ x: item.x, y: item.y }) };
+      positionsRef.current = next;
+      setPositions(next);
+      queueSave();
+    },
+    [queueSave],
+  );
+
   const onHandleKey = useCallback(
     (item: CanvasItem, dx: number, dy: number) => {
       setPositions((prev) => {
@@ -2108,6 +2798,9 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
     },
     [queueSave],
   );
+
+  // A shared file only shows notes and sections; while a Note or Section tool is armed the canvas takes every press.
+  const boardInteractive = !shared && !boardTool;
 
   return (
     <div className="canvas-root">
@@ -2122,6 +2815,17 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
         aria-describedby="canvas-help"
       >
         <div ref={worldRef} className="canvas-world">
+          {/* Sections first, so items draw above their frame; notes and ghosts last, above everything. */}
+          {sections.map((section) => (
+            <SectionView
+              key={section.id}
+              section={section}
+              hidden={marks.some((m) => m.kind === "section" && m.target === section.id)}
+              interactive={boardInteractive}
+              selected={selected === `e:section:${section.id}`}
+              handlers={boardHandlers}
+            />
+          ))}
           {shown.map((item) => (
             <CanvasItemView
               key={item.id}
@@ -2141,6 +2845,34 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
               openAnnotation={openAnnotation?.id ?? null}
               annotationHandlers={annotationHandlers}
               onTrash={moveToTrash}
+              move={(() => {
+                const moved = movedItems.find((m) => m.id === item.id);
+                return moved ? moveStateOf(moved) : undefined;
+              })()}
+              onUndoMove={undoMove}
+            />
+          ))}
+          {notes.map((note) => (
+            <NoteView
+              key={note.id}
+              note={note}
+              hidden={marks.some((m) => m.kind === "note" && m.target === note.id)}
+              interactive={boardInteractive}
+              selected={selected === `e:note:${note.id}`}
+              handlers={boardHandlers}
+            />
+          ))}
+          {marks.map((mark) => (
+            <MarkView
+              key={mark.id}
+              mark={mark}
+              open={openMark === mark.id}
+              interactive={boardInteractive}
+              selected={selected === `g:${mark.kind}:${mark.id}`}
+              handlers={boardHandlers}
+              onText={markHandlers.onText}
+              onClose={markHandlers.onClose}
+              onDelete={markHandlers.onDelete}
             />
           ))}
         </div>
@@ -2198,7 +2930,55 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
           )}
         </div>
       )}
-      <div className="canvas-toolbar" role="toolbar" aria-label={labels.toolbar}>
+      {/* Four groups, each where designers expect it: tools at the bottom centre, the view bottom right, the
+          file's own controls top right, and the changes waiting for the agent, only when there are any, top
+          centre. The tools bar comes first: item reveals measure the first bar for the bottom margin. */}
+      {!shared && (
+        <div className="canvas-toolbar" data-place="tools" role="toolbar" aria-label={labels.toolsBar}>
+          {/* One tool at a time. Select is the default; Escape or V returns to it. */}
+          <button
+            type="button"
+            className="canvas-button canvas-icon-button"
+            aria-pressed={!annotating && !boardTool}
+            aria-label={labels.selectTool}
+            data-tip={labels.selectToolHint}
+            onClick={() => chooseTool("select")}
+          >
+            <SelectIcon />
+          </button>
+          <button
+            type="button"
+            className="canvas-button canvas-icon-button"
+            aria-pressed={annotating}
+            aria-label={labels.annotate}
+            data-tip={labels.annotateHint}
+            onClick={() => chooseTool("annotate")}
+          >
+            <AnnotateIcon />
+          </button>
+          <button
+            type="button"
+            className="canvas-button canvas-icon-button"
+            aria-pressed={boardTool === "note"}
+            aria-label={labels.noteTool}
+            data-tip={labels.noteToolHint}
+            onClick={() => chooseTool("note")}
+          >
+            <NoteIcon />
+          </button>
+          <button
+            type="button"
+            className="canvas-button canvas-icon-button"
+            aria-pressed={boardTool === "section"}
+            aria-label={labels.sectionTool}
+            data-tip={labels.sectionToolHint}
+            onClick={() => chooseTool("section")}
+          >
+            <SectionIcon />
+          </button>
+        </div>
+      )}
+      <div className="canvas-toolbar" data-place="view" role="toolbar" aria-label={labels.viewBar}>
         <button
           type="button"
           className="canvas-button canvas-icon-button"
@@ -2221,9 +3001,14 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
           <PlusIcon />
         </button>
         <span className="canvas-separator" aria-hidden="true" />
-        <button type="button" className="canvas-button" onClick={fitAll}>
+        <button
+          type="button"
+          className="canvas-button canvas-icon-button"
+          aria-label={labels.fitAll}
+          data-tip={labels.fitAll}
+          onClick={fitAll}
+        >
           <FitIcon />
-          {labels.fitAll}
         </button>
         <button
           type="button"
@@ -2234,70 +3019,30 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
         >
           <ResetIcon />
         </button>
-        {!shared && (
-          <>
-            <span className="canvas-separator" aria-hidden="true" />
-            <button
-              type="button"
-              className="canvas-button"
-              aria-pressed={annotating}
-              data-tip={labels.annotateHint}
-              onClick={() => setAnnotateMode(!annotatingRef.current)}
-            >
-              <AnnotateIcon />
-              {labels.annotate}
-            </button>
-            {agentHandling && (
-              <span className="canvas-agent-status">
-                <span className="canvas-agent-dot" aria-hidden="true" />
-                {labels.agentWorking}
-              </span>
-            )}
-            {unsentCount > 0 && (
-              <button type="button" className="canvas-button canvas-button-primary" onClick={() => void sendAnnotations()}>
-                {agentOn ? <SendIcon /> : <CopyIcon />}
-                {agentOn ? labels.sendAnnotations(unsentCount) : labels.copyAnnotations(unsentCount)}
-              </button>
-            )}
-            {visibleAnnotations.some((a) => a.text.trim()) && (
-              <>
-                <button
-                  type="button"
-                  className="canvas-button canvas-icon-button"
-                  aria-label={labels.clearAnnotations}
-                  data-tip={labels.clearAnnotations}
-                  onClick={clearAnnotations}
-                >
-                  <EraserIcon />
-                </button>
-              </>
-            )}
-          </>
-        )}
-        <span className="canvas-separator" aria-hidden="true" />
-        {trashedItems.length > 0 && (
-          <>
-            <button
-              ref={trashButtonRef}
-              type="button"
-              className="canvas-button canvas-trash-button"
-              aria-label={labels.trash(trashedItems.length)}
-              aria-expanded={trashOpen}
-              aria-controls={trashOpen ? "canvas-trash" : undefined}
-              data-tip={labels.trashHeading}
-              onClick={() => {
-                // The trash opens where notices and the share panel show.
-                setToast(null);
-                setSharedFile(null);
-                setTrashOpen((open) => !open);
-              }}
-            >
-              <TrashIcon />
-              {trashedItems.length}
-            </button>
-            <span className="canvas-separator" aria-hidden="true" />
-          </>
-        )}
+      </div>
+      {trashedItems.length > 0 && (
+        <div className="canvas-toolbar" data-place="trash" role="toolbar" aria-label={labels.trashHeading}>
+          <button
+            ref={trashButtonRef}
+            type="button"
+            className="canvas-button canvas-trash-button"
+            aria-label={labels.trash(trashedItems.length)}
+            aria-expanded={trashOpen}
+            aria-controls={trashOpen ? "canvas-trash" : undefined}
+            data-tip={labels.trashHeading}
+            onClick={() => {
+              // The trash opens where notices and the share panel show.
+              setToast(null);
+              setSharedFile(null);
+              setTrashOpen((open) => !open);
+            }}
+          >
+            <TrashIcon />
+            {trashedItems.length}
+          </button>
+        </div>
+      )}
+      <div className="canvas-toolbar" data-place="top" role="toolbar" aria-label={labels.canvasBar}>
         {theme && theme.options.length > 1 && (
           <>
             <fieldset className="canvas-themes" aria-label={labels.theme}>
@@ -2356,6 +3101,36 @@ function CanvasBoard({ items, storageKey, theme }: CanvasProps) {
           </span>
         </span>
       </div>
+      {/* Only while something is waiting: the one place to apply or drop every change, so it is hard to miss. */}
+      {!shared && (hasChanges || agentHandling) && (
+        <div className="canvas-toolbar" data-place="pending" role="group" aria-label={labels.changesBar}>
+          {agentHandling && (
+            <span className="canvas-agent-status">
+              <span className="canvas-agent-dot" aria-hidden="true" />
+              {labels.agentWorking}
+            </span>
+          )}
+          {unsentCount === 0 && waitingCount > 0 && <span className="canvas-pending-note">{labels.waitingForAgent(waitingCount)}</span>}
+          {hasChanges && (
+            <button
+              type="button"
+              className="canvas-button"
+              aria-label={labels.discardChanges}
+              data-tip={labels.discardChanges}
+              onClick={discardChanges}
+            >
+              <EraserIcon />
+              {labels.discardShort}
+            </button>
+          )}
+          {unsentCount > 0 && (
+            <button type="button" className="canvas-button canvas-button-primary" onClick={() => void sendAnnotations()}>
+              {agentOn ? <SendIcon /> : <CopyIcon />}
+              {agentOn ? labels.sendAnnotations(unsentCount) : labels.copyAnnotations(unsentCount)}
+            </button>
+          )}
+        </div>
+      )}
       {sharedFile && <SharePanel file={sharedFile.name} missing={sharedFile.missing} onClose={closeSharePanel} />}
       {trashOpen && (
         <TrashPopover

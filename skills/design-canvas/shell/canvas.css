@@ -230,12 +230,13 @@ body,
   background: rgb(47 111 237 / 8%);
   pointer-events: none;
 }
-/* Minimal fixed controls, centered at the bottom; notices sit just above. */
+/* Fixed controls in four groups, each where a design tool puts it: tools at the
+   bottom centre, the view bottom right, trash bottom left, the file's own
+   controls top right, and the changes waiting for the agent top centre. Notices
+   sit just above the tools. */
 .canvas-toolbar,
 .canvas-toast {
   position: fixed;
-  inset-inline-start: 50%;
-  translate: -50% 0;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -246,9 +247,41 @@ body,
   box-shadow: 0 2px 8px rgb(0 0 0 / 8%);
 }
 .canvas-toolbar {
+  z-index: 5;
   inset-block-end: 16px;
 }
+.canvas-toolbar[data-place="tools"],
+.canvas-toolbar[data-place="pending"] {
+  inset-inline-start: 50%;
+  translate: -50% 0;
+}
+.canvas-toolbar[data-place="view"] {
+  inset-inline-end: 16px;
+}
+.canvas-toolbar[data-place="trash"] {
+  inset-inline-start: 16px;
+}
+.canvas-toolbar[data-place="top"],
+.canvas-toolbar[data-place="pending"] {
+  inset-block: 16px auto;
+}
+.canvas-toolbar[data-place="top"] {
+  inset-inline-end: 16px;
+}
+/* Hints open away from the screen edge, and line up with the end of bars at the right edge. */
+.canvas-toolbar[data-place="view"] [data-tip]:hover::after,
+.canvas-toolbar[data-place="view"] [data-tip]:focus-visible::after,
+.canvas-toolbar[data-place="top"] [data-tip]:hover::after,
+.canvas-toolbar[data-place="top"] [data-tip]:focus-visible::after {
+  inset-inline: auto 0;
+}
+.canvas-toolbar[data-place="top"] .canvas-icon-button[data-tip]::after,
+.canvas-toolbar[data-place="pending"] [data-tip]::after {
+  inset-block: calc(100% + 8px) auto;
+}
 .canvas-toast {
+  inset-inline-start: 50%;
+  translate: -50% 0;
   inset-block-end: 68px;
   gap: 8px;
   padding: 6px 12px;
@@ -328,6 +361,9 @@ body,
   font-size: 13px;
   line-height: 1.5;
 }
+.canvas-toolbar[data-place="top"] .canvas-help-popover {
+  inset-block: calc(100% + 10px) auto;
+}
 .canvas-help:hover .canvas-help-popover,
 .canvas-help:focus-within .canvas-help-popover {
   display: flex;
@@ -346,6 +382,12 @@ body,
   min-block-size: 30px;
   padding: 0 10px;
   color: var(--canvas-subtle-color);
+  white-space: nowrap;
+}
+.canvas-pending-note {
+  padding: 0 10px;
+  color: var(--canvas-subtle-color);
+  font-size: 13px;
   white-space: nowrap;
 }
 .canvas-agent-dot {
@@ -398,7 +440,20 @@ body,
   margin: 16px;
   font-size: 14px;
 }
-/* Narrow windows keep every control; the text labels go first. */
+/* Narrow windows: the view stacks above the tools, the waiting changes drop under
+   the top bar, and notices clear both. */
+@media (max-width: 640px) {
+  .canvas-toolbar[data-place="view"] {
+    inset-block-end: 64px;
+  }
+  .canvas-toolbar[data-place="pending"] {
+    inset-block-start: 64px;
+  }
+  .canvas-toast {
+    inset-block-end: 116px;
+  }
+}
+/* Narrower still keeps every control; the text labels go first. */
 @media (max-width: 480px) {
   .canvas-toolbar .canvas-button:not(.canvas-icon-button) {
     justify-content: center;
@@ -640,8 +695,7 @@ html[data-canvas-alt] .canvas-frame-root * {
 .canvas-trash-popover {
   position: fixed;
   inset-block-end: 64px;
-  inset-inline-start: 50%;
-  translate: -50% 0;
+  inset-inline-start: 16px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -750,12 +804,11 @@ html[data-canvas-alt] .canvas-frame-root * {
   }
 }
 
-/* After Share: the file's name and the ways to pass it on, where the trash opens. */
+/* After Share: the file's name and the ways to pass it on, under the Share button. */
 .canvas-share-popover {
   position: fixed;
-  inset-block-end: 64px;
-  inset-inline-start: 50%;
-  translate: -50% 0;
+  inset-block-start: 64px;
+  inset-inline-end: 16px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -799,4 +852,320 @@ html[data-canvas-alt] .canvas-frame-root * {
 }
 .canvas-share-way {
   color: var(--canvas-subtle-color);
+}
+
+/* Notes and sections.
+   A section is a folder: a frame behind its items with its title on a raised
+   tab, in tints of the canvas's own colors so it follows the theme.
+   A note is a sticker with a folded corner, in fixed colors in every theme, so
+   it reads as a comment on the work and never as part of the product. */
+.canvas-section {
+  --section-fill: color-mix(in srgb, var(--canvas-text-color) 5%, var(--canvas-bg-color));
+  --section-line: color-mix(in srgb, var(--canvas-text-color) 24%, var(--canvas-bg-color));
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  /* Below the items in the world's own stacking context, a ghost section included. */
+  z-index: -1;
+  /* Presses pass through the frame, so empty space inside a section still pans. */
+  pointer-events: none;
+}
+.canvas-section-frame {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  border: 1.5px solid var(--section-line);
+  /* The tab sits on the top-left corner, so that corner stays square. */
+  border-radius: 0 12px 12px 12px;
+  background: var(--section-fill);
+}
+/* The tab covers the frame's top edge under it, so the two read as one shape. */
+.canvas-section-tab {
+  position: absolute;
+  inset-block-end: 100%;
+  inset-inline-start: 0;
+  margin-block-end: -1.5px;
+  box-sizing: border-box;
+  max-inline-size: 70%;
+  padding: 5px 14px 6px;
+  border: 1.5px solid var(--section-line);
+  border-block-end: 0;
+  border-radius: 10px 10px 0 0;
+  background: var(--section-fill);
+  color: var(--canvas-text-color);
+  font: 600 14px/1.2 var(--canvas-font, system-ui, -apple-system, "Segoe UI", sans-serif);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: none;
+}
+.canvas-section[data-interactive] .canvas-section-tab {
+  pointer-events: auto;
+  cursor: grab;
+}
+.canvas-section[data-selected] .canvas-section-frame,
+.canvas-section[data-selected] .canvas-section-tab {
+  outline: 2px solid var(--canvas-focus-color);
+  outline-offset: 2px;
+}
+.canvas-section[data-interactive]:not([data-selected]) .canvas-section-tab:hover {
+  background: color-mix(in srgb, var(--canvas-text-color) 10%, var(--canvas-bg-color));
+}
+
+.canvas-note-card {
+  --fold: 22px;
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  z-index: 2;
+  display: flex;
+  box-sizing: border-box;
+  /* A drop shadow, not box-shadow: the cut corner would clip the latter. */
+  filter: drop-shadow(0 1px 1px rgb(0 0 0 / 14%)) drop-shadow(0 6px 10px rgb(0 0 0 / 10%));
+  color: #2b2400;
+  font: 14px/1.45 var(--canvas-font, system-ui, -apple-system, "Segoe UI", sans-serif);
+  cursor: default;
+  user-select: text;
+}
+.canvas-note-body {
+  position: relative;
+  flex: 1;
+  box-sizing: border-box;
+  min-inline-size: 0;
+  padding: 14px 16px 18px;
+  background: linear-gradient(180deg, #fff7bd, #ffee96);
+  /* The bottom-right corner is cut away; ::after draws the flap that folds over it. */
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - var(--fold)), calc(100% - var(--fold)) 100%, 0 100%);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.canvas-note-body::after {
+  content: "";
+  position: absolute;
+  inset-inline-end: 0;
+  inset-block-end: 0;
+  inline-size: var(--fold);
+  block-size: var(--fold);
+  background: linear-gradient(135deg, #f8e98f 0, #d4b73a 50%, transparent 50%);
+}
+.canvas-note-card[data-interactive] {
+  cursor: grab;
+  user-select: none;
+}
+.canvas-note-card[data-interactive]:not([data-selected]):hover {
+  outline: 1.5px solid color-mix(in srgb, var(--canvas-focus-color) 60%, transparent);
+  outline-offset: 3px;
+}
+.canvas-note-card[data-selected] {
+  outline: 2px solid var(--canvas-focus-color);
+  outline-offset: 3px;
+}
+
+/* Corner grips on the selected note or section; one size on screen at any zoom. */
+.canvas-resize {
+  position: absolute;
+  z-index: 3;
+  inline-size: 10px;
+  block-size: 10px;
+  margin: -5px;
+  box-sizing: border-box;
+  border: 2px solid var(--canvas-focus-color);
+  border-radius: 2px;
+  background: #fff;
+  transform: scale(var(--canvas-unzoom, 1));
+  pointer-events: auto;
+}
+.canvas-resize[data-corner="nw"] {
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  cursor: nwse-resize;
+}
+.canvas-resize[data-corner="ne"] {
+  inset-block-start: 0;
+  inset-inline-end: 0;
+  margin-inline: 0 -5px;
+  cursor: nesw-resize;
+}
+.canvas-resize[data-corner="sw"] {
+  inset-block-end: 0;
+  inset-inline-start: 0;
+  margin-block: 0 -5px;
+  cursor: nesw-resize;
+}
+.canvas-resize[data-corner="se"] {
+  inset-block-end: 0;
+  inset-inline-end: 0;
+  margin: 0 -5px -5px 0;
+  cursor: nwse-resize;
+}
+.canvas-resize[data-corner="ne"],
+.canvas-resize[data-corner="sw"],
+.canvas-resize[data-corner="se"] {
+  transform-origin: center;
+}
+
+/* While a Note or Section tool is armed, the whole canvas takes the press, and
+   the cursor says so. */
+.canvas-viewport[data-board-tool],
+.canvas-viewport[data-board-tool] * {
+  cursor: crosshair !important;
+}
+.canvas-viewport[data-board-tool] .canvas-item,
+.canvas-viewport[data-board-tool] .canvas-note-card,
+.canvas-viewport[data-board-tool] .canvas-section-tab,
+.canvas-viewport[data-board-tool] .canvas-resize,
+.canvas-viewport[data-board-tool] .canvas-ghost-tag {
+  pointer-events: none;
+}
+
+/* Waiting for the agent: dashed and tagged, so an unapplied change is never
+   taken for content, and the tag says what happens next. */
+.canvas-ghost {
+  z-index: 3;
+}
+.canvas-section.canvas-ghost {
+  z-index: -1;
+  --section-line: #b87c00;
+  --section-fill: color-mix(in srgb, #b87c00 9%, var(--canvas-bg-color));
+}
+.canvas-section.canvas-ghost .canvas-section-frame,
+.canvas-section.canvas-ghost .canvas-section-tab {
+  border-style: dashed;
+}
+.canvas-section.canvas-ghost .canvas-section-tab {
+  border-block-end: 0;
+}
+.canvas-note-card.canvas-ghost {
+  outline: 2px dashed #b87c00;
+  outline-offset: 3px;
+}
+.canvas-note-card.canvas-ghost[data-selected] {
+  outline: 2px solid var(--canvas-focus-color);
+}
+.canvas-note-card.canvas-ghost .canvas-note-body {
+  opacity: 0.88;
+}
+.canvas-ghost-tag {
+  position: absolute;
+  inset-block-end: 100%;
+  inset-inline-end: 0;
+  z-index: 4;
+  margin-block-end: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px 2px 8px;
+  border-radius: 999px;
+  background: #b87c00;
+  color: #fff;
+  font: 600 12px var(--canvas-font, system-ui, -apple-system, "Segoe UI", sans-serif);
+  white-space: nowrap;
+  pointer-events: auto;
+  user-select: none;
+}
+.canvas-ghost[data-state="sent"] .canvas-ghost-tag,
+.canvas-ghost[data-state="queued"] .canvas-ghost-tag {
+  background: #5f6b76;
+}
+.canvas-ghost-delete {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 5px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.canvas-ghost-delete svg {
+  display: block;
+}
+.canvas-ghost-delete:hover {
+  background: rgb(255 255 255 / 25%);
+}
+.canvas-ghost-field {
+  box-sizing: border-box;
+  inline-size: 100%;
+  min-block-size: 3.2em;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  resize: none;
+  field-sizing: content;
+  user-select: text;
+}
+/* A section's title is typed on its tab. */
+.canvas-section-tab .canvas-ghost-field {
+  inline-size: auto;
+  min-inline-size: 10ch;
+  min-block-size: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* A section pulls by its tab, marked with the same grip an item's name has, and
+   by its frame, which lights up under the pointer. */
+.canvas-section-grip {
+  display: inline-block;
+  margin-inline-end: 7px;
+  vertical-align: -1px;
+  opacity: 0.55;
+}
+.canvas-section[data-interactive] .canvas-section-tab:hover .canvas-section-grip {
+  opacity: 1;
+}
+.canvas-section-edge {
+  position: absolute;
+  display: none;
+  pointer-events: auto;
+  cursor: grab;
+}
+.canvas-section[data-interactive] .canvas-section-edge {
+  display: block;
+}
+.canvas-section-edge[data-side="top"],
+.canvas-section-edge[data-side="bottom"] {
+  inset-inline: 0;
+  block-size: 10px;
+}
+.canvas-section-edge[data-side="left"],
+.canvas-section-edge[data-side="right"] {
+  inset-block: 0;
+  inline-size: 10px;
+}
+.canvas-section-edge[data-side="top"] {
+  inset-block-start: -5px;
+}
+.canvas-section-edge[data-side="bottom"] {
+  inset-block-end: -5px;
+}
+.canvas-section-edge[data-side="left"] {
+  inset-inline-start: -5px;
+}
+.canvas-section-edge[data-side="right"] {
+  inset-inline-end: -5px;
+}
+.canvas-section:has(.canvas-section-edge:hover):not([data-selected]) .canvas-section-frame,
+.canvas-section:has(.canvas-section-tab:hover):not([data-selected]) .canvas-section-frame {
+  border-color: color-mix(in srgb, var(--canvas-focus-color) 70%, var(--canvas-bg-color));
+}
+.canvas-viewport[data-board-tool] .canvas-section-edge {
+  pointer-events: none;
+}
+
+/* The same tag on an item that sits somewhere the registry does not have it:
+   above its top-right corner, where a note's or section's tag sits. */
+.canvas-item-tag {
+  z-index: 4;
+}
+.canvas-item-tag[data-state="sent"],
+.canvas-item-tag[data-state="queued"] {
+  background: #5f6b76;
 }

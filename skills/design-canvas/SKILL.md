@@ -5,13 +5,13 @@ description: Build or update a local design canvas of live, real product compone
 
 # Design canvas
 
-A freeform canvas of live previews: the app's real components, synthetic data, no backend. People pan, zoom, drag items by their name or grip, click a name to copy it, open an item alone in a new tab, move items to the trash and put them back, switch the app's themes, Alt/Option-click any element to copy a reference for the conversation, send you annotations straight from the canvas, and download the canvas as one HTML file to share. You change content in source files. The canvas shell is already built and tested, so never rebuild it.
+A freeform canvas of live previews: the app's real components, synthetic data, no backend. People pan, zoom, drag items by their name or grip, click a name to copy it, open an item alone in a new tab, move items to the trash and put them back, switch the app's themes, Alt/Option-click any element to copy a reference for the conversation, send you annotations straight from the canvas, add notes and sections that explain the canvas to whoever you share it with, and download the canvas as one HTML file to share. You change content in source files. The canvas shell is already built and tested, so never rebuild it.
 
 Rules adapted from `create-canvas` in ibelick/ui-skills (MIT).
 
 ## 1. Find or install the canvas
 
-- Look for an existing canvas first: a folder with `canvas/Canvas.tsx` and `registry.tsx`, usually under `design-canvas/` in the app. Continue that one for follow-up requests. Before your first change to it in a conversation, bring it up to date with this skill: `bash ~/.agents/skills/design-canvas/scripts/update.sh <canvas-folder>`. It replaces only `canvas/` and lists what changed. If anything changed, tell the user in one line that the canvas was updated. If `update.sh` or `install.sh` says a newer version of this skill is out, tell the person in one line with the command it prints, and continue with this copy; after they update, read this file again. If it says the canvas cannot send annotations to the agent, add `agentChannel()` to the plugins in the canvas's vite config, imported from `./canvas/agent-channel.ts`, and `allowImportingTsExtensions` and `noEmit` to its tsconfig, as `kits/react-vite/` does.
+- Look for an existing canvas first: a folder with `canvas/Canvas.tsx` and `registry.tsx`, usually under `design-canvas/` in the app. Continue that one for follow-up requests. Before your first change to it in a conversation, bring it up to date with this skill: `bash ~/.agents/skills/design-canvas/scripts/update.sh <canvas-folder>`. It replaces only `canvas/` and lists what changed. If anything changed, tell the user in one line that the canvas was updated. If `update.sh` or `install.sh` says a newer version of this skill is out, tell the person in one line with the command it prints, and continue with this copy; after they update, read this file again. If it says the canvas cannot send annotations to the agent, add `agentChannel()` to the plugins in the canvas's vite config, imported from `./canvas/agent-channel.ts`, and `allowImportingTsExtensions` and `noEmit` to its tsconfig, as `kits/react-vite/` does. If the canvas's `registry.tsx` does not export `notes` and `sections`, add them above `registry` (empty arrays, typed `CanvasNote[]` and `CanvasSection[]` from `./canvas/types`), and pass them in `main.tsx`: `<Canvas items={registry} notes={notes} sections={sections} … />`, as `kits/react-vite/` does. Keep `registry` as the last array in the file.
 - Choose a kit. First list the private kits, which are fitted to specific projects: `ls ~/.agents/design-canvas-kits` (or `$DESIGN_CANVAS_KITS`), and read each `kit.env` label. Use the one that matches this project. Otherwise use `react-vite`, which fits any React app, including Next.js; its canvas is a Vite page in `<app>/design-canvas/<name>/`.
 - Run the installer from inside the app:
 
@@ -62,7 +62,7 @@ If you can run a background command that tells you when it exits (Claude Code ca
 bash ~/.agents/skills/design-canvas/scripts/listen.sh http://127.0.0.1:<port>/
 ```
 
-While it waits, the canvas's annotation button reads "Send N to agent" instead of "Copy N annotations", so people send notes without switching to the chat. After they send, the toolbar shows "Agent working" until you listen again, which tells them you finished. When it exits, act on what it printed:
+While it waits, the button in the bar at the top centre reads "Apply N changes" instead of "Copy N changes", so people send changes without switching to the chat. After they send, that bar shows "Agent working" until you listen again, which tells them you finished. When it exits, act on what it printed:
 
 - Annotations: the person wrote them on the canvas, so they are the person's request. Handle them like pasted annotations (see "References from the user"). The chat does not show them, so start your reply with a short list of what you got. Then listen again.
 - Nothing sent for a while: listen again, unless the person has moved on to other work.
@@ -98,7 +98,7 @@ Each registry entry has a stable `id`, a unique readable `name` such as `Pricing
 - People can move items to the canvas trash and put them back. The trash only hides an item; its code stays in the registry. Never remove an item's code because it is in the trash unless the user asks. The trash is saved in the browser with the layout: `localStorage["design-canvas:<canvas-name>"].trash`, item ids, most recent first.
 - When comparing one feature, keep data, content, size, and theme the same across items. For broader alternatives, name the layout differences. No full variant matrix unless asked.
 - Add the states that matter for the decision, such as empty, long content, or error, as separate items when they are relevant.
-- Give a new item a source position in empty space near related ones. If that spot overlaps the user's saved layout, the canvas moves only the new item to free space beside its row and brings it into view; existing items never move.
+- Give a new item a source position in empty space near related ones. If that spot overlaps the user's saved layout, the canvas moves only the new item to free space beside its row and brings it into view; existing items never move. That move is a change to apply too, so a new item whose source position overlaps shows a "Not applied yet" tag until you set its position in the registry: choose a free spot.
 - Previews never navigate the canvas away. Links, native form submits, and mocked router calls are cancelled with a short notice, while the component's own handlers still run. A link to `#<item-id>` reveals that item, so use it for flows that span items.
 
 ### Real viewport
@@ -133,6 +133,42 @@ Treat each numbered entry as a change to that element, area, or item, and handle
 
 Sent and copied annotations stay on the canvas as sent pins and disappear on their own, so you never need to clear them: in-place ones once their item renders differently after your edit, new-version ones once an item with `from` set to their item appears. A sent pin that stays means its item did not change, or its new version has no `from`.
 
+### Notes and sections
+
+People explain a canvas to the readers of its shared file with notes and sections. The tools bar at the bottom centre has four tools, one on at a time: **Select** (the default; Escape or V returns to it), **Annotate** (A), **Note** (N) and **Section** (S). A note is a sticker: pick Note, click anywhere, type. A section is a folder: pick Section, drag a frame, type its title on the tab. Both tools put themselves down after one use. In Select, a note or a section's tab drags to move it, the corner grips resize it, a double-click edits its text or title, and arrow keys nudge the focused one. A section carries the items inside it when it moves.
+
+Like annotations they are requests, not content: the canvas is source files, so each change shows as a dashed "Not applied yet" ghost until you write it into `registry.tsx`, and the bar at the top centre, which shows only while something is waiting, has **Discard** and the main button (**Apply N changes** while you listen, **Copy N changes** otherwise) that sends them with any annotations in one message:
+
+```text
+Notes and sections from the design canvas (4):
+1. Add a note at 566,260, 220×120: “Keep A: clearer hierarchy”
+2. Add a section “Set aside” at 100,400, size 900×500. Inside it, at their positions on the canvas now: Pricing · B (120,440); Pricing · C (520,440)
+3. Change note “why-b”: text to “B dropped: too dense on mobile”; move to 640,120
+4. Change section “set-aside”: resize to 960×520; items inside, at their positions on the canvas now: Pricing · B (120,440)
+```
+
+Apply every entry, and say which you could not:
+
+- **Add a note**: a `notes` entry `{ id, text, x, y, width, height }` with a readable kebab-case `id`. `width` and `height` come from the size shown; `height` is a minimum, since a note grows with its text. Keep the person's wording; fix only typos.
+- **Add a section**: a `sections` entry `{ id, title, x, y, width, height }` with those bounds.
+- **Change a note or section**: edit that entry, and only the parts the line names: `text` or `title`, `x` and `y` (move), `width` and `height` (resize).
+- **Items inside a section**: the positions listed are where the person has the items now, but the registry still holds their old ones, and the shared file uses the registry. Set each listed item's `x` and `y` to the position shown. A section only draws a frame and never moves items by itself. Items the person did not put inside stay where they are.
+- Removing a note or section is a plain request in chat: remove its entry.
+
+A ghost leaves on its own once the registry shows it: a new one when the registry holds one more note or section than when it was sent, a change when the entry matches the ghost's text, position, and size. A ghost that stays means the entry is missing or differs.
+
+### Moved items
+
+Where people put items on the canvas is kept in their browser, but the shared file and the next session use the positions in `registry.tsx`. So a moved item is a change to apply, like a note: it shows a "Not applied yet" tag above its top-right corner, counts in the toolbar's Apply button, and goes out in the same message:
+
+```text
+Items moved on the design canvas (2):
+1. Move “Pricing · B” (id pricing-b) to 120,440
+2. Move “Pricing · C” (id pricing-c) to 520,440
+```
+
+Set each listed item's `x` and `y` in the registry to the position shown. The tag leaves on its own once the registry matches; a person can also put the item back with the tag's ↺ button. Items inside a section that is itself waiting are listed under that section instead, not here.
+
 ## 4. Check
 
 - Open the canvas in the browser. Confirm it mounts, every item renders, and the console shows no errors. A hidden browser pane pauses animation frames, so the camera may not repaint; show the pane before judging what you see.
@@ -146,7 +182,7 @@ Sent and copied annotations stay on the canvas as sent pins and disappear on the
 The canvas runs on this machine. To let other people try it, share it as a file.
 
 - **Share as a file.** When the person wants others to try the canvas, or wants it in Figma, run `bash ~/.agents/skills/design-canvas/scripts/share.sh <canvas-folder>`. It builds the canvas into one HTML file, `<canvas-folder>/shared/<name>-<date>.html`, and prints its path and size. Give the person the path; on a Mac, `open -R <file>` shows it in Finder. A second argument writes the file somewhere else. People can also click **Share** in the canvas toolbar: the dev server builds the same file and the browser downloads it.
-  - The file opens with a double-click in any browser, with no server, the app, or an agent. Every item, theme, pan and zoom, and Alt-click reference works. It leaves out annotations and sending to the agent. Each viewer's layout stays in their own browser.
+  - The file opens with a double-click in any browser, with no server, the app, or an agent. Every item, theme, pan and zoom, and Alt-click reference works. It keeps notes and sections, since they are in the registry, and leaves out annotations, the unapplied ghosts, and sending to the agent. Each viewer's layout stays in their own browser.
   - In Figma, people drag the file onto a canvas. It becomes a code layer; they press its play button or view it full screen.
   - In Notion, people drag the file into a page. It becomes an embedded web page that works in place.
   - It is a snapshot. Share again after changes, and say which items changed.
