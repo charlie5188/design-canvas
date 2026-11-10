@@ -31,6 +31,7 @@ import {
   saveMarks,
   saveMoves,
   sentTargets,
+  foldedNotes,
 } from "./marks";
 import { frameUrl, fromThisCanvas, NAVIGATE_EVENT, postToFrame, readFrameMessage, shared } from "./bridge";
 import { FrameHost } from "./FrameHost";
@@ -100,6 +101,17 @@ const SECTION_TITLE_ROOM = 32;
 /** The smallest section a drag makes; anything smaller reads as a stray click. */
 const SECTION_MIN_W = 80;
 const SECTION_MIN_H = 60;
+/**
+ * A note inside a section that is being moved. `ghost` says `id` is a mark (a
+ * new note, or a change already made to a registry note); otherwise `id` is the
+ * registry note, which gets a mark once it actually moves.
+ */
+type CarriedNote = { id: string; ghost: boolean; x: number; y: number };
+/** The marks that are a change of their own: a note folded into its section's change is counted with that section. */
+const standalone = (list: BoardMark[], all: BoardMark[]) => {
+  const folded = foldedNotes(all);
+  return list.filter((m) => !folded.has(m.id));
+};
 
 /** Previews never rerender because of the camera, a move, or a copy. */
 const Preview = memo(function Preview({ component: Component }: { component: ComponentType }) {
@@ -1138,6 +1150,7 @@ function CanvasBoard({ items, notes = NO_NOTES, sections = NO_SECTIONS, storageK
   const selectedRef = useRef(selected);
   const isUnsent = (m: BoardMark) => m.sent === undefined && !m.queued && !!m.text.trim();
   const unsentMarks = marks.filter(isUnsent);
+  const foldedMarks = useMemo(() => foldedNotes(marks), [marks]);
   // Items moved on the canvas. Their positions live in the browser, but the
   // shared file uses the registry's, so a moved item is a change to apply too.
   const [moveStates, setMoveStates] = useState<MoveStates>(() => (shared ? {} : loadMoves(storageKey)));
@@ -1190,7 +1203,8 @@ function CanvasBoard({ items, notes = NO_NOTES, sections = NO_SECTIONS, storageK
     setMarks((prev) =>
       prev.filter((m) => {
         if (m.id !== id) return true;
-        if (!m.text.trim()) return false;
+        // An empty new note or section stays as a placeholder; an empty change to an entry is no change.
+        if (!m.text.trim()) return !m.target;
         return !(isUnchanged(m) && m.sent === undefined);
       }),
     );
@@ -1240,8 +1254,11 @@ function CanvasBoard({ items, notes = NO_NOTES, sections = NO_SECTIONS, storageK
     [boardContext],
   );
   /** Moving, resizing, and typing all change a mark; a sent or queued one becomes a new request. */
-  const updateMark = useCallback((id: string, patch: Partial<Pick<BoardMark, "x" | "y" | "w" | "h">>) => {
-    setMarks((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch, sent: undefined, queued: undefined } : m)));
+  // A change by hand takes a note out of its section's change; carrying sets it again.
+  const updateMark = useCallback((id: string, patch: Partial<Pick<BoardMark, "x" | "y" | "w" | "h">>, carriedBy?: string) => {
+    setMarks((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, ...patch, sent: undefined, queued: undefined, carriedBy } : m)),
+    );
   }, []);
   /** Opens a note's text or a section's title for editing, as a change to the entry if it is a real one. */
   const editBoard = useCallback(
@@ -1259,7 +1276,9 @@ function CanvasBoard({ items, notes = NO_NOTES, sections = NO_SECTIONS, storageK
     () => ({
       // Editing a sent or queued mark makes it a new request, so it goes out again.
       onText: (id: string, text: string) =>
-        setMarks((prev) => prev.map((m) => (m.id === id ? { ...m, text: limitMarkText(text), sent: undefined, queued: undefined } : m))),
+        setMarks((prev) =>
+          prev.map((m) => (m.id === id ? { ...m, text: limitMarkText(text), sent: undefined, queued: undefined, carriedBy: undefined } : m)),
+        ),
       onClose: closeMark,
       onDelete: (id: string) => {
         if (openMarkRef.current === id) setMarkOpen(null);
@@ -1283,7 +1302,7 @@ function CanvasBoard({ items, notes = NO_NOTES, sections = NO_SECTIONS, storageK
         setBoardTool(null);
         const waiting =
           annotationsRef.current.filter((a) => shownIds.has(a.itemId) && !a.sent && !a.queued && a.text.trim()).length +
-          marksRef.current.filter(isUnsent).length +
+          standalone(marksRef.current.filter(isUnsent), marksRef.current).length +
           unsentMovesRef.current.length;
         if (waiting) {
           const listening = agentRef.current === "listening" || agentRef.current === "working";
@@ -1316,14 +1335,14 @@ function CanvasBoard({ items, notes = NO_NOTES, sections = NO_SECTIONS, storageK
     },
     [setAnnotateMode, setBoardTool],
   );
-  const unsentCount = unsentAnnotations + unsentMarks.length + unsentMoves.length;
+  const unsentCount = unsentAnnotations + standalone(unsentMarks, marks).length + unsentMoves.length;
   // What the bar of waiting changes shows: anything to discard, and what has gone out but is not applied yet.
   const hasChanges =
     !shared &&
     (visibleAnnotations.some((a) => a.text.trim()) || marks.some((m) => m.text.trim()) || movedItems.length > 0);
   const waitingCount =
     visibleAnnotations.filter((a) => a.sent || a.queued).length +
-    marks.filter((m) => m.sent !== undefined || m.queued).length +
+    standalone(marks.filter((m) => m.sent !== undefined || m.queued), marks).length +
     movedItems.filter((m) => moveStateOf(m) !== "new").length;
   // A press anywhere but on a note or section lets go of the selection.
   useEffect(() => {
@@ -1423,7 +1442,7 @@ function CanvasBoard({ items, notes = NO_NOTES, sections = NO_SECTIONS, storageK
         return;
       }
       markSent(list, markList, moveList);
-      notify(done(list.length + markList.length + moveList.length));
+      notify(done(list.length + standalone(markList, marksRef.current).length + moveList.length));
     },
     [markSent, message, notify],
   );
@@ -1438,7 +1457,7 @@ function CanvasBoard({ items, notes = NO_NOTES, sections = NO_SECTIONS, storageK
     const list = annotationsRef.current.filter((a) => shownIds.has(a.itemId) && !a.sent && !a.queued && a.text.trim());
     const markList = marksRef.current.filter(isUnsent);
     const moveList = unsentMovesRef.current;
-    const total = list.length + markList.length + moveList.length;
+    const total = list.length + standalone(markList, marksRef.current).length + moveList.length;
     if (!total) return;
     const offered = agentRef.current === "listening" || agentRef.current === "working";
     let state = agentRef.current;
@@ -1608,6 +1627,42 @@ function CanvasBoard({ items, notes = NO_NOTES, sections = NO_SECTIONS, storageK
     });
   insideRef.current = itemsInside;
 
+  // Notes inside a section move with it, as items do. A registry note's move is a
+  // change to it, so it is made into a mark only when the section actually moves.
+  const notesInside = (bounds: { x: number; y: number; w: number; h: number }): CarriedNote[] => {
+    const measured = (selector: string) => worldRef.current?.querySelector<HTMLElement>(selector)?.offsetHeight ?? 0;
+    const isInside = (x: number, y: number, w: number, h: number) => {
+      const cx = x + w / 2;
+      const cy = y + h / 2;
+      return cx >= bounds.x && cx <= bounds.x + bounds.w && cy >= bounds.y && cy <= bounds.y + bounds.h;
+    };
+    const found: CarriedNote[] = [];
+    for (const note of notes) {
+      const mark = marksRef.current.find((m) => m.kind === "note" && m.target === note.id);
+      const x = mark?.x ?? note.x;
+      const y = mark?.y ?? note.y;
+      const w = mark?.w ?? note.width ?? NOTE_WIDTH;
+      const el = mark ? `[data-board-ghost="${CSS.escape(mark.id)}"]` : `[data-board-id="${CSS.escape(note.id)}"]`;
+      const h = mark?.h ?? note.height ?? (measured(el) || 80);
+      if (isInside(x, y, w, h)) found.push({ id: mark ? mark.id : note.id, ghost: !!mark, x, y });
+    }
+    // A new note the person added is a mark of its own, not in the registry yet.
+    for (const m of marksRef.current) {
+      // Empty drafts move with their section too; they are not sent, so only their place matters.
+      if (m.kind !== "note" || m.target) continue;
+      const h = m.h ?? (measured(`[data-board-ghost="${CSS.escape(m.id)}"]`) || 80);
+      if (isInside(m.x, m.y, m.w ?? NOTE_WIDTH, h)) found.push({ id: m.id, ghost: true, x: m.x, y: m.y });
+    }
+    return found;
+  };
+  /** Moves carried notes by the same step as their section, which they then belong to. Each registry note gets its mark on first move. */
+  const carryNotes = (carried: CarriedNote[], dx: number, dy: number, section: string) => {
+    for (const c of carried) {
+      const id = c.ghost ? c.id : ensureMark("note", c.id);
+      if (id) updateMark(id, { x: Math.round(c.x + dx), y: Math.round(c.y + dy) }, section);
+    }
+  };
+
   // Moving and resizing notes and sections. The first change to a real one
   // makes its mark; from then on the ghost is what moves. Everything runs on the
   // viewport with pointer capture, because the real element is replaced by its
@@ -1703,6 +1758,7 @@ function CanvasBoard({ items, notes = NO_NOTES, sections = NO_SECTIONS, storageK
       let id = ref.ghost ? ref.id : "";
       // A section carries the items inside it, so the frame never leaves its contents behind.
       const carried = ref.kind === "section" && origin.w && origin.h ? itemsInside({ x: origin.x, y: origin.y, w: origin.w, h: origin.h }) : [];
+      const carriedNotes = ref.kind === "section" && origin.w && origin.h ? notesInside({ x: origin.x, y: origin.y, w: origin.w, h: origin.h }) : [];
       dragBoard(
         event,
         () => {
@@ -1716,6 +1772,7 @@ function CanvasBoard({ items, notes = NO_NOTES, sections = NO_SECTIONS, storageK
           const y = Math.round(origin.y + dy);
           updateMark(id, { x, y });
           shiftItems(carried, x - origin.x, y - origin.y);
+          carryNotes(carriedNotes, x - origin.x, y - origin.y, id);
         },
         () => {
           if (carried.length) queueSave();
@@ -1776,8 +1833,10 @@ function CanvasBoard({ items, notes = NO_NOTES, sections = NO_SECTIONS, storageK
       const id = ref.ghost ? ref.id : ensureMark(ref.kind, ref.id);
       if (!id) return;
       const carried = ref.kind === "section" && origin.w && origin.h ? itemsInside({ x: origin.x, y: origin.y, w: origin.w, h: origin.h }) : [];
+      const carriedNotes = ref.kind === "section" && origin.w && origin.h ? notesInside({ x: origin.x, y: origin.y, w: origin.w, h: origin.h }) : [];
       updateMark(id, { x: Math.round(origin.x + dx), y: Math.round(origin.y + dy) });
       shiftItems(carried, dx, dy);
+      carryNotes(carriedNotes, dx, dy, id);
       queueSave();
       if (!ref.ghost) {
         // The real element is replaced by its ghost; keyboard focus follows it.
@@ -2867,6 +2926,7 @@ function CanvasBoard({ items, notes = NO_NOTES, sections = NO_SECTIONS, storageK
               key={mark.id}
               mark={mark}
               open={openMark === mark.id}
+              folded={foldedMarks.has(mark.id)}
               interactive={boardInteractive}
               selected={selected === `g:${mark.kind}:${mark.id}`}
               handlers={boardHandlers}

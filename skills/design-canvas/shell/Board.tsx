@@ -199,6 +199,7 @@ export function NoteView({
 export function MarkView({
   mark,
   open,
+  folded,
   interactive,
   selected,
   handlers,
@@ -208,6 +209,8 @@ export function MarkView({
 }: {
   mark: BoardMark;
   open: boolean;
+  /** A note moved with its section: the section's change shows it, so it has no tag of its own. */
+  folded: boolean;
   interactive: boolean;
   selected: boolean;
   handlers: BoardHandlers;
@@ -252,16 +255,22 @@ export function MarkView({
       onBlur={onClose}
     />
   );
+  const empty = !mark.text.trim();
+  const hint = <span className="canvas-ghost-hint">{isNote ? labels.notePlaceholder : labels.sectionPlaceholder}</span>;
   const content = open ? (
     field
   ) : isNote ? (
-    <div className="canvas-note-body">{mark.text}</div>
+    <div className="canvas-note-body">{empty ? hint : mark.text}</div>
+  ) : empty ? (
+    hint
   ) : (
     mark.text
   );
-  const tag = (
+  // An empty new note or section is a draft: it shows its placeholder and is not
+  // a change, so it has no state, only a way to discard it.
+  const tag = folded ? null : (
     <span className="canvas-ghost-tag">
-      {state}
+      {!empty && state}
       <DiscardButton keepFocus onClick={() => onDelete(mark.id)} />
     </span>
   );
