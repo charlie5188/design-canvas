@@ -503,6 +503,36 @@ test('Undo removes a note that was just saved', async ({ page }) => {
   }
 })
 
+test('the zoom buttons and keys step between fixed levels', async ({ page }) => {
+  const errors = collectErrors(page)
+  await page.goto('/')
+  await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toBeVisible()
+  await page.waitForTimeout(600)
+  const zoom = page.locator('.canvas-zoom')
+  await page.getByRole('button', { name: 'Reset view (actual size)' }).click()
+  await expect(zoom).toHaveText('100%')
+  await page.getByRole('button', { name: 'Zoom in' }).click()
+  await expect(zoom).toHaveText('200%')
+  await page.getByRole('button', { name: 'Zoom in' }).click()
+  await expect(zoom).toHaveText('300%')
+  // The limit holds.
+  await page.getByRole('button', { name: 'Zoom in' }).click()
+  await expect(zoom).toHaveText('300%')
+  for (const level of ['200%', '100%', '50%', '25%', '10%', '10%']) {
+    await page.getByRole('button', { name: 'Zoom out' }).click()
+    await expect(zoom).toHaveText(level)
+  }
+  // From between two levels, a press goes to the next one in its direction; the keys do the same.
+  await page.mouse.move(400, 300)
+  await page.locator('.canvas-viewport').focus()
+  await page.keyboard.press('0')
+  await page.keyboard.press('-')
+  await expect(zoom).toHaveText('50%')
+  await page.keyboard.press('=')
+  await expect(zoom).toHaveText('100%')
+  expect(errors).toEqual([])
+})
+
 test('Select is the default tool and Escape returns to it', async ({ page }) => {
   await page.goto('/')
   const tool = (name: string) => page.getByRole('button', { name, exact: true })
