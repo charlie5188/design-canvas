@@ -209,7 +209,9 @@ export function removeEntry(source: string, kind: DirectRemove["kind"], id: stri
   while (source[end] === " " || source[end] === "\t") end++;
   // An entry alone on its line takes the line with it; one inline keeps its neighbours' layout.
   if (ownLine && source[end] === "\n") end++;
-  return source.slice(0, start) + source.slice(end);
+  const without = source.slice(0, start) + source.slice(end);
+  // The last entry gone leaves an empty array as it was written before there was one: `[]`.
+  return without.replace(new RegExp(`(export const ${ARRAY[kind]}\\b[^=]*=\\s*\\[)\\s+\\]`), "$1]");
 }
 
 /** A readable, unique id from the text, such as `keep-a-clearer-hierarchy`. */

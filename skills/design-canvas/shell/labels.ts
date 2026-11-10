@@ -2,6 +2,9 @@
 const ANNOTATE_HELP =
   "Press A to annotate: click an element, drag across an area, or click an item's name for the whole item; add a note or a section; then apply or copy them all at once";
 
+const EDIT_HELP = "Double-click a caption, a note, or a section's title to edit it; select a note or section and press Delete to remove it";
+const SAVE_HELP = "Moves, edits, and new notes save into registry.tsx as you make them; ⌘/Ctrl + Z undoes the last one";
+
 export const labels = {
   region: "Design canvas",
   toolbar: "Canvas view",
@@ -13,6 +16,9 @@ export const labels = {
   help: "Canvas controls",
   /** The help line a shared file leaves out, since it has no annotations. */
   annotateHelp: ANNOTATE_HELP,
+  /** Also left out of a shared file, which saves nothing. */
+  saveHelp: SAVE_HELP,
+  editHelp: EDIT_HELP,
   helpLines: [
     "Drag empty space to pan",
     "Drag an item's name or grip to move it",
@@ -21,6 +27,8 @@ export const labels = {
     "Hold ⌥/Alt and click an element to copy a reference to it",
     ANNOTATE_HELP,
     "Hover an item's name to open it alone or move it to the trash",
+    SAVE_HELP,
+    EDIT_HELP,
     "With the canvas focused: arrow keys pan, + and − zoom, 0 resets, 1 fits all",
   ],
   linkBlocked: (target: string) => `Links stay on the canvas: ${target}`,
@@ -115,6 +123,9 @@ export const labels = {
   sectionPlaceholder: "Section title",
   boardNotApplied: "Not applied yet",
   boardSaving: "Saving…",
+  undone: "Undone",
+  nothingToUndo: "Nothing to undo",
+  undoFailed: "Couldn't undo. The dev server writes registry.tsx, so it must be running.",
   captionHint: "Double-click to edit the caption",
   captionLabel: "Caption",
   captionNotSaved: "Couldn't save the caption. The dev server writes registry.tsx, so it must be running.",

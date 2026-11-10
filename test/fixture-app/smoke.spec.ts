@@ -455,6 +455,54 @@ test('a save the dev server cannot take says why, and the change waits for the a
   await expect(page.getByRole('button', { name: 'Copy 1 change' })).toBeVisible()
 })
 
+test('Undo (Cmd or Ctrl + Z) puts back a moved item in the registry', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    await page.goto('/')
+    await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toBeVisible()
+    await page.waitForTimeout(600)
+    // The grip keeps focus after a nudge, and Undo works from there.
+    await page.locator('.canvas-item[data-canvas-item="example"] .canvas-handle').focus()
+    await page.keyboard.press('ArrowRight')
+    await page.keyboard.press('ArrowRight')
+    await page.keyboard.press('ArrowRight')
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).not.toBe(original)
+    await page.keyboard.press('ControlOrMeta+z')
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toBe(original)
+    await expect(page.locator('.canvas-toast')).toContainText('Undone')
+    // Nothing left to undo, and the item is not saved again.
+    await page.waitForTimeout(900)
+    expect(readFileSync(REGISTRY, 'utf8')).toBe(original)
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
+test('Undo removes a note that was just saved', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    await page.goto('/')
+    await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toBeVisible()
+    await page.waitForTimeout(600)
+    await page.getByRole('button', { name: 'Note', exact: true }).click()
+    await page.mouse.click(700, 400)
+    await expect(page.locator('[data-board-ghost] textarea')).toBeFocused()
+    await page.keyboard.type('Undo me')
+    await page.keyboard.press('Escape')
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toContain('text: "Undo me"')
+    await expect(page.locator('[data-board-ghost]')).toHaveCount(0)
+    await page.keyboard.press('ControlOrMeta+z')
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toBe(original)
+    await expect(page.locator('.canvas-note-card', { hasText: 'Undo me' })).toHaveCount(0)
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
 test('Select is the default tool and Escape returns to it', async ({ page }) => {
   await page.goto('/')
   const tool = (name: string) => page.getByRole('button', { name, exact: true })
