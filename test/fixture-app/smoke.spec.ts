@@ -395,6 +395,66 @@ test('Backspace in a note being edited edits it, and does not delete the note', 
   }
 })
 
+test('a caption is edited in place and saved to the registry', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    await page.goto('/')
+    const caption = page.locator('.canvas-item[data-canvas-item="example"] .canvas-note')
+    await expect(caption).toBeVisible()
+    await page.waitForTimeout(600)
+    await caption.dblclick()
+    const field = page.locator('.canvas-caption-field')
+    await expect(field).toBeFocused()
+    await field.fill('A caption written on the canvas')
+    // Backspace and other keys stay in the field.
+    await page.keyboard.press('Enter')
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toContain('note: "A caption written on the canvas"')
+    await expect(caption).toHaveText('A caption written on the canvas')
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
+test('Escape cancels a caption edit and saves nothing', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    await page.goto('/')
+    const caption = page.locator('.canvas-item[data-canvas-item="example"] .canvas-note')
+    await expect(caption).toBeVisible()
+    await page.waitForTimeout(600)
+    const before = await caption.textContent()
+    await caption.dblclick()
+    await page.locator('.canvas-caption-field').fill('Not this')
+    await page.keyboard.press('Escape')
+    await expect(page.locator('.canvas-caption-field')).toHaveCount(0)
+    await expect(caption).toHaveText(before!)
+    // Longer than the pause before a save.
+    await page.waitForTimeout(900)
+    expect(readFileSync(REGISTRY, 'utf8')).toBe(original)
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
+test('a save the dev server cannot take says why, and the change waits for the agent', async ({ page }) => {
+  // A server started before the canvas was updated does not know the route.
+  await page.route('**/__design-canvas/edit', (route) => route.fulfill({ status: 404, body: 'not found' }))
+  await page.goto('/')
+  const name = page.locator('.canvas-item[data-canvas-item="example"] .canvas-name')
+  await expect(name).toBeVisible()
+  await page.waitForTimeout(600)
+  const box = (await name.boundingBox())!
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(box.x + box.width / 2 + 120, box.y + box.height / 2 + 80, { steps: 6 })
+  await page.mouse.up()
+  await expect(page.locator('.canvas-toast')).toContainText("Restart this canvas's dev server")
+  await expect(page.locator('.canvas-item-tag')).toContainText('Not applied yet')
+  await expect(page.getByRole('button', { name: 'Copy 1 change' })).toBeVisible()
+})
+
 test('Select is the default tool and Escape returns to it', async ({ page }) => {
   await page.goto('/')
   const tool = (name: string) => page.getByRole('button', { name, exact: true })

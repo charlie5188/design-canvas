@@ -1174,3 +1174,22 @@ html[data-canvas-alt] .canvas-frame-root * {
 .canvas-item-tag[data-state="queued"] {
   background: #5f6b76;
 }
+
+/* The caption under an item's name while it is being edited: one line, in the
+   place of the text, lined up with the name. */
+.canvas-caption-field {
+  box-sizing: border-box;
+  inline-size: calc(100% - 30px);
+  min-inline-size: 12ch;
+  margin: 0 0 0 30px;
+  padding: 0 4px;
+  border: 1px solid var(--canvas-focus-color);
+  border-radius: 4px;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  resize: none;
+  field-sizing: content;
+  user-select: text;
+}

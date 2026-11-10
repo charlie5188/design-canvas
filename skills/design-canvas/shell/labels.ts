@@ -115,6 +115,12 @@ export const labels = {
   sectionPlaceholder: "Section title",
   boardNotApplied: "Not applied yet",
   boardSaving: "Saving…",
+  captionHint: "Double-click to edit the caption",
+  captionLabel: "Caption",
+  captionNotSaved: "Couldn't save the caption. The dev server writes registry.tsx, so it must be running.",
+  saveNeedsServer: "Auto-save can't reach the dev server, so changes wait for the agent. Restart this canvas's dev server.",
+  saveCouldntPlace: (names: string) =>
+    `${names} can't be changed in registry.tsx automatically (no plain id, or a computed value), so the change waits for the agent.`,
   noteDeleted: "Note deleted",
   sectionDeleted: "Section deleted",
   noteRestored: "Note put back",

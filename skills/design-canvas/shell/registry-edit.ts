@@ -16,7 +16,7 @@ const ARRAY: Record<DirectKind, string> = { note: "notes", section: "sections", 
 const FIELDS: Record<DirectKind, Record<string, "number" | "string">> = {
   note: { x: "number", y: "number", width: "number", height: "number", text: "string" },
   section: { x: "number", y: "number", width: "number", height: "number", title: "string" },
-  item: { x: "number", y: "number" },
+  item: { x: "number", y: "number", note: "string" },
 };
 const COORD_LIMIT = 100_000;
 const MAX_TEXT = 1000;
@@ -137,7 +137,11 @@ function setField(source: string, kind: DirectKind, id: string, key: string, val
     if (source[valueStart] !== '"' && source[valueStart] !== "'" && source[valueStart] !== "`") return undefined;
     valueEnd = stringEnd(source, valueStart);
     if (valueEnd < 0) return undefined;
+    // A template with a placeholder is code, not text.
+    if (source[valueStart] === "`" && source.slice(valueStart, valueEnd).includes("${")) return undefined;
   }
+  // The value must be the whole value: `x: 0 + gap` or `"a" + "b"` is computed, and replacing a part of it would be wrong.
+  if (!/^[ \t]*(,|}|\r?\n|\/\/|\/\*|$)/.test(source.slice(valueEnd, valueEnd + 40))) return undefined;
   return source.slice(0, valueStart) + literalOf(value, type) + source.slice(valueEnd);
 }
 

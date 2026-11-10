@@ -507,6 +507,72 @@ function AnnotationPin({
   );
 }
 
+/**
+ * The caption under an item's name. Double-click edits it; Enter or leaving the
+ * field saves, Escape cancels. Saving is the page's job (saveCaption), not the agent's.
+ */
+function ItemCaption({ text, editable, onSave }: { text: string; editable: boolean; onSave: (text: string) => void }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const fieldRef = useRef<HTMLTextAreaElement>(null);
+  // Leaving the field after Enter or Escape must not save a second time.
+  const finished = useRef(false);
+  const editing = draft !== null;
+  useEffect(() => {
+    if (!editing) return;
+    fieldRef.current?.focus({ preventScroll: true });
+    fieldRef.current?.select();
+  }, [editing]);
+  const finish = (save: boolean) => {
+    if (finished.current) return;
+    finished.current = true;
+    const next = draft?.trim();
+    setDraft(null);
+    if (save && next && next !== text) onSave(next);
+  };
+  if (editing) {
+    return (
+      <textarea
+        ref={fieldRef}
+        className="canvas-caption-field"
+        rows={1}
+        value={draft}
+        aria-label={labels.captionLabel}
+        // A caption is one line.
+        onChange={(event) => setDraft(event.currentTarget.value.replace(/\r?\n/g, " "))}
+        onKeyDown={(event) => {
+          // The canvas's own keys (A, N, S, Delete) stay out of a field.
+          event.stopPropagation();
+          if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+            event.preventDefault();
+            finish(true);
+          } else if (event.key === "Escape") {
+            event.preventDefault();
+            finish(false);
+          }
+        }}
+        onBlur={() => finish(true)}
+      />
+    );
+  }
+  return (
+    <p
+      className="canvas-note canvas-subtle"
+      data-editable={editable || undefined}
+      data-tip={editable ? labels.captionHint : undefined}
+      onDoubleClick={
+        editable
+          ? () => {
+              finished.current = false;
+              setDraft(text);
+            }
+          : undefined
+      }
+    >
+      {text}
+    </p>
+  );
+}
+
 function CanvasItemView({
   item,
   position,
@@ -522,6 +588,9 @@ function CanvasItemView({
   onTrash,
   move,
   onUndoMove,
+  caption,
+  editable,
+  onCaption,
 }: {
   item: CanvasItem;
   position: Position;
@@ -540,6 +609,11 @@ function CanvasItemView({
   /** Set while the item sits somewhere the registry does not have it. */
   move?: MoveSent["state"] | "new";
   onUndoMove: (item: CanvasItem) => void;
+  /** The caption as shown: the person's edit until the registry has it. */
+  caption: string | undefined;
+  /** False in a shared file, where nothing can be saved. */
+  editable: boolean;
+  onCaption: (item: CanvasItem, text: string) => void;
 }) {
   const ref = useCallback((element: HTMLDivElement | null) => register(item.id, element), [item.id, register]);
   return (
@@ -604,7 +678,7 @@ function CanvasItemView({
             </button>
           </NameButton>
         </span>
-        {item.note && <p className="canvas-note canvas-subtle">{item.note}</p>}
+        {caption && <ItemCaption text={caption} editable={editable} onSave={(text) => onCaption(item, text)} />}
       </div>
       <div className="canvas-preview-wrap">
         <div
@@ -1262,6 +1336,8 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     }));
     let failed = new Set<string>();
     let rejected = new Set<number>();
+    // Why a save fell back to the agent, so it is never silent.
+    let unreachable = false;
     if (edits.length || adds.length) {
       try {
         const response = await fetch(EDIT_PATH, {
@@ -1274,13 +1350,17 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
         failed = new Set(Array.isArray(result.missing) ? result.missing.filter((id): id is string => typeof id === "string") : []);
         rejected = new Set(Array.isArray(result.rejected) ? result.rejected.filter((i): i is number => typeof i === "number") : []);
       } catch {
-        // No dev server, or it refused: every change in this batch goes to the agent instead.
+        // No dev server, or one that does not know this route (started before the canvas was updated):
+        // every change in this batch goes to the agent instead.
+        unreachable = true;
         failed = new Set(edits.map((e) => e.id));
         rejected = new Set(adds.map((_, i) => i));
       }
     }
     const failedNew = new Set(pendingNew.filter((_, i) => rejected.has(i)).map((m) => m.id));
     if (!failed.size && !failedNew.size) return;
+    const names = [...failed, ...(failedNew.size ? ["a new note or section"] : [])];
+    notify(unreachable ? labels.saveNeedsServer : labels.saveCouldntPlace(names.slice(0, 3).join(", ")), undefined, true);
     setMarks((prev) =>
       prev.map((m) =>
         (markIds.has(m.id) && m.target && failed.has(m.target)) || failedNew.has(m.id) ? { ...m, direct: undefined, sent: undefined } : m,
@@ -1290,7 +1370,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       ...prev,
       ...Object.fromEntries(pendingMoves.filter((m) => failed.has(m.id)).map((m) => [m.id, { x: m.x, y: m.y, state: "failed" as const }])),
     }));
-  }, [shared]);
+  }, [notify, shared]);
   // Saves once the person pauses, so a drag or a line of typing is one write.
   useEffect(() => {
     const timer = window.setTimeout(() => void flushDirect(), 300);
@@ -1412,13 +1492,34 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       return next.size === prev.size ? prev : next;
     });
   }, [notes, sections]);
-  const postRegistry = async (body: { removes?: unknown[]; adds?: unknown[] }) => {
+  const postRegistry = async (body: { edits?: unknown[]; removes?: unknown[]; adds?: unknown[] }) => {
     try {
       const response = await fetch(EDIT_PATH, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      return response.ok ? ((await response.json()) as { rejected?: number[]; unremoved?: string[] }) : undefined;
+      return response.ok ? ((await response.json()) as { rejected?: number[]; unremoved?: string[]; missing?: string[] }) : undefined;
     } catch {
       return undefined;
     }
+  };
+  // A caption edit shows at once and stays until the registry has the text.
+  const [captions, setCaptions] = useState<Record<string, string>>({});
+  useEffect(() => {
+    setCaptions((prev) => {
+      const keep = Object.entries(prev).filter(([id, text]) => items.find((item) => item.id === id)?.note !== text);
+      return keep.length === Object.keys(prev).length ? prev : Object.fromEntries(keep);
+    });
+  }, [items]);
+  const saveCaption = async (item: CanvasItem, text: string) => {
+    if (shared) return;
+    setCaptions((prev) => ({ ...prev, [item.id]: text }));
+    const result = await postRegistry({ edits: [{ kind: "item", id: item.id, set: { note: text } }] });
+    if (result && !result.missing?.length) return;
+    // Not written: show what is in the registry again.
+    setCaptions((prev) => {
+      const next = { ...prev };
+      delete next[item.id];
+      return next;
+    });
+    notify(result ? labels.saveCouldntPlace(item.name) : labels.captionNotSaved, undefined, true);
   };
   const deleteBoard = async (kind: BoardKind, id: string) => {
     const note = kind === "note" ? notes.find((n) => n.id === id) : undefined;
@@ -3115,6 +3216,9 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
                 return moved ? moveStateOf(moved) : undefined;
               })()}
               onUndoMove={undoMove}
+              caption={captions[item.id] ?? item.note}
+              editable={!shared}
+              onCaption={saveCaption}
             />
           ))}
           {notes.map((note) => (
