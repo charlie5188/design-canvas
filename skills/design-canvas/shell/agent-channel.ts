@@ -29,7 +29,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Plugin } from "vite";
 import { AGENT_EVENT, AGENT_PATH, EDIT_PATH, SHARE_PATH } from "./channel.ts";
-import { applyEdits, type DirectEdit, validEdit } from "./registry-edit.ts";
+import { addEntry, applyEdits, type DirectAdd, type DirectEdit, validAdd, validEdit } from "./registry-edit.ts";
 
 export type AgentState = "off" | "listening" | "working";
 /** What the page hears: `finished` only on the update that ends `handling` because the agent said done. */
@@ -102,10 +102,43 @@ async function buildSharedFile(root: string): Promise<SharedFile> {
   return { name: `${name}-${date}.html`, html: page.source, missing };
 }
 
+const RENDER = /createRoot\(\s*document\.getElementById\((["'])root\1\)!?\s*\)\.render\(/;
+
+/**
+ * A save into registry.tsx must not reload the page: a reload cuts off a drag the
+ * person has already started, and flickers. registry.tsx is not a component, so
+ * Vite has nothing to swap and reloads. This makes the canvas's main.tsx and
+ * frame.tsx accept the update instead, keeping one React root and rendering into
+ * it again with the new registry. An entry file of another shape is left alone
+ * and reloads as before.
+ */
+function renderInPlace(code: string, id: string, root: string): { code: string; map: null } | undefined {
+  const normal = (path: string) => path.replace(/\\/g, "/");
+  // Both pages that read the registry: the canvas, and frame.html, which `viewport` items load in iframes.
+  // If either could not take the update, Vite would reload every page.
+  const file = normal(id.split("?")[0]!);
+  const entry = ["main.tsx", "frame.tsx"].some((name) => file === normal(join(root, name)));
+  if (!entry || code.includes("import.meta.hot") || !RENDER.test(code)) return undefined;
+  const next = code.replace(
+    RENDER,
+    '(import.meta.hot ? (import.meta.hot.data.root ??= createRoot(document.getElementById("root")!)) : createRoot(document.getElementById("root")!)).render(',
+  );
+  return { code: `${next}\nif (import.meta.hot) {\n  import.meta.hot.accept();\n}\n`, map: null };
+}
+
 export function agentChannel(): Plugin {
+  let root = "";
   return {
     name: "design-canvas:agent",
     apply: "serve",
+    // Before the other transforms, so main.tsx is still the file the kit wrote.
+    enforce: "pre",
+    configResolved(config) {
+      root = config.root;
+    },
+    transform(code, id) {
+      return renderInPlace(code, id, root);
+    },
     configureServer(server) {
       let listener: { response: ServerResponse; timer: Timer } | undefined;
       let busyUntil = 0;
@@ -224,24 +257,35 @@ export function agentChannel(): Plugin {
         if (!fromCanvasPage(request)) return send(response, 403, "Not allowed");
         readBody(request).then(
           (body) => {
-            let raw: unknown;
+            let parsed: { edits?: unknown; adds?: unknown } = {};
             try {
-              raw = (JSON.parse(body) as { edits?: unknown }).edits;
+              parsed = JSON.parse(body) as typeof parsed;
             } catch {
               // Falls through to the 400 below.
             }
-            if (!Array.isArray(raw)) return send(response, 400, "Expected { edits }");
-            const edits = raw.map(validEdit);
-            if (edits.some((edit) => !edit)) return send(response, 400, "Invalid edit");
+            const rawEdits = Array.isArray(parsed.edits) ? parsed.edits : [];
+            const rawAdds = Array.isArray(parsed.adds) ? parsed.adds : [];
+            if (!rawEdits.length && !rawAdds.length) return send(response, 400, "Expected { edits } or { adds }");
+            const edits = rawEdits.map(validEdit);
+            const adds = rawAdds.map(validAdd);
+            if (edits.some((edit) => !edit) || adds.some((add) => !add)) return send(response, 400, "Invalid edit");
             const path = join(server.config.root, "registry.tsx");
             const job = writing.then(async () => {
               const result = applyEdits(await readFile(path, "utf8"), edits as DirectEdit[]);
-              if (result.applied.length) await writeFile(path, result.source);
-              return result;
+              // New entries go in order, so their place in the array matches their place in the request.
+              let next = result.source;
+              const rejected: number[] = [];
+              (adds as DirectAdd[]).forEach((add, index) => {
+                const added = addEntry(next, add);
+                if (added) next = added.source;
+                else rejected.push(index);
+              });
+              if (result.applied.length || rejected.length < adds.length) await writeFile(path, next);
+              return { applied: result.applied, missing: result.missing, rejected };
             });
             writing = job.catch(() => {});
             job.then(
-              (result) => sendJson(response, { applied: result.applied, missing: result.missing }),
+              (result) => sendJson(response, result),
               (error: unknown) => send(response, 500, error instanceof Error ? error.message : String(error)),
             );
           },

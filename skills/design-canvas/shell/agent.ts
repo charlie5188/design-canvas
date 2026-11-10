@@ -3,7 +3,7 @@
 // downloading the canvas as a shared file.
 
 import { useEffect, useRef, useState } from "react";
-import { AGENT_EVENT, AGENT_PATH, EDIT_PATH, SHARE_PATH } from "./channel.ts";
+import { AGENT_EVENT, AGENT_PATH, SHARE_PATH } from "./channel.ts";
 import type { AgentState, AgentStatus, SharedFile } from "./agent-channel.ts";
 
 export type { AgentState, AgentStatus };

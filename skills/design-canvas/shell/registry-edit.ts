@@ -162,3 +162,75 @@ export function applyEdits(source: string, edits: DirectEdit[]): ApplyResult {
   }
   return { source: next, applied, missing };
 }
+
+// New notes and sections are appended to the end of their array.
+
+export type DirectAdd = { kind: "note" | "section"; text: string; x: number; y: number; width?: number; height?: number };
+
+/** Checks a new entry from the browser before it goes near the file. */
+export function validAdd(value: unknown): DirectAdd | undefined {
+  const a = value as Partial<DirectAdd> | null;
+  if (!a || typeof a !== "object" || !(a.kind === "note" || a.kind === "section")) return undefined;
+  if (typeof a.text !== "string" || !a.text.trim() || a.text.length > MAX_TEXT) return undefined;
+  const num = (n: unknown) => (typeof n === "number" && Number.isFinite(n) && Math.abs(n) <= COORD_LIMIT ? Math.round(n) : undefined);
+  const [x, y] = [num(a.x), num(a.y)];
+  if (x === undefined || y === undefined) return undefined;
+  const width = a.width === undefined ? undefined : num(a.width);
+  const height = a.height === undefined ? undefined : num(a.height);
+  // A section is a frame, so it needs a size; a note's size is optional.
+  if (a.kind === "section" && (!width || !height)) return undefined;
+  if ((a.width !== undefined && width === undefined) || (a.height !== undefined && height === undefined)) return undefined;
+  return { kind: a.kind, text: a.text, x, y, ...(width ? { width } : {}), ...(height ? { height } : {}) };
+}
+
+/** A readable, unique id from the text, such as `keep-a-clearer-hierarchy`. */
+function newId(text: string, kind: DirectAdd["kind"], used: Set<string>): string {
+  let base = text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  // Long text is cut at a word, not in the middle of one.
+  if (base.length > 32) {
+    base = base.slice(0, 32);
+    const cut = base.lastIndexOf("-");
+    if (cut > 8) base = base.slice(0, cut);
+  }
+  base = base.replace(/-+$/, "") || kind;
+  let id = base;
+  for (let n = 2; used.has(id); n++) id = `${base}-${n}`;
+  return id;
+}
+
+/** The source with the entry added at the end of its array, or undefined when the array cannot be found. */
+export function addEntry(source: string, add: DirectAdd): { source: string; id: string } | undefined {
+  const array = ARRAY[add.kind];
+  const head = new RegExp(`export const ${array}\\b[^=]*=\\s*\\[`).exec(source);
+  if (!head) return undefined;
+  const open = head.index + head[0].length - 1;
+  let depth = 0;
+  let close = -1;
+  for (let i = open; i < source.length; i++) {
+    const c = source[i]!;
+    if (c === '"' || c === "'" || c === "`") {
+      const stop = stringEnd(source, i);
+      if (stop < 0) return undefined;
+      i = stop - 1;
+    } else if (c === "[") depth++;
+    else if (c === "]") {
+      depth--;
+      if (depth === 0) {
+        close = i;
+        break;
+      }
+    }
+  }
+  if (close < 0) return undefined;
+  const body = source.slice(open + 1, close);
+  const used = new Set([...body.matchAll(/\bid\s*:\s*(["'])(.*?)\1/g)].map((m) => m[2]!));
+  const id = newId(add.text, add.kind, used);
+  const key = add.kind === "note" ? "text" : "title";
+  const size = `${add.width ? `, width: ${add.width}` : ""}${add.height ? `, height: ${add.height}` : ""}`;
+  const entry = `{ id: ${JSON.stringify(id)}, ${key}: ${JSON.stringify(add.text)}, x: ${add.x}, y: ${add.y}${size} },`;
+  const empty = !body.trim();
+  // After the last entry, adding a comma if it has none; into an empty array, on its own line.
+  const at = open + 1 + body.trimEnd().length;
+  const comma = !empty && !body.trimEnd().endsWith(",") ? "," : "";
+  return { source: `${source.slice(0, at)}${comma}\n  ${entry}${empty ? "\n" : ""}${source.slice(at)}`, id };
+}

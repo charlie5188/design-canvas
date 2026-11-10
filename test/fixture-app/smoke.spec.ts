@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -15,6 +15,29 @@ function collectErrors(page: Page) {
   })
   page.on('pageerror', (error) => errors.push(error.message))
   return errors
+}
+
+const REGISTRY = 'design-canvas/smoke/registry.tsx'
+
+// The dev server writes moves and new notes into registry.tsx. Tests about the
+// agent path need the write refused, which is what makes a change fall back to
+// the agent; refusing it also leaves the registry as installed for the tests after.
+// Puts the registry back as installed and waits for the page to take that update, so
+// it cannot land during the next test.
+async function restoreRegistry(page: Page, original: string) {
+  if (readFileSync(REGISTRY, 'utf8') === original) return
+  const updated = page.waitForEvent('console', { predicate: (m) => m.text().includes('hot updated'), timeout: 10_000 }).catch(() => {})
+  writeFileSync(REGISTRY, original)
+  await updated
+}
+
+async function refuseSaves(page: Page) {
+  await page.route('**/__design-canvas/edit', (route) => {
+    const body = JSON.parse(route.request().postData() ?? '{}') as { edits?: { id: string }[]; adds?: unknown[] }
+    return route.fulfill({
+      json: { applied: [], missing: (body.edits ?? []).map((e) => e.id), rejected: (body.adds ?? []).map((_, i) => i) },
+    })
+  })
 }
 
 test('the canvas renders the example item', async ({ page }) => {
@@ -70,6 +93,7 @@ test('copied annotations ask for a new version by default', async ({ page, conte
 test('a note added in annotate mode waits as a ghost and travels with the changes', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   const errors = collectErrors(page)
+  await refuseSaves(page)
   await page.goto('/')
   await page.getByRole('button', { name: 'Note', exact: true }).click()
   await page.mouse.click(700, 500)
@@ -94,6 +118,7 @@ test('a note added in annotate mode waits as a ghost and travels with the change
 test('a section drawn on empty canvas lists the items inside it', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   const errors = collectErrors(page)
+  await refuseSaves(page)
   await page.goto('/')
   const item = page.locator('.canvas-item[data-canvas-item="example"]')
   await expect(item).toBeVisible()
@@ -120,6 +145,7 @@ test('a section drawn on empty canvas lists the items inside it', async ({ page,
 test('a placed note moves and resizes, and the change waits for the agent', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   const errors = collectErrors(page)
+  await refuseSaves(page)
   await page.goto('/')
   await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toBeVisible()
   // The first paint fits the canvas to the window once fonts load; draw after that moved the camera.
@@ -157,6 +183,7 @@ test('a placed note moves and resizes, and the change waits for the agent', asyn
 test('an item moved on the canvas is a change to apply', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   const errors = collectErrors(page)
+  await refuseSaves(page)
   await page.goto('/')
   const name = page.locator('.canvas-item[data-canvas-item="example"] .canvas-name')
   await expect(name).toBeVisible()
@@ -183,6 +210,7 @@ test('an item moved on the canvas is a change to apply', async ({ page, context 
 
 test('Discard changes drops every change not applied yet, and Undo brings them back', async ({ page }) => {
   const errors = collectErrors(page)
+  await refuseSaves(page)
   await page.goto('/')
   const name = page.locator('.canvas-item[data-canvas-item="example"] .canvas-name')
   await expect(name).toBeVisible()
@@ -211,6 +239,103 @@ test('Discard changes drops every change not applied yet, and Undo brings them b
   await expect(page.locator('.canvas-item-tag')).toContainText('Not applied yet')
   await expect(page.getByRole('button', { name: 'Copy 2 changes' })).toBeVisible()
   expect(errors).toEqual([])
+})
+
+test('a moved item is saved to the registry, with no change waiting for the agent', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    await page.goto('/')
+    const name = page.locator('.canvas-item[data-canvas-item="example"] .canvas-name')
+    await expect(name).toBeVisible()
+    await page.waitForTimeout(600)
+    // A save re-renders in place: a reload would cut off the next drag and flicker.
+    await page.evaluate(() => ((window as unknown as { __samePage: boolean }).__samePage = true))
+    const box = (await name.boundingBox())!
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(box.x + box.width / 2 + 120, box.y + box.height / 2 + 80, { steps: 6 })
+    await page.mouse.up()
+    // Written once the pointer pauses; the tag goes when the registry has the position.
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).not.toBe(original)
+    expect(readFileSync(REGISTRY, 'utf8')).toMatch(/id: "example"[\s\S]*?x: [1-9]\d*/)
+    await expect(page.locator('.canvas-item-tag')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /^(Copy|Apply) \d+ change/ })).toHaveCount(0)
+    expect(await page.evaluate(() => (window as unknown as { __samePage?: boolean }).__samePage)).toBe(true)
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
+test('a new note is saved to the registry once it has text', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    await page.goto('/')
+    await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toBeVisible()
+    await page.waitForTimeout(600)
+    await page.getByRole('button', { name: 'Note', exact: true }).click()
+    await page.mouse.click(700, 400)
+    await expect(page.locator('[data-board-ghost] textarea')).toBeFocused()
+    await page.keyboard.type('Saved on its own')
+    await page.keyboard.press('Escape')
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toContain('text: "Saved on its own"')
+    // The ghost leaves once the registry has the note, and nothing waits for the agent.
+    await expect(page.locator('[data-board-ghost]')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /^(Copy|Apply) \d+ change/ })).toHaveCount(0)
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
+test('an empty note stays as a draft and is never saved', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    await page.goto('/')
+    await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toBeVisible()
+    await page.waitForTimeout(600)
+    await page.getByRole('button', { name: 'Note', exact: true }).click()
+    await page.mouse.click(700, 400)
+    await expect(page.locator('[data-board-ghost] textarea')).toBeFocused()
+    await page.keyboard.press('Escape')
+    const draft = page.locator('[data-board-ghost]')
+    await expect(draft).toContainText('Write a note')
+    // Longer than the pause before a save.
+    await page.waitForTimeout(900)
+    await expect(draft).toHaveCount(1)
+    await expect(page.getByRole('button', { name: /^(Copy|Apply) \d+ change/ })).toHaveCount(0)
+    expect(readFileSync(REGISTRY, 'utf8')).toBe(original)
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
+test('a registry update in the middle of a drag does not cancel it', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    await page.goto('/')
+    await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toBeVisible()
+    await page.waitForTimeout(600)
+    await page.getByRole('button', { name: 'Annotate', exact: true }).click()
+    const box = (await page.locator('.canvas-preview[data-canvas-preview="example"]').boundingBox())!
+    const scale = box.width / 360
+    await page.mouse.move(box.x + 4 * scale, box.y + 4 * scale)
+    await page.mouse.down()
+    await page.mouse.move(box.x + 180 * scale, box.y + 30 * scale, { steps: 4 })
+    // A save from another tab, or from the agent, rewrites the registry now.
+    const updated = page.waitForEvent('console', { predicate: (m) => m.text().includes('hot updated') })
+    appendFileSync(REGISTRY, '\n// touched\n')
+    await updated
+    await page.mouse.move(box.x + 356 * scale, box.y + 50 * scale, { steps: 4 })
+    await page.mouse.up()
+    await expect(page.getByRole('dialog', { name: /^Annotation on Example · replace me › area / })).toContainText('heading “Canvas is ready”')
+  } finally {
+    await restoreRegistry(page, original)
+  }
 })
 
 test('Select is the default tool and Escape returns to it', async ({ page }) => {
