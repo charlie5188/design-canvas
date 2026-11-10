@@ -240,6 +240,8 @@ test('a moved item is saved to the registry, with no change waiting for the agen
     const name = page.locator('.canvas-item[data-canvas-item="example"] .canvas-name')
     await expect(name).toBeVisible()
     await page.waitForTimeout(600)
+    // A save re-renders in place: a reload would cut off the next drag and flicker.
+    await page.evaluate(() => ((window as unknown as { __samePage: boolean }).__samePage = true))
     const box = (await name.boundingBox())!
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
     await page.mouse.down()
@@ -250,6 +252,7 @@ test('a moved item is saved to the registry, with no change waiting for the agen
     expect(readFileSync(REGISTRY, 'utf8')).toMatch(/id: "example"[\s\S]*?x: [1-9]\d*/)
     await expect(page.locator('.canvas-item-tag')).toHaveCount(0)
     await expect(page.getByRole('button', { name: /^(Copy|Apply) \d+ change/ })).toHaveCount(0)
+    expect(await page.evaluate(() => (window as unknown as { __samePage?: boolean }).__samePage)).toBe(true)
     expect(errors).toEqual([])
   } finally {
     writeFileSync(REGISTRY, original)

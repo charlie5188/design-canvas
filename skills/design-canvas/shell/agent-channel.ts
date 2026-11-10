@@ -102,10 +102,43 @@ async function buildSharedFile(root: string): Promise<SharedFile> {
   return { name: `${name}-${date}.html`, html: page.source, missing };
 }
 
+const RENDER = /createRoot\(\s*document\.getElementById\((["'])root\1\)!?\s*\)\.render\(/;
+
+/**
+ * A save into registry.tsx must not reload the page: a reload cuts off a drag the
+ * person has already started, and flickers. registry.tsx is not a component, so
+ * Vite has nothing to swap and reloads. This makes the canvas's main.tsx and
+ * frame.tsx accept the update instead, keeping one React root and rendering into
+ * it again with the new registry. An entry file of another shape is left alone
+ * and reloads as before.
+ */
+function renderInPlace(code: string, id: string, root: string): { code: string; map: null } | undefined {
+  const normal = (path: string) => path.replace(/\\/g, "/");
+  // Both pages that read the registry: the canvas, and frame.html, which `viewport` items load in iframes.
+  // If either could not take the update, Vite would reload every page.
+  const file = normal(id.split("?")[0]!);
+  const entry = ["main.tsx", "frame.tsx"].some((name) => file === normal(join(root, name)));
+  if (!entry || code.includes("import.meta.hot") || !RENDER.test(code)) return undefined;
+  const next = code.replace(
+    RENDER,
+    '(import.meta.hot ? (import.meta.hot.data.root ??= createRoot(document.getElementById("root")!)) : createRoot(document.getElementById("root")!)).render(',
+  );
+  return { code: `${next}\nif (import.meta.hot) {\n  import.meta.hot.accept();\n}\n`, map: null };
+}
+
 export function agentChannel(): Plugin {
+  let root = "";
   return {
     name: "design-canvas:agent",
     apply: "serve",
+    // Before the other transforms, so main.tsx is still the file the kit wrote.
+    enforce: "pre",
+    configResolved(config) {
+      root = config.root;
+    },
+    transform(code, id) {
+      return renderInPlace(code, id, root);
+    },
     configureServer(server) {
       let listener: { response: ServerResponse; timer: Timer } | undefined;
       let busyUntil = 0;
