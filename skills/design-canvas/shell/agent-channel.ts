@@ -285,13 +285,19 @@ export function agentChannel(): Plugin {
               }
               // New entries go in order, so their place in the array matches their place in the request.
               const rejected: number[] = [];
+              const ids: (string | null)[] = [];
               (adds as DirectAdd[]).forEach((add, index) => {
                 const added = addEntry(next, add);
-                if (added) next = added.source;
-                else rejected.push(index);
+                if (added) {
+                  next = added.source;
+                  ids[index] = added.id;
+                } else {
+                  rejected.push(index);
+                  ids[index] = null;
+                }
               });
               if (next !== original) await writeFile(path, next);
-              return { applied: result.applied, missing: result.missing, rejected, unremoved };
+              return { applied: result.applied, missing: result.missing, rejected, unremoved, ids };
             });
             writing = job.catch(() => {});
             job.then(

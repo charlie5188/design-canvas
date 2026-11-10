@@ -77,7 +77,7 @@ test('copied annotations ask for a new version by default', async ({ page, conte
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   const errors = collectErrors(page)
   await page.goto('/')
-  await page.getByRole('button', { name: 'Annotate', exact: true }).click()
+  await page.getByRole('button', { name: 'Request change', exact: true }).click()
   await page.locator('.canvas-preview h2').click()
   const note = page.getByRole('dialog', { name: /^Annotation on/ })
   await expect(note.getByRole('checkbox', { name: 'Apply to a new version' })).toBeChecked()
@@ -104,7 +104,7 @@ test('a note added in annotate mode waits as a ghost and travels with the change
   await expect(ghost).toContainText('Why this version')
   await expect(ghost).toContainText('Not applied yet')
   // Leaving annotate mode with a change waiting says so, so it is not forgotten.
-  await page.getByRole('button', { name: 'Annotate', exact: true }).click()
+  await page.getByRole('button', { name: 'Request change', exact: true }).click()
   await page.keyboard.press('Escape')
   await expect(page.locator('.canvas-toast')).toContainText("1 change isn't applied yet")
   await page.getByRole('button', { name: 'Copy 1 change' }).click()
@@ -320,7 +320,7 @@ test('a registry update in the middle of a drag does not cancel it', async ({ pa
     await page.goto('/')
     await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toBeVisible()
     await page.waitForTimeout(600)
-    await page.getByRole('button', { name: 'Annotate', exact: true }).click()
+    await page.getByRole('button', { name: 'Request change', exact: true }).click()
     const box = (await page.locator('.canvas-preview[data-canvas-preview="example"]').boundingBox())!
     const scale = box.width / 360
     await page.mouse.move(box.x + 4 * scale, box.y + 4 * scale)
@@ -395,6 +395,114 @@ test('Backspace in a note being edited edits it, and does not delete the note', 
   }
 })
 
+test('a caption is edited in place and saved to the registry', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    await page.goto('/')
+    const caption = page.locator('.canvas-item[data-canvas-item="example"] .canvas-note')
+    await expect(caption).toBeVisible()
+    await page.waitForTimeout(600)
+    await caption.dblclick()
+    const field = page.locator('.canvas-caption-field')
+    await expect(field).toBeFocused()
+    await field.fill('A caption written on the canvas')
+    // Backspace and other keys stay in the field.
+    await page.keyboard.press('Enter')
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toContain('note: "A caption written on the canvas"')
+    await expect(caption).toHaveText('A caption written on the canvas')
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
+test('Escape cancels a caption edit and saves nothing', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    await page.goto('/')
+    const caption = page.locator('.canvas-item[data-canvas-item="example"] .canvas-note')
+    await expect(caption).toBeVisible()
+    await page.waitForTimeout(600)
+    const before = await caption.textContent()
+    await caption.dblclick()
+    await page.locator('.canvas-caption-field').fill('Not this')
+    await page.keyboard.press('Escape')
+    await expect(page.locator('.canvas-caption-field')).toHaveCount(0)
+    await expect(caption).toHaveText(before!)
+    // Longer than the pause before a save.
+    await page.waitForTimeout(900)
+    expect(readFileSync(REGISTRY, 'utf8')).toBe(original)
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
+test('a save the dev server cannot take says why, and the change waits for the agent', async ({ page }) => {
+  // A server started before the canvas was updated does not know the route.
+  await page.route('**/__design-canvas/edit', (route) => route.fulfill({ status: 404, body: 'not found' }))
+  await page.goto('/')
+  const name = page.locator('.canvas-item[data-canvas-item="example"] .canvas-name')
+  await expect(name).toBeVisible()
+  await page.waitForTimeout(600)
+  const box = (await name.boundingBox())!
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(box.x + box.width / 2 + 120, box.y + box.height / 2 + 80, { steps: 6 })
+  await page.mouse.up()
+  await expect(page.locator('.canvas-toast')).toContainText("Restart this canvas's dev server")
+  await expect(page.locator('.canvas-item-tag')).toContainText('Not applied yet')
+  await expect(page.getByRole('button', { name: 'Copy 1 change' })).toBeVisible()
+})
+
+test('Undo (Cmd or Ctrl + Z) puts back a moved item in the registry', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    await page.goto('/')
+    await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toBeVisible()
+    await page.waitForTimeout(600)
+    // The grip keeps focus after a nudge, and Undo works from there.
+    await page.locator('.canvas-item[data-canvas-item="example"] .canvas-handle').focus()
+    await page.keyboard.press('ArrowRight')
+    await page.keyboard.press('ArrowRight')
+    await page.keyboard.press('ArrowRight')
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).not.toBe(original)
+    await page.keyboard.press('ControlOrMeta+z')
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toBe(original)
+    await expect(page.locator('.canvas-toast')).toContainText('Undone')
+    // Nothing left to undo, and the item is not saved again.
+    await page.waitForTimeout(900)
+    expect(readFileSync(REGISTRY, 'utf8')).toBe(original)
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
+test('Undo removes a note that was just saved', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    await page.goto('/')
+    await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toBeVisible()
+    await page.waitForTimeout(600)
+    await page.getByRole('button', { name: 'Note', exact: true }).click()
+    await page.mouse.click(700, 400)
+    await expect(page.locator('[data-board-ghost] textarea')).toBeFocused()
+    await page.keyboard.type('Undo me')
+    await page.keyboard.press('Escape')
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toContain('text: "Undo me"')
+    await expect(page.locator('[data-board-ghost]')).toHaveCount(0)
+    await page.keyboard.press('ControlOrMeta+z')
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toBe(original)
+    await expect(page.locator('.canvas-note-card', { hasText: 'Undo me' })).toHaveCount(0)
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
 test('Select is the default tool and Escape returns to it', async ({ page }) => {
   await page.goto('/')
   const tool = (name: string) => page.getByRole('button', { name, exact: true })
@@ -406,13 +514,13 @@ test('Select is the default tool and Escape returns to it', async ({ page }) => 
   await expect(tool('Select')).toHaveAttribute('aria-pressed', 'false')
   await page.keyboard.press('Escape')
   await expect(tool('Select')).toHaveAttribute('aria-pressed', 'true')
-  await tool('Annotate').click()
+  await tool('Request change').click()
   await page.mouse.move(400, 300)
-  await expect(tool('Annotate')).toHaveAttribute('aria-pressed', 'true')
+  await expect(tool('Request change')).toHaveAttribute('aria-pressed', 'true')
   await tool('Select').click()
   await page.mouse.move(400, 300)
   await expect(tool('Select')).toHaveAttribute('aria-pressed', 'true')
-  await expect(tool('Annotate')).toHaveAttribute('aria-pressed', 'false')
+  await expect(tool('Request change')).toHaveAttribute('aria-pressed', 'false')
 })
 
 // Before the agent tests: they leave the agent busy for a while, and then the button sends instead of copying.
@@ -423,7 +531,7 @@ test('a drag annotates an area, and the name annotates the whole item', async ({
   await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toBeVisible()
   // The first paint fits the canvas to the window once fonts load; measure after that moved the camera.
   await page.waitForTimeout(600)
-  await page.getByRole('button', { name: 'Annotate', exact: true }).click()
+  await page.getByRole('button', { name: 'Request change', exact: true }).click()
   const preview = page.locator('.canvas-preview[data-canvas-preview="example"]')
   const box = (await preview.boundingBox())!
   // Item pixels to screen pixels, whatever the zoom: drag across the heading only.
@@ -461,7 +569,7 @@ test('annotations go straight to a listening agent', async ({ page, baseURL }) =
   const exited = new Promise<number | null>((resolve) => listener.on('exit', resolve))
   try {
     await page.goto('/')
-    await page.getByRole('button', { name: 'Annotate', exact: true }).click()
+    await page.getByRole('button', { name: 'Request change', exact: true }).click()
     await page.locator('.canvas-preview h2').click()
     const note = page.getByRole('dialog', { name: /^Annotation on/ })
     await note.getByRole('textbox').fill('Shorter title')
@@ -488,7 +596,7 @@ test('the toolbar shows the agent working until it listens again', async ({ page
   let again: ReturnType<typeof listen> | undefined
   try {
     await page.goto('/')
-    await page.getByRole('button', { name: 'Annotate', exact: true }).click()
+    await page.getByRole('button', { name: 'Request change', exact: true }).click()
     await page.locator('.canvas-preview h2').click()
     const note = page.getByRole('dialog', { name: /^Annotation on/ })
     await note.getByRole('textbox').fill('Shorter title')
@@ -514,9 +622,9 @@ test('a kept listener stays working until the agent says done', async ({ page, r
   // The Codex listener's side: it listens with keep=1 and reconnects right after each message.
   const kept = () => request.get('/__design-canvas/agent/listen?timeout=30&keep=1')
   const firstPoll = kept()
-  await expect(page.getByRole('button', { name: 'Annotate', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Request change', exact: true })).toBeVisible()
   await expect.poll(async () => (await (await request.get('/__design-canvas/agent')).json()).state).toBe('listening')
-  await page.getByRole('button', { name: 'Annotate', exact: true }).click()
+  await page.getByRole('button', { name: 'Request change', exact: true }).click()
   await page.locator('.canvas-preview h2').click()
   const note = page.getByRole('dialog', { name: /^Annotation on/ })
   await note.getByRole('textbox').fill('Shorter title')
@@ -565,7 +673,7 @@ test('a shared file works from disk, frames included, without the agent tools', 
     const url = pathToFileURL(file).href
     await page.goto(url)
     await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toContainText('Canvas is ready')
-    await expect(page.getByRole('button', { name: 'Annotate', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Request change', exact: true })).toHaveCount(0)
     await expect(page.locator('#canvas-help')).not.toContainText('Press A')
     const frame = page.locator('.canvas-item[data-canvas-item="phone"] iframe')
     await expect(page.frameLocator('.canvas-item[data-canvas-item="phone"] iframe').locator('body')).toContainText(
@@ -625,7 +733,7 @@ test('cursors say what a press or drag will do', async ({ page }) => {
   expect(await cursor('.canvas-name')).toBe('grab')
   expect(await cursor('.canvas-handle')).toBe('grab')
   expect(await cursor('.canvas-preview h2')).toBe('auto')
-  await page.getByRole('button', { name: 'Annotate', exact: true }).click()
+  await page.getByRole('button', { name: 'Request change', exact: true }).click()
   expect(await cursor('.canvas-preview h2')).toBe('crosshair')
   expect(await cursor('.canvas-name')).toBe('crosshair')
   await page.locator('.canvas-viewport').evaluate((element) => element.setAttribute('data-gesture', 'pan'))

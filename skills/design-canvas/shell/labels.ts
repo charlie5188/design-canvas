@@ -1,6 +1,9 @@
 // Canvas chrome copy. Edit here to change the language of the controls.
 const ANNOTATE_HELP =
-  "Press A to annotate: click an element, drag across an area, or click an item's name for the whole item; add a note or a section; then apply or copy them all at once";
+  "Press A to request a change: click an element, drag across an area, or click an item's name for the whole item, and say what to change; then apply or copy them all at once";
+
+const EDIT_HELP = "Double-click a caption, a note, or a section's title to edit it; select a note or section and press Delete to remove it";
+const SAVE_HELP = "Moves, edits, and new notes save into registry.tsx as you make them; ⌘/Ctrl + Z undoes the last one";
 
 export const labels = {
   region: "Design canvas",
@@ -13,6 +16,9 @@ export const labels = {
   help: "Canvas controls",
   /** The help line a shared file leaves out, since it has no annotations. */
   annotateHelp: ANNOTATE_HELP,
+  /** Also left out of a shared file, which saves nothing. */
+  saveHelp: SAVE_HELP,
+  editHelp: EDIT_HELP,
   helpLines: [
     "Drag empty space to pan",
     "Drag an item's name or grip to move it",
@@ -21,6 +27,8 @@ export const labels = {
     "Hold ⌥/Alt and click an element to copy a reference to it",
     ANNOTATE_HELP,
     "Hover an item's name to open it alone or move it to the trash",
+    SAVE_HELP,
+    EDIT_HELP,
     "With the canvas focused: arrow keys pan, + and − zoom, 0 resets, 1 fits all",
   ],
   linkBlocked: (target: string) => `Links stay on the canvas: ${target}`,
@@ -46,14 +54,14 @@ export const labels = {
   trashHeading: "Trash",
   trashHint: "Click an item to put it back",
   putBack: (name: string) => `Put back ${name}`,
-  annotate: "Annotate",
-  annotateHint: "Annotate (A)",
+  annotate: "Request change",
+  annotateHint: "Request change (A)",
   annotateModeOn:
-    "Annotate mode. Click an element, drag across an area, or click an item's name for the whole item. Press Escape to finish.",
+    "Request-change mode. Click an element, drag across an area, or click an item's name for the whole item. Press Escape to finish.",
   /** An area drawn over a preview, in px from the item's top-left, and what is entirely inside it. */
   areaRef: (w: number, h: number, x: number, y: number, names: string[], more: number) =>
     `area ${w}×${h} at ${x},${y}${names.length ? `: ${names.join(", ")}${more ? ` and ${more} more` : ""}` : ""}`,
-  annotateModeOff: "Annotate mode off",
+  annotateModeOff: "Request-change mode off",
   annotationPlaceholder: "Note for the agent",
   annotationField: (ref: string) => `Annotation on ${ref}`,
   annotationPin: (n: number, text: string) => `Annotation ${n}: ${text}`,
@@ -115,6 +123,15 @@ export const labels = {
   sectionPlaceholder: "Section title",
   boardNotApplied: "Not applied yet",
   boardSaving: "Saving…",
+  undone: "Undone",
+  nothingToUndo: "Nothing to undo",
+  undoFailed: "Couldn't undo. The dev server writes registry.tsx, so it must be running.",
+  captionHint: "Double-click to edit the caption",
+  captionLabel: "Caption",
+  captionNotSaved: "Couldn't save the caption. The dev server writes registry.tsx, so it must be running.",
+  saveNeedsServer: "Auto-save can't reach the dev server, so changes wait for the agent. Restart this canvas's dev server.",
+  saveCouldntPlace: (names: string) =>
+    `${names} can't be changed in registry.tsx automatically (no plain id, or a computed value), so the change waits for the agent.`,
   noteDeleted: "Note deleted",
   sectionDeleted: "Section deleted",
   noteRestored: "Note put back",
