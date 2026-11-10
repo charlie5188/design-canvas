@@ -29,7 +29,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Plugin } from "vite";
 import { AGENT_EVENT, AGENT_PATH, EDIT_PATH, SHARE_PATH } from "./channel.ts";
-import { addEntry, applyEdits, type DirectAdd, type DirectEdit, validAdd, validEdit } from "./registry-edit.ts";
+import { addEntry, applyEdits, type DirectAdd, type DirectEdit, type DirectRemove, removeEntry, validAdd, validEdit, validRemove } from "./registry-edit.ts";
 
 export type AgentState = "off" | "listening" | "working";
 /** What the page hears: `finished` only on the update that ends `handling` because the agent said done. */
@@ -257,7 +257,7 @@ export function agentChannel(): Plugin {
         if (!fromCanvasPage(request)) return send(response, 403, "Not allowed");
         readBody(request).then(
           (body) => {
-            let parsed: { edits?: unknown; adds?: unknown } = {};
+            let parsed: { edits?: unknown; adds?: unknown; removes?: unknown } = {};
             try {
               parsed = JSON.parse(body) as typeof parsed;
             } catch {
@@ -265,23 +265,33 @@ export function agentChannel(): Plugin {
             }
             const rawEdits = Array.isArray(parsed.edits) ? parsed.edits : [];
             const rawAdds = Array.isArray(parsed.adds) ? parsed.adds : [];
-            if (!rawEdits.length && !rawAdds.length) return send(response, 400, "Expected { edits } or { adds }");
+            const rawRemoves = Array.isArray(parsed.removes) ? parsed.removes : [];
+            if (!rawEdits.length && !rawAdds.length && !rawRemoves.length) return send(response, 400, "Expected { edits }, { adds }, or { removes }");
             const edits = rawEdits.map(validEdit);
             const adds = rawAdds.map(validAdd);
-            if (edits.some((edit) => !edit) || adds.some((add) => !add)) return send(response, 400, "Invalid edit");
+            const removes = rawRemoves.map(validRemove);
+            if (edits.some((edit) => !edit) || adds.some((add) => !add) || removes.some((remove) => !remove)) return send(response, 400, "Invalid edit");
             const path = join(server.config.root, "registry.tsx");
             const job = writing.then(async () => {
-              const result = applyEdits(await readFile(path, "utf8"), edits as DirectEdit[]);
-              // New entries go in order, so their place in the array matches their place in the request.
+              const original = await readFile(path, "utf8");
+              const result = applyEdits(original, edits as DirectEdit[]);
               let next = result.source;
+              // Removals first, so an entry that is removed and added back in one request ends up present.
+              const unremoved: string[] = [];
+              for (const remove of removes as DirectRemove[]) {
+                const removed = removeEntry(next, remove.kind, remove.id);
+                if (removed === undefined) unremoved.push(remove.id);
+                else next = removed;
+              }
+              // New entries go in order, so their place in the array matches their place in the request.
               const rejected: number[] = [];
               (adds as DirectAdd[]).forEach((add, index) => {
                 const added = addEntry(next, add);
                 if (added) next = added.source;
                 else rejected.push(index);
               });
-              if (result.applied.length || rejected.length < adds.length) await writeFile(path, next);
-              return { applied: result.applied, missing: result.missing, rejected };
+              if (next !== original) await writeFile(path, next);
+              return { applied: result.applied, missing: result.missing, rejected, unremoved };
             });
             writing = job.catch(() => {});
             job.then(

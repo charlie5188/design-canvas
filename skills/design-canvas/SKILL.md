@@ -153,7 +153,7 @@ Apply every entry, and say which you could not:
 - **Add a section**: a `sections` entry `{ id, title, x, y, width, height }` with those bounds.
 - **Change a note or section**: edit that entry, and only the parts the line names: `text` or `title`, `x` and `y` (move), `width` and `height` (resize).
 - **Items inside a section**: the positions listed are where the person has the items now, but the registry still holds their old ones, and the shared file uses the registry. Set each listed item's `x` and `y` to the position shown. A section only draws a frame and never moves items by itself. Items the person did not put inside stay where they are.
-- Removing a note or section is a plain request in chat: remove its entry.
+- Removing a note or section needs no request: the person selects it and presses Delete or Backspace, and the canvas removes its entry from `registry.tsx` and offers Undo, which puts it back as it was. Deleting a section removes only the frame; the items and notes inside stay.
 
 A ghost leaves on its own once the registry shows it: a new one when the registry holds one more note or section than when it was sent, a change when the entry matches the ghost's text, position, and size. A ghost that stays means the entry is missing or differs.
 

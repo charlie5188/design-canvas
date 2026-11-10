@@ -338,6 +338,63 @@ test('a registry update in the middle of a drag does not cancel it', async ({ pa
   }
 })
 
+test('Delete removes a selected note from the registry, and Undo puts it back', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    await page.goto('/')
+    await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toBeVisible()
+    await page.waitForTimeout(600)
+    await page.getByRole('button', { name: 'Note', exact: true }).click()
+    await page.mouse.click(700, 400)
+    await expect(page.locator('[data-board-ghost] textarea')).toBeFocused()
+    await page.keyboard.type('Delete me')
+    await page.keyboard.press('Escape')
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toContain('text: "Delete me"')
+    // The saved note replaces its ghost once the registry has it.
+    await expect(page.locator('[data-board-ghost]')).toHaveCount(0)
+    const note = page.locator('.canvas-note-card', { hasText: 'Delete me' })
+    await note.click()
+    await page.keyboard.press('Delete')
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).not.toContain('Delete me')
+    await expect(note).toHaveCount(0)
+    await expect(page.locator('.canvas-toast')).toContainText('Note deleted')
+    await page.getByRole('button', { name: 'Undo' }).click()
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toContain('text: "Delete me"')
+    await expect(note).toBeVisible()
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
+test('Backspace in a note being edited edits it, and does not delete the note', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    await page.goto('/')
+    await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toBeVisible()
+    await page.waitForTimeout(600)
+    await page.getByRole('button', { name: 'Note', exact: true }).click()
+    await page.mouse.click(700, 400)
+    await expect(page.locator('[data-board-ghost] textarea')).toBeFocused()
+    await page.keyboard.type('Keep me!')
+    await page.keyboard.press('Escape')
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toContain('text: "Keep me!"')
+    await expect(page.locator('[data-board-ghost]')).toHaveCount(0)
+    const note = page.locator('.canvas-note-card', { hasText: 'Keep me!' })
+    await note.dblclick()
+    await expect(page.locator('[data-board-ghost] textarea')).toBeFocused()
+    await page.keyboard.press('Backspace')
+    await page.keyboard.press('Escape')
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toContain('text: "Keep me"')
+    await expect(page.locator('.canvas-note-card', { hasText: 'Keep me' })).toBeVisible()
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
 test('Select is the default tool and Escape returns to it', async ({ page }) => {
   await page.goto('/')
   const tool = (name: string) => page.getByRole('button', { name, exact: true })
@@ -363,6 +420,9 @@ test('a drag annotates an area, and the name annotates the whole item', async ({
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   const errors = collectErrors(page)
   await page.goto('/')
+  await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toBeVisible()
+  // The first paint fits the canvas to the window once fonts load; measure after that moved the camera.
+  await page.waitForTimeout(600)
   await page.getByRole('button', { name: 'Annotate', exact: true }).click()
   const preview = page.locator('.canvas-preview[data-canvas-preview="example"]')
   const box = (await preview.boundingBox())!

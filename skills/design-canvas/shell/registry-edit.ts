@@ -165,7 +165,9 @@ export function applyEdits(source: string, edits: DirectEdit[]): ApplyResult {
 
 // New notes and sections are appended to the end of their array.
 
-export type DirectAdd = { kind: "note" | "section"; text: string; x: number; y: number; width?: number; height?: number };
+/** `id` is for putting a deleted entry back as it was; without it, the id is made from the text. */
+export type DirectAdd = { kind: "note" | "section"; text: string; x: number; y: number; width?: number; height?: number; id?: string };
+export type DirectRemove = { kind: "note" | "section"; id: string };
 
 /** Checks a new entry from the browser before it goes near the file. */
 export function validAdd(value: unknown): DirectAdd | undefined {
@@ -179,8 +181,31 @@ export function validAdd(value: unknown): DirectAdd | undefined {
   const height = a.height === undefined ? undefined : num(a.height);
   // A section is a frame, so it needs a size; a note's size is optional.
   if (a.kind === "section" && (!width || !height)) return undefined;
+  if (a.id !== undefined && (typeof a.id !== "string" || !ID.test(a.id))) return undefined;
   if ((a.width !== undefined && width === undefined) || (a.height !== undefined && height === undefined)) return undefined;
-  return { kind: a.kind, text: a.text, x, y, ...(width ? { width } : {}), ...(height ? { height } : {}) };
+  return { kind: a.kind, text: a.text, x, y, ...(width ? { width } : {}), ...(height ? { height } : {}), ...(a.id ? { id: a.id } : {}) };
+}
+
+/** Checks a removal from the browser. Items are never removed from here. */
+export function validRemove(value: unknown): DirectRemove | undefined {
+  const r = value as Partial<DirectRemove> | null;
+  if (!r || typeof r !== "object" || !(r.kind === "note" || r.kind === "section")) return undefined;
+  return typeof r.id === "string" && ID.test(r.id) ? { kind: r.kind, id: r.id } : undefined;
+}
+
+/** The source without that entry, or undefined when it cannot be found exactly once. */
+export function removeEntry(source: string, kind: DirectRemove["kind"], id: string): string | undefined {
+  const entry = entryOf(source, kind, id);
+  if (!entry) return undefined;
+  let start = entry.open;
+  while (start > 0 && (source[start - 1] === " " || source[start - 1] === "\t")) start--;
+  const ownLine = start === 0 || source[start - 1] === "\n";
+  let end = entry.close + 1;
+  if (source[end] === ",") end++;
+  while (source[end] === " " || source[end] === "\t") end++;
+  // An entry alone on its line takes the line with it; one inline keeps its neighbours' layout.
+  if (ownLine && source[end] === "\n") end++;
+  return source.slice(0, start) + source.slice(end);
 }
 
 /** A readable, unique id from the text, such as `keep-a-clearer-hierarchy`. */
@@ -224,7 +249,7 @@ export function addEntry(source: string, add: DirectAdd): { source: string; id: 
   if (close < 0) return undefined;
   const body = source.slice(open + 1, close);
   const used = new Set([...body.matchAll(/\bid\s*:\s*(["'])(.*?)\1/g)].map((m) => m[2]!));
-  const id = newId(add.text, add.kind, used);
+  const id = add.id && !used.has(add.id) ? add.id : newId(add.text, add.kind, used);
   const key = add.kind === "note" ? "text" : "title";
   const size = `${add.width ? `, width: ${add.width}` : ""}${add.height ? `, height: ${add.height}` : ""}`;
   const entry = `{ id: ${JSON.stringify(id)}, ${key}: ${JSON.stringify(add.text)}, x: ${add.x}, y: ${add.y}${size} },`;
