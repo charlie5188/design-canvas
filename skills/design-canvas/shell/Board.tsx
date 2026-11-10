@@ -271,7 +271,7 @@ export function MarkView({
   const tag = folded ? null : (
     <span className="canvas-ghost-tag">
       {!empty && state}
-      {!mark.direct && <DiscardButton keepFocus onClick={() => onDelete(mark.id)} />}
+      {(!mark.direct || empty) && <DiscardButton keepFocus onClick={() => onDelete(mark.id)} />}
     </span>
   );
   const common = {

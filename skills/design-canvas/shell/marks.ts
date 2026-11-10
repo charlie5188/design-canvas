@@ -95,7 +95,8 @@ const valid = (value: unknown): BoardMark | undefined => {
   const sent = finite(m.sent) && m.sent >= 0 ? { sent: m.sent } : {};
   const queued = m.queued === true && !("sent" in sent) ? { queued: true } : {};
   const carried = typeof m.carriedBy === "string" && m.carriedBy.length <= 40 ? { carriedBy: m.carriedBy } : {};
-  const direct = m.direct === true && "target" in target ? { direct: true } : {};
+  // A new note or section that has not gone to the agent is saved to the registry like any other change.
+  const direct = m.direct === true || (!("target" in target) && !("sent" in sent) && !("queued" in queued)) ? { direct: true } : {};
   return { id: m.id, kind: m.kind, x: m.x, y: m.y, ...dims, text: m.text, ...target, ...(from ? { from } : {}), ...sent, ...queued, ...carried, ...direct };
 };
 

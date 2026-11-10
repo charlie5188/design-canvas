@@ -72,7 +72,7 @@ import {
 import { type ThemeStore, useThemeId } from "./theme";
 import type { CanvasItem, CanvasNote, CanvasSection } from "./types";
 import { EDIT_PATH } from "./channel.ts";
-import type { DirectEdit } from "./registry-edit.ts";
+import type { DirectAdd, DirectEdit } from "./registry-edit.ts";
 import "./canvas.css";
 
 const DEFAULT_CAMERA: Camera = { x: 48, y: 120, z: 1 };
@@ -1189,13 +1189,19 @@ function CanvasBoard({ items, notes = NO_NOTES, sections = NO_SECTIONS, storageK
   const movedItemsRef = useRef(movedItems);
   movedItemsRef.current = movedItems;
 
-  // A move, resize, or text change of an existing note, section, or item is written
-  // into registry.tsx once the person pauses (see registry-edit.ts), so it needs no
-  // message. A write the registry refuses falls back to the agent as before.
+  // Moves, resizes, and text changes of existing notes, sections, and items, and
+  // new notes and sections once they have text, are written into registry.tsx
+  // once the person pauses (see registry-edit.ts), so none of it needs a message.
+  // A write the registry refuses falls back to the agent as before.
+  const countsRef = useRef(counts);
+  countsRef.current = counts;
   const flushDirect = useCallback(async () => {
     if (shared) return;
     const open = openMarkRef.current;
-    const pendingMarks = marksRef.current.filter((m) => m.direct && m.target && m.sent === undefined && m.id !== open);
+    const pending = marksRef.current.filter((m) => m.direct && m.sent === undefined && m.id !== open);
+    const pendingMarks = pending.filter((m) => m.target);
+    // An empty new note or section is a draft: it is never saved.
+    const pendingNew = pending.filter((m) => !m.target && m.text.trim());
     // A moved item is pending until its state says it went out at this position.
     const pendingMoves = movedItemsRef.current.filter((m) => {
       const s = moveStatesRef.current[m.id];
@@ -1215,32 +1221,48 @@ function CanvasBoard({ items, notes = NO_NOTES, sections = NO_SECTIONS, storageK
       if (Object.keys(set).length) edits.push({ kind: m.kind, id: m.target!, set });
     }
     for (const m of pendingMoves) edits.push({ kind: "item", id: m.id, set: { x: Math.round(m.x), y: Math.round(m.y) } });
-    if (!markIds.size && !pendingMoves.length) return;
+    const adds: DirectAdd[] = pendingNew.map((m) => ({
+      kind: m.kind,
+      text: m.text,
+      x: m.x,
+      y: m.y,
+      ...(m.w ? { width: m.w } : {}),
+      ...(m.h ? { height: m.h } : {}),
+    }));
+    if (!markIds.size && !pendingNew.length && !pendingMoves.length) return;
+    // A new mark is applied once the registry holds one more entry of its kind, in request order.
+    const targets = sentTargets(pendingNew, countsRef.current);
     // Marked in flight first, so a second save does not start for the same change.
-    setMarks((prev) => prev.map((m) => (markIds.has(m.id) ? { ...m, sent: 0 } : m)));
+    setMarks((prev) => prev.map((m) => (markIds.has(m.id) ? { ...m, sent: 0 } : targets.has(m.id) ? { ...m, sent: targets.get(m.id) } : m)));
     setMoveStates((prev) => ({
       ...prev,
       ...Object.fromEntries(pendingMoves.map((m) => [m.id, { x: m.x, y: m.y, state: "saving" as const }])),
     }));
     let failed = new Set<string>();
-    if (edits.length) {
+    let rejected = new Set<number>();
+    if (edits.length || adds.length) {
       try {
         const response = await fetch(EDIT_PATH, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ edits }),
+          body: JSON.stringify({ edits, adds }),
         });
         if (!response.ok) throw new Error(`edit ${response.status}`);
-        const result = (await response.json()) as { missing?: unknown };
+        const result = (await response.json()) as { missing?: unknown; rejected?: unknown };
         failed = new Set(Array.isArray(result.missing) ? result.missing.filter((id): id is string => typeof id === "string") : []);
+        rejected = new Set(Array.isArray(result.rejected) ? result.rejected.filter((i): i is number => typeof i === "number") : []);
       } catch {
         // No dev server, or it refused: every change in this batch goes to the agent instead.
         failed = new Set(edits.map((e) => e.id));
+        rejected = new Set(adds.map((_, i) => i));
       }
     }
-    if (!failed.size) return;
+    const failedNew = new Set(pendingNew.filter((_, i) => rejected.has(i)).map((m) => m.id));
+    if (!failed.size && !failedNew.size) return;
     setMarks((prev) =>
-      prev.map((m) => (markIds.has(m.id) && m.target && failed.has(m.target) ? { ...m, direct: undefined, sent: undefined } : m)),
+      prev.map((m) =>
+        (markIds.has(m.id) && m.target && failed.has(m.target)) || failedNew.has(m.id) ? { ...m, direct: undefined, sent: undefined } : m,
+      ),
     );
     setMoveStates((prev) => ({
       ...prev,
@@ -1282,7 +1304,7 @@ function CanvasBoard({ items, notes = NO_NOTES, sections = NO_SECTIONS, storageK
     (kind: BoardKind, x: number, y: number, size?: { w: number; h: number }) => {
       closeAnnotation();
       closeMark();
-      const mark: BoardMark = { id: newMarkId(), kind, x: Math.round(x), y: Math.round(y), text: "", ...(size ?? {}) };
+      const mark: BoardMark = { id: newMarkId(), kind, x: Math.round(x), y: Math.round(y), text: "", direct: true, ...(size ?? {}) };
       setMarks((prev) => [...prev, mark]);
       setMarkOpen(mark.id);
     },
