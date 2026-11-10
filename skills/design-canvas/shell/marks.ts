@@ -49,6 +49,12 @@ export type BoardMark = {
    * Cleared as soon as the note is changed by hand.
    */
   carriedBy?: string;
+  /**
+   * A change to a registry entry that is written into the source as it happens
+   * (see registry-edit.ts), not sent to the agent. It shows as "Saving…" until
+   * the registry matches, and only falls back to the agent if the write fails.
+   */
+  direct?: boolean;
 };
 
 const VERSION = 2;
@@ -89,7 +95,8 @@ const valid = (value: unknown): BoardMark | undefined => {
   const sent = finite(m.sent) && m.sent >= 0 ? { sent: m.sent } : {};
   const queued = m.queued === true && !("sent" in sent) ? { queued: true } : {};
   const carried = typeof m.carriedBy === "string" && m.carriedBy.length <= 40 ? { carriedBy: m.carriedBy } : {};
-  return { id: m.id, kind: m.kind, x: m.x, y: m.y, ...dims, text: m.text, ...target, ...(from ? { from } : {}), ...sent, ...queued, ...carried };
+  const direct = m.direct === true && "target" in target ? { direct: true } : {};
+  return { id: m.id, kind: m.kind, x: m.x, y: m.y, ...dims, text: m.text, ...target, ...(from ? { from } : {}), ...sent, ...queued, ...carried, ...direct };
 };
 
 export function loadMarks(storageKey: string): BoardMark[] {
@@ -235,7 +242,8 @@ export function isApplied(mark: BoardMark, counts: Record<BoardKind, number>, co
 // position, and nothing once the registry matches.
 
 export type MovedItem = { id: string; name: string; x: number; y: number };
-export type MoveSent = { x: number; y: number; state: "sent" | "queued" };
+/** `saving` while its write is in flight, `failed` when the write was refused and the agent gets it. */
+export type MoveSent = { x: number; y: number; state: "sent" | "queued" | "saving" | "failed" };
 export type MoveStates = Record<string, MoveSent>;
 
 const MAX_MOVES = 200;
