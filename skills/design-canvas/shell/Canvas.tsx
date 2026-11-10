@@ -1401,6 +1401,83 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     }),
     [closeMark, setMarkOpen],
   );
+  // Delete: a selected note or section is removed from registry.tsx, and Undo puts it back as it was.
+  const [removed, setRemoved] = useState<ReadonlySet<string>>(() => new Set());
+  // It stays hidden from the click until the registry stops listing it.
+  useEffect(() => {
+    setRemoved((prev) => {
+      const next = new Set(
+        [...prev].filter((key) => notes.some((n) => `note:${n.id}` === key) || sections.some((s) => `section:${s.id}` === key)),
+      );
+      return next.size === prev.size ? prev : next;
+    });
+  }, [notes, sections]);
+  const postRegistry = async (body: { removes?: unknown[]; adds?: unknown[] }) => {
+    try {
+      const response = await fetch(EDIT_PATH, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      return response.ok ? ((await response.json()) as { rejected?: number[]; unremoved?: string[] }) : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const deleteBoard = async (kind: BoardKind, id: string) => {
+    const note = kind === "note" ? notes.find((n) => n.id === id) : undefined;
+    const section = kind === "section" ? sections.find((s) => s.id === id) : undefined;
+    const snapshot: DirectAdd | undefined = note
+      ? { kind, id, text: note.text, x: note.x, y: note.y, ...(note.width ? { width: note.width } : {}), ...(note.height ? { height: note.height } : {}) }
+      : section
+        ? { kind, id, text: section.title, x: section.x, y: section.y, width: section.width, height: section.height }
+        : undefined;
+    if (!snapshot) return;
+    const key = `${kind}:${id}`;
+    setRemoved((prev) => new Set(prev).add(key));
+    select(null);
+    // A change waiting on the entry means nothing once it is gone.
+    setMarks((prev) => prev.filter((m) => !(m.kind === kind && m.target === id)));
+    const result = await postRegistry({ removes: [{ kind, id }] });
+    if (!result || result.unremoved?.length) {
+      setRemoved((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+      notify(labels.deleteFailed);
+      return;
+    }
+    notify(kind === "note" ? labels.noteDeleted : labels.sectionDeleted, {
+      label: labels.undo,
+      run: async () => {
+        // Shown again at once: if the registry's removal and this restore reach the page together, it never sees the entry gone to clear this itself.
+        setRemoved((prev) => {
+          const next = new Set(prev);
+          next.delete(key);
+          return next;
+        });
+        const back = await postRegistry({ adds: [snapshot] });
+        notify(back && !back.rejected?.length ? (kind === "note" ? labels.noteRestored : labels.sectionRestored) : labels.restoreFailed);
+      },
+    });
+  };
+  const deleteSelected = () => {
+    const key = selectedRef.current;
+    if (!key || shared) return;
+    const [side, kind, id] = key.split(":") as ["g" | "e", BoardKind, string];
+    if (side === "e") {
+      void deleteBoard(kind, id);
+      return;
+    }
+    const mark = marksRef.current.find((m) => m.id === id);
+    if (!mark) return;
+    // A change to an entry that exists deletes the entry; a new one is just dropped.
+    if (mark.target) void deleteBoard(kind, mark.target);
+    else {
+      if (openMarkRef.current === id) setMarkOpen(null);
+      setMarks((prev) => prev.filter((m) => m.id !== id));
+      select(null);
+    }
+  };
+  const deleteBoardRef = useRef(deleteSelected);
+  deleteBoardRef.current = deleteSelected;
   // Leaving annotate mode with changes still waiting is where they get
   // forgotten, so say so, with the way to apply them.
   const sendRef = useRef<() => Promise<void>>(async () => {});
@@ -2702,6 +2779,21 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
         chooseTool(toolKey as "select" | BoardKind);
         return;
       }
+      // Delete or Backspace removes the selected note or section, unless a field has the keys.
+      if (
+        !shared &&
+        plain &&
+        canvasFocus &&
+        (event.key === "Delete" || event.key === "Backspace") &&
+        selectedRef.current &&
+        !openMarkRef.current &&
+        // The canvas itself counts as editable to isEditable, so it is passed as nothing.
+        !(event.target instanceof Element && event.target !== viewport && isEditable(event.target))
+      ) {
+        event.preventDefault();
+        deleteBoardRef.current();
+        return;
+      }
       // Escape puts a Note or Section tool down first, then leaves annotate mode.
       if (event.key === "Escape" && boardToolRef.current && canvasFocus) {
         setBoardTool(null);
@@ -2993,7 +3085,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
             <SectionView
               key={section.id}
               section={section}
-              hidden={marks.some((m) => m.kind === "section" && m.target === section.id)}
+              hidden={removed.has(`section:${section.id}`) || marks.some((m) => m.kind === "section" && m.target === section.id)}
               interactive={boardInteractive}
               selected={selected === `e:section:${section.id}`}
               handlers={boardHandlers}
@@ -3029,7 +3121,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
             <NoteView
               key={note.id}
               note={note}
-              hidden={marks.some((m) => m.kind === "note" && m.target === note.id)}
+              hidden={removed.has(`note:${note.id}`) || marks.some((m) => m.kind === "note" && m.target === note.id)}
               interactive={boardInteractive}
               selected={selected === `e:note:${note.id}`}
               handlers={boardHandlers}
