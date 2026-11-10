@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -22,6 +22,15 @@ const REGISTRY = 'design-canvas/smoke/registry.tsx'
 // The dev server writes moves and new notes into registry.tsx. Tests about the
 // agent path need the write refused, which is what makes a change fall back to
 // the agent; refusing it also leaves the registry as installed for the tests after.
+// Puts the registry back as installed and waits for the page to take that update, so
+// it cannot land during the next test.
+async function restoreRegistry(page: Page, original: string) {
+  if (readFileSync(REGISTRY, 'utf8') === original) return
+  const updated = page.waitForEvent('console', { predicate: (m) => m.text().includes('hot updated'), timeout: 10_000 }).catch(() => {})
+  writeFileSync(REGISTRY, original)
+  await updated
+}
+
 async function refuseSaves(page: Page) {
   await page.route('**/__design-canvas/edit', (route) => {
     const body = JSON.parse(route.request().postData() ?? '{}') as { edits?: { id: string }[]; adds?: unknown[] }
@@ -255,7 +264,7 @@ test('a moved item is saved to the registry, with no change waiting for the agen
     expect(await page.evaluate(() => (window as unknown as { __samePage?: boolean }).__samePage)).toBe(true)
     expect(errors).toEqual([])
   } finally {
-    writeFileSync(REGISTRY, original)
+    await restoreRegistry(page, original)
   }
 })
 
@@ -277,7 +286,7 @@ test('a new note is saved to the registry once it has text', async ({ page }) =>
     await expect(page.getByRole('button', { name: /^(Copy|Apply) \d+ change/ })).toHaveCount(0)
     expect(errors).toEqual([])
   } finally {
-    writeFileSync(REGISTRY, original)
+    await restoreRegistry(page, original)
   }
 })
 
@@ -301,7 +310,31 @@ test('an empty note stays as a draft and is never saved', async ({ page }) => {
     expect(readFileSync(REGISTRY, 'utf8')).toBe(original)
     expect(errors).toEqual([])
   } finally {
-    writeFileSync(REGISTRY, original)
+    await restoreRegistry(page, original)
+  }
+})
+
+test('a registry update in the middle of a drag does not cancel it', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    await page.goto('/')
+    await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toBeVisible()
+    await page.waitForTimeout(600)
+    await page.getByRole('button', { name: 'Annotate', exact: true }).click()
+    const box = (await page.locator('.canvas-preview[data-canvas-preview="example"]').boundingBox())!
+    const scale = box.width / 360
+    await page.mouse.move(box.x + 4 * scale, box.y + 4 * scale)
+    await page.mouse.down()
+    await page.mouse.move(box.x + 180 * scale, box.y + 30 * scale, { steps: 4 })
+    // A save from another tab, or from the agent, rewrites the registry now.
+    const updated = page.waitForEvent('console', { predicate: (m) => m.text().includes('hot updated') })
+    appendFileSync(REGISTRY, '\n// touched\n')
+    await updated
+    await page.mouse.move(box.x + 356 * scale, box.y + 50 * scale, { steps: 4 })
+    await page.mouse.up()
+    await expect(page.getByRole('dialog', { name: /^Annotation on Example · replace me › area / })).toContainText('heading “Canvas is ready”')
+  } finally {
+    await restoreRegistry(page, original)
   }
 })
 

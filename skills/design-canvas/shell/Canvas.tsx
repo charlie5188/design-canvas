@@ -785,6 +785,25 @@ const HELP_LINES = shared ? labels.helpLines.filter((line) => line !== labels.an
 const NO_NOTES: CanvasNote[] = [];
 const NO_SECTIONS: CanvasSection[] = [];
 
+const sameEntry = (a: object, b: object) => {
+  const [x, y] = [Object.entries(a), Object.entries(b)];
+  return x.length === y.length && x.every(([key, value]) => Object.is(value, (b as Record<string, unknown>)[key]));
+};
+
+/**
+ * The same array while its entries are equal. A save into registry.tsx brings new
+ * `items`, `notes`, and `sections` arrays with the same content, and a new array
+ * rebuilds the callbacks the pointer effect depends on, which restarts it and drops
+ * a drag in progress. Entries are compared field by field (`component` by identity).
+ */
+function useStableList<T extends object>(list: T[]): T[] {
+  const kept = useRef(list);
+  if (kept.current !== list && !(kept.current.length === list.length && list.every((entry, i) => sameEntry(entry, kept.current[i]!)))) {
+    kept.current = list;
+  }
+  return kept.current;
+}
+
 type CanvasProps = {
   items: CanvasItem[];
   /** Notes that explain the canvas to whoever opens it; see CanvasNote. */
@@ -805,7 +824,10 @@ export function Canvas(props: CanvasProps) {
   return <CanvasBoard {...props} />;
 }
 
-function CanvasBoard({ items, notes = NO_NOTES, sections = NO_SECTIONS, storageKey, theme }: CanvasProps) {
+function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: sectionsProp = NO_SECTIONS, storageKey, theme }: CanvasProps) {
+  const items = useStableList(itemsProp);
+  const notes = useStableList(notesProp);
+  const sections = useStableList(sectionsProp);
   const viewportRef = useRef<HTMLDivElement>(null);
   const worldRef = useRef<HTMLDivElement>(null);
   const zoomLabelRef = useRef<HTMLSpanElement>(null);
