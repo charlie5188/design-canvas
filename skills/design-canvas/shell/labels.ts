@@ -137,7 +137,7 @@ export const labels = {
   boardPartText: (kind: string, text: string) => `${kind === "note" ? "text" : "title"} to ${text}`,
   boardPartMove: (where: string) => `move to ${where}`,
   boardPartSize: (dims: string) => `resize to ${dims}`,
-  boardPartItems: (items: string[]) => `items inside, at their positions on the canvas now: ${items.join("; ")}`,
+  boardPartItems: (items: string[]) => `items and notes inside, at their positions on the canvas now: ${items.join("; ")}`,
   boardHowTo:
-    "Write notes into `notes` and sections into `sections` in registry.tsx. For a change, edit that entry: `x`, `y`, `width`, `height` (a note's height is its minimum), `text` or `title`. For each item listed inside a section, set its x and y in the registry to the position shown, so the shared file keeps this arrangement.",
+    "Write notes into `notes` and sections into `sections` in registry.tsx. For a change, edit that entry: `x`, `y`, `width`, `height` (a note's height is its minimum), `text` or `title`. For each item or note listed inside a section, set its x and y in the registry to the position shown, so the shared file keeps this arrangement.",
 };

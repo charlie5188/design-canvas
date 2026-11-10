@@ -43,6 +43,12 @@ export type BoardMark = {
   sent?: number;
   /** Sent while the agent was busy; goes out once it listens again. Never with `sent`. */
   queued?: boolean;
+  /**
+   * A registry note that moved along with this section. Its change is part of
+   * the section's change: it is listed inside the section's line, not on its own.
+   * Cleared as soon as the note is changed by hand.
+   */
+  carriedBy?: string;
 };
 
 const VERSION = 2;
@@ -73,15 +79,17 @@ const valid = (value: unknown): BoardMark | undefined => {
   if (typeof m.id !== "string" || m.id.length > 40) return undefined;
   if (m.kind !== "note" && m.kind !== "section") return undefined;
   if (!finite(m.x) || !finite(m.y) || Math.abs(m.x) > COORD_LIMIT || Math.abs(m.y) > COORD_LIMIT) return undefined;
-  if (typeof m.text !== "string" || !m.text.trim() || m.text.length > MAX_TEXT) return undefined;
+  if (typeof m.text !== "string" || m.text.length > MAX_TEXT) return undefined;
   const dims = { ...(size(m.w) ? { w: m.w } : {}), ...(size(m.h) ? { h: m.h } : {}) };
   if (m.kind === "section" && !m.target && !(dims.w && dims.h)) return undefined;
   const target = typeof m.target === "string" && m.target.length <= 80 ? { target: m.target } : {};
+  if (!m.text.trim() && "target" in target) return undefined;
   const from = "target" in target ? validGeometry(m.from) : undefined;
   if ("target" in target && !from) return undefined;
   const sent = finite(m.sent) && m.sent >= 0 ? { sent: m.sent } : {};
   const queued = m.queued === true && !("sent" in sent) ? { queued: true } : {};
-  return { id: m.id, kind: m.kind, x: m.x, y: m.y, ...dims, text: m.text, ...target, ...(from ? { from } : {}), ...sent, ...queued };
+  const carried = typeof m.carriedBy === "string" && m.carriedBy.length <= 40 ? { carriedBy: m.carriedBy } : {};
+  return { id: m.id, kind: m.kind, x: m.x, y: m.y, ...dims, text: m.text, ...target, ...(from ? { from } : {}), ...sent, ...queued, ...carried };
 };
 
 export function loadMarks(storageKey: string): BoardMark[] {
@@ -101,7 +109,8 @@ export function loadMarks(storageKey: string): BoardMark[] {
 
 export function saveMarks(storageKey: string, marks: BoardMark[]) {
   try {
-    const kept = marks.filter((m) => m.text.trim()).slice(0, MAX_MARKS);
+    // An empty new note or section is kept as a draft; an empty change to an entry is not.
+    const kept = marks.filter((m) => m.text.trim() || !m.target).slice(0, MAX_MARKS);
     if (kept.length) window.localStorage.setItem(keyOf(storageKey), JSON.stringify({ version: VERSION, marks: kept }));
     else window.localStorage.removeItem(keyOf(storageKey));
   } catch {
@@ -158,17 +167,35 @@ export type BoardContext = {
   inside: (bounds: { x: number; y: number; w: number; h: number }) => { name: string; x: number; y: number }[];
 };
 
+/**
+ * Registry notes that moved along with a section which is in the same list:
+ * their changes are part of that section's change, so they are not counted or
+ * listed on their own. A note with no section in the list stands alone again.
+ */
+export function foldedNotes(list: BoardMark[]): Set<string> {
+  const sections = new Set(list.filter((m) => m.kind === "section").map((m) => m.id));
+  return new Set(list.filter((m) => m.kind === "note" && m.target && m.carriedBy && sections.has(m.carriedBy)).map((m) => m.id));
+}
+
 /** One message for the conversation, in the same style as the annotation list. */
-export function formatBoard(list: BoardMark[], context: BoardContext) {
+export function formatBoard(all: BoardMark[], context: BoardContext) {
   const quote = (text: string) => `“${text.trim().split(/\r?\n/).join(" ")}”`;
   const round = Math.round;
+  const folded = foldedNotes(all);
+  const list = all.filter((m) => !folded.has(m.id));
   const entries = list.map((mark, index) => {
     const n = index + 1;
     const where = `${round(mark.x)},${round(mark.y)}`;
     const dims = mark.w && mark.h ? `${round(mark.w)}×${round(mark.h)}` : mark.w ? `width ${round(mark.w)}` : "";
+    // Items and folded notes inside a section, at the positions they have now.
     const items =
       mark.kind === "section" && mark.w && mark.h
-        ? context.inside({ x: mark.x, y: mark.y, w: mark.w, h: mark.h }).map((item) => `${item.name} (${round(item.x)},${round(item.y)})`)
+        ? [
+            ...context.inside({ x: mark.x, y: mark.y, w: mark.w, h: mark.h }).map((item) => `${item.name} (${round(item.x)},${round(item.y)})`),
+            ...all
+              .filter((m) => folded.has(m.id) && m.carriedBy === mark.id)
+              .map((note) => `note ${quote(note.text)} (${round(note.x)},${round(note.y)})`),
+          ]
         : [];
     if (!mark.target || !mark.from) {
       return mark.kind === "note"

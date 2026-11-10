@@ -1045,6 +1045,11 @@ html[data-canvas-alt] .canvas-frame-root * {
 .canvas-note-card.canvas-ghost .canvas-note-body {
   opacity: 0.88;
 }
+/* An empty draft's placeholder, shown when it is not being typed in. */
+.canvas-ghost-hint {
+  opacity: 0.55;
+  font-weight: 400;
+}
 .canvas-ghost-tag {
   position: absolute;
   inset-block-end: 100%;
