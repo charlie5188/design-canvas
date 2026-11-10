@@ -114,6 +114,7 @@ export const labels = {
   notePlaceholder: "Write a note",
   sectionPlaceholder: "Section title",
   boardNotApplied: "Not applied yet",
+  boardSaving: "Saving…",
   boardSent: "Sent · waiting for the agent",
   boardQueued: "Queued · waiting for the agent",
   boardEditHint: "Double-click to edit",

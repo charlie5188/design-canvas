@@ -25,15 +25,16 @@
 // for the page to download. Only the canvas page may ask.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { Plugin } from "vite";
+import { AGENT_EVENT, AGENT_PATH, EDIT_PATH, SHARE_PATH } from "./channel.ts";
+import { applyEdits, type DirectEdit, validEdit } from "./registry-edit.ts";
 
 export type AgentState = "off" | "listening" | "working";
 /** What the page hears: `finished` only on the update that ends `handling` because the agent said done. */
 export type AgentStatus = { state: AgentState; handling: boolean; finished?: boolean };
-export const AGENT_PATH = "/__design-canvas/agent";
-/** Vite's HMR channel carries state changes to open pages. */
-export const AGENT_EVENT = "design-canvas:agent";
-export const SHARE_PATH = "/__design-canvas/share";
+export { AGENT_EVENT, AGENT_PATH, EDIT_PATH, SHARE_PATH } from "./channel.ts";
 /** The shared file the Share button downloads, and the files that could not go inside it. */
 export type SharedFile = { name: string; html: string; missing: string[] };
 
@@ -213,6 +214,39 @@ export function agentChannel(): Plugin {
         }
 
         next();
+      });
+
+      // Moves, resizes, and text changes are written into registry.tsx as they happen.
+      // Writes run one after another, so two edits never read the same file state.
+      let writing: Promise<unknown> = Promise.resolve();
+      server.middlewares.use(EDIT_PATH, (request, response, next) => {
+        if (request.method !== "POST" || (request.url ?? "/") !== "/") return next();
+        if (!fromCanvasPage(request)) return send(response, 403, "Not allowed");
+        readBody(request).then(
+          (body) => {
+            let raw: unknown;
+            try {
+              raw = (JSON.parse(body) as { edits?: unknown }).edits;
+            } catch {
+              // Falls through to the 400 below.
+            }
+            if (!Array.isArray(raw)) return send(response, 400, "Expected { edits }");
+            const edits = raw.map(validEdit);
+            if (edits.some((edit) => !edit)) return send(response, 400, "Invalid edit");
+            const path = join(server.config.root, "registry.tsx");
+            const job = writing.then(async () => {
+              const result = applyEdits(await readFile(path, "utf8"), edits as DirectEdit[]);
+              if (result.applied.length) await writeFile(path, result.source);
+              return result;
+            });
+            writing = job.catch(() => {});
+            job.then(
+              (result) => sendJson(response, { applied: result.applied, missing: result.missing }),
+              (error: unknown) => send(response, 500, error instanceof Error ? error.message : String(error)),
+            );
+          },
+          () => send(response, 413, "Too large"),
+        );
       });
 
       // One build at a time: a second click while it runs gets the same file.

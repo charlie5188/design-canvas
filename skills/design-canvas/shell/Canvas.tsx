@@ -32,6 +32,7 @@ import {
   saveMoves,
   sentTargets,
   foldedNotes,
+  type MoveSent,
 } from "./marks";
 import { frameUrl, fromThisCanvas, NAVIGATE_EVENT, postToFrame, readFrameMessage, shared } from "./bridge";
 import { FrameHost } from "./FrameHost";
@@ -70,6 +71,8 @@ import {
 } from "./layout";
 import { type ThemeStore, useThemeId } from "./theme";
 import type { CanvasItem, CanvasNote, CanvasSection } from "./types";
+import { EDIT_PATH } from "./channel.ts";
+import type { DirectEdit } from "./registry-edit.ts";
 import "./canvas.css";
 
 const DEFAULT_CAMERA: Camera = { x: 48, y: 120, z: 1 };
@@ -535,7 +538,7 @@ function CanvasItemView({
   annotationHandlers: AnnotationHandlers;
   onTrash: (item: CanvasItem) => void;
   /** Set while the item sits somewhere the registry does not have it. */
-  move?: "new" | "sent" | "queued";
+  move?: MoveSent["state"] | "new";
   onUndoMove: (item: CanvasItem) => void;
 }) {
   const ref = useCallback((element: HTMLDivElement | null) => register(item.id, element), [item.id, register]);
@@ -551,8 +554,8 @@ function CanvasItemView({
     >
       {move && (
         <span className="canvas-ghost-tag canvas-item-tag" data-state={move}>
-          {move === "sent" ? labels.boardSent : move === "queued" ? labels.boardQueued : labels.boardNotApplied}
-          <DiscardButton onClick={() => onUndoMove(item)} />
+          {move === "sent" ? labels.boardSent : move === "queued" ? labels.boardQueued : move === "failed" ? labels.boardNotApplied : labels.boardSaving}
+          {move !== "new" && move !== "saving" && <DiscardButton onClick={() => onUndoMove(item)} />}
         </span>
       )}
       <div className="canvas-item-head">
@@ -1148,7 +1151,8 @@ function CanvasBoard({ items, notes = NO_NOTES, sections = NO_SECTIONS, storageK
   // The selected note or section, by "g:" (a ghost) or "e:" (an entry) and its kind and id.
   const [selected, setSelected] = useState<string | null>(null);
   const selectedRef = useRef(selected);
-  const isUnsent = (m: BoardMark) => m.sent === undefined && !m.queued && !!m.text.trim();
+  // A direct change is saved to the registry, so it is never a change for the agent.
+  const isUnsent = (m: BoardMark) => m.sent === undefined && !m.queued && !!m.text.trim() && !m.direct;
   const unsentMarks = marks.filter(isUnsent);
   const foldedMarks = useMemo(() => foldedNotes(marks), [marks]);
   // Items moved on the canvas. Their positions live in the browser, but the
@@ -1178,11 +1182,76 @@ function CanvasBoard({ items, notes = NO_NOTES, sections = NO_SECTIONS, storageK
     const sent = moveStates[m.id];
     return sent && sent.x === m.x && sent.y === m.y ? sent.state : "new";
   };
-  const unsentMoves = movedItems.filter((m) => moveStateOf(m) === "new");
+  // Items that are moved are saved to the registry; only a refused write goes to the agent.
+  const unsentMoves = movedItems.filter((m) => moveStateOf(m) === "failed");
   const unsentMovesRef = useRef(unsentMoves);
   unsentMovesRef.current = unsentMoves;
   const movedItemsRef = useRef(movedItems);
   movedItemsRef.current = movedItems;
+
+  // A move, resize, or text change of an existing note, section, or item is written
+  // into registry.tsx once the person pauses (see registry-edit.ts), so it needs no
+  // message. A write the registry refuses falls back to the agent as before.
+  const flushDirect = useCallback(async () => {
+    if (shared) return;
+    const open = openMarkRef.current;
+    const pendingMarks = marksRef.current.filter((m) => m.direct && m.target && m.sent === undefined && m.id !== open);
+    // A moved item is pending until its state says it went out at this position.
+    const pendingMoves = movedItemsRef.current.filter((m) => {
+      const s = moveStatesRef.current[m.id];
+      return !(s && s.x === m.x && s.y === m.y);
+    });
+    const edits: DirectEdit[] = [];
+    const markIds = new Set<string>();
+    for (const m of pendingMarks) {
+      const from = m.from!;
+      const set: Record<string, number | string> = {};
+      if (m.x !== from.x) set.x = m.x;
+      if (m.y !== from.y) set.y = m.y;
+      if (m.w !== undefined && m.w !== from.w) set.width = m.w;
+      if (m.h !== undefined && m.h !== from.h) set.height = m.h;
+      if (m.text.trim() !== from.text.trim()) set[m.kind === "note" ? "text" : "title"] = m.text;
+      markIds.add(m.id);
+      if (Object.keys(set).length) edits.push({ kind: m.kind, id: m.target!, set });
+    }
+    for (const m of pendingMoves) edits.push({ kind: "item", id: m.id, set: { x: Math.round(m.x), y: Math.round(m.y) } });
+    if (!markIds.size && !pendingMoves.length) return;
+    // Marked in flight first, so a second save does not start for the same change.
+    setMarks((prev) => prev.map((m) => (markIds.has(m.id) ? { ...m, sent: 0 } : m)));
+    setMoveStates((prev) => ({
+      ...prev,
+      ...Object.fromEntries(pendingMoves.map((m) => [m.id, { x: m.x, y: m.y, state: "saving" as const }])),
+    }));
+    let failed = new Set<string>();
+    if (edits.length) {
+      try {
+        const response = await fetch(EDIT_PATH, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ edits }),
+        });
+        if (!response.ok) throw new Error(`edit ${response.status}`);
+        const result = (await response.json()) as { missing?: unknown };
+        failed = new Set(Array.isArray(result.missing) ? result.missing.filter((id): id is string => typeof id === "string") : []);
+      } catch {
+        // No dev server, or it refused: every change in this batch goes to the agent instead.
+        failed = new Set(edits.map((e) => e.id));
+      }
+    }
+    if (!failed.size) return;
+    setMarks((prev) =>
+      prev.map((m) => (markIds.has(m.id) && m.target && failed.has(m.target) ? { ...m, direct: undefined, sent: undefined } : m)),
+    );
+    setMoveStates((prev) => ({
+      ...prev,
+      ...Object.fromEntries(pendingMoves.filter((m) => failed.has(m.id)).map((m) => [m.id, { x: m.x, y: m.y, state: "failed" as const }])),
+    }));
+  }, [shared]);
+  // Saves once the person pauses, so a drag or a line of typing is one write.
+  useEffect(() => {
+    const timer = window.setTimeout(() => void flushDirect(), 300);
+    return () => window.clearTimeout(timer);
+  }, [flushDirect, marks, positions]);
   // An item whose position matches the registry again is applied, or was put back.
   useEffect(() => {
     const moved = new Set(movedItems.map((m) => m.id));
@@ -1239,6 +1308,7 @@ function CanvasBoard({ items, notes = NO_NOTES, sections = NO_SECTIONS, storageK
         id: newMarkId(),
         kind,
         target: id,
+        direct: true,
         from: entry,
         x: entry.x,
         y: entry.y,
@@ -1339,11 +1409,11 @@ function CanvasBoard({ items, notes = NO_NOTES, sections = NO_SECTIONS, storageK
   // What the bar of waiting changes shows: anything to discard, and what has gone out but is not applied yet.
   const hasChanges =
     !shared &&
-    (visibleAnnotations.some((a) => a.text.trim()) || marks.some((m) => m.text.trim()) || movedItems.length > 0);
+    (visibleAnnotations.some((a) => a.text.trim()) || marks.some((m) => m.text.trim() && !m.direct) || movedItems.length > 0);
   const waitingCount =
     visibleAnnotations.filter((a) => a.sent || a.queued).length +
-    standalone(marks.filter((m) => m.sent !== undefined || m.queued), marks).length +
-    movedItems.filter((m) => moveStateOf(m) !== "new").length;
+    standalone(marks.filter((m) => (m.sent !== undefined || m.queued) && !m.direct), marks).length +
+    movedItems.filter((m) => moveStateOf(m) === "sent" || moveStateOf(m) === "queued").length;
   // A press anywhere but on a note or section lets go of the selection.
   useEffect(() => {
     if (!selected) return;

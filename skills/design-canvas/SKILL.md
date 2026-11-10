@@ -137,7 +137,7 @@ Sent and copied annotations stay on the canvas as sent pins and disappear on the
 
 People explain a canvas to the readers of its shared file with notes and sections. The tools bar at the bottom centre has four tools, one on at a time: **Select** (the default; Escape or V returns to it), **Annotate** (A), **Note** (N) and **Section** (S). A note is a sticker: pick Note, click anywhere, type. A section is a folder: pick Section, drag a frame, type its title on the tab. Both tools put themselves down after one use. In Select, a note or a section's tab drags to move it, the corner grips resize it, a double-click edits its text or title, and arrow keys nudge the focused one. A section carries the items and the notes inside it when it moves. A new note or section left empty stays on the canvas as a draft: it shows a "Write a note" or "Section title" placeholder, is not a change, and is not sent. Typing makes it a change; the tag's discard button removes a draft.
 
-Like annotations they are requests, not content: the canvas is source files, so each change shows as a dashed "Not applied yet" ghost until you write it into `registry.tsx`, and the bar at the top centre, which shows only while something is waiting, has **Discard** and the main button (**Apply N changes** while you listen, **Copy N changes** otherwise) that sends them with any annotations in one message:
+Moving, resizing, or editing an existing note or section is saved into `registry.tsx` as soon as the person pauses: a "Saving…" tag shows until the registry matches, and the agent is not involved. Only new notes and sections, and an annotation, are requests, not content: each shows as a dashed "Not applied yet" ghost until you write it into `registry.tsx`, and the bar at the top centre, which shows only while something is waiting, has **Discard** and the main button (**Apply N changes** while you listen, **Copy N changes** otherwise) that sends them with any annotations in one message:
 
 ```text
 Notes and sections from the design canvas (4):
@@ -159,7 +159,7 @@ A ghost leaves on its own once the registry shows it: a new one when the registr
 
 ### Moved items
 
-Where people put items on the canvas is kept in their browser, but the shared file and the next session use the positions in `registry.tsx`. So a moved item is a change to apply, like a note: it shows a "Not applied yet" tag above its top-right corner, counts in the toolbar's Apply button, and goes out in the same message:
+Where people put items on the canvas is kept in their browser, but the shared file and the next session use the positions in `registry.tsx`. A moved item is written there as soon as the person pauses, and shows a "Saving…" tag until the registry matches. Only a write the dev server refuses, or cannot make, becomes a change for the agent: it shows "Not applied yet", counts in the toolbar's Apply button, and goes out in the same message:
 
 ```text
 Items moved on the design canvas (2):

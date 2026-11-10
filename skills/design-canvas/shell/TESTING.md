@@ -141,7 +141,7 @@ Before claiming smooth performance, profile a canvas with a realistic number of 
 - Section: a drag draws the outline, then a folder with the "Section title" placeholder focused on the tab; Enter keeps it. Left empty it stays as a draft, like a note. A drag under 80×60 canvas units makes nothing and keeps the tool.
 - A section looks like a folder: its title is on a raised tab joined to the frame, in tints of the canvas colors in both themes. A note is a sticker with a cut, folded bottom-right corner in fixed colors in both themes.
 - In Select, dragging a note, or a section's tab, moves it at every zoom; a press that never travels stays a click and selects it. A selected one shows four corner grips; dragging one resizes it with the opposite edge fixed, to a minimum size. A section carries the items and the notes inside it: dragging the section, or nudging it with arrow keys, moves them by the same amount, and dragging it back restores them with no change left. A registry note carried this way is its own change, listed separately. Arrow keys move the focused one (Shift for larger steps), Enter or a double-click edits it.
-- Moving, resizing, or editing a note or section from the registry hides it and shows its ghost, which keeps moving; putting it back where it began removes the ghost.
+- Moving, resizing, or editing a note or section from the registry saves it into `registry.tsx` after a short pause: its ghost shows "Saving…" with no discard button and leaves once the registry matches. Putting it back where it began removes the ghost. With no dev server the change falls back to "Not applied yet" and the agent message.
 - Ghosts are dashed and tagged "Not applied yet", turn "Sent · waiting for the agent" or "Queued" after sending, stay across a reload, and a ghost section stays behind its items. Moving a sent ghost makes it a new request.
 - The button in the changes bar counts notes, sections, and annotations together and says "Apply N changes" with a listening agent, "Copy N changes" without. Leaving annotate mode with changes waiting shows "N changes aren't applied yet" with a button that applies or copies them.
 - The message lists the changes in words (add, move, resize, text or title) and, for a section, the items inside it with their current positions.
@@ -152,7 +152,9 @@ Before claiming smooth performance, profile a canvas with a realistic number of 
 
 ## Moved items
 
-- Dragging an item to a position the registry does not have shows "Not applied yet" and a ↺ button above its top-right corner, and the changes bar counts it. A shared file shows neither.
+- Dragging an item saves its position to `registry.tsx` after a short pause, with a "Saving…" tag and no ↺ button, which leaves once the registry matches. With no dev server it shows "Not applied yet" and a ↺ button, and the changes bar counts it. A shared file shows neither.
 - The message lists "Move “Name” (id x) to x,y". After sending, the tag says "Sent · waiting for the agent" ("Queued" while the agent is busy); moving the item again makes it new again.
 - ↺ puts the item back where the registry has it and ends the change. An item whose registry position changes to match loses its tag on its own.
 - Items inside a section that is waiting for the agent are one change with it: no tag, not counted twice.
+- Notes inside a section that moves are saved with it, in the same write, and show no tag of their own.
+- An empty draft note or section is never saved; it moves with its section and is discarded with its ✕ button.

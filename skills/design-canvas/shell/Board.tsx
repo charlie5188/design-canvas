@@ -234,7 +234,7 @@ export function MarkView({
     return () => cancelAnimationFrame(frame);
   }, [open]);
   const sentState = mark.sent !== undefined;
-  const state = sentState ? labels.boardSent : mark.queued ? labels.boardQueued : labels.boardNotApplied;
+  const state = mark.direct ? labels.boardSaving : sentState ? labels.boardSent : mark.queued ? labels.boardQueued : labels.boardNotApplied;
   const field = (
     <textarea
       ref={fieldRef}
@@ -271,7 +271,7 @@ export function MarkView({
   const tag = folded ? null : (
     <span className="canvas-ghost-tag">
       {!empty && state}
-      <DiscardButton keepFocus onClick={() => onDelete(mark.id)} />
+      {!mark.direct && <DiscardButton keepFocus onClick={() => onDelete(mark.id)} />}
     </span>
   );
   const common = {
