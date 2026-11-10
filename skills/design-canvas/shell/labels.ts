@@ -1,6 +1,6 @@
 // Canvas chrome copy. Edit here to change the language of the controls.
 const ANNOTATE_HELP =
-  "Press A to annotate: click an element, drag across an area, or click an item's name for the whole item; add a note or a section; then apply or copy them all at once";
+  "Press A to request a change: click an element, drag across an area, or click an item's name for the whole item, and say what to change; then apply or copy them all at once";
 
 const EDIT_HELP = "Double-click a caption, a note, or a section's title to edit it; select a note or section and press Delete to remove it";
 const SAVE_HELP = "Moves, edits, and new notes save into registry.tsx as you make them; ⌘/Ctrl + Z undoes the last one";
@@ -54,14 +54,14 @@ export const labels = {
   trashHeading: "Trash",
   trashHint: "Click an item to put it back",
   putBack: (name: string) => `Put back ${name}`,
-  annotate: "Annotate",
-  annotateHint: "Annotate (A)",
+  annotate: "Request change",
+  annotateHint: "Request change (A)",
   annotateModeOn:
-    "Annotate mode. Click an element, drag across an area, or click an item's name for the whole item. Press Escape to finish.",
+    "Request-change mode. Click an element, drag across an area, or click an item's name for the whole item. Press Escape to finish.",
   /** An area drawn over a preview, in px from the item's top-left, and what is entirely inside it. */
   areaRef: (w: number, h: number, x: number, y: number, names: string[], more: number) =>
     `area ${w}×${h} at ${x},${y}${names.length ? `: ${names.join(", ")}${more ? ` and ${more} more` : ""}` : ""}`,
-  annotateModeOff: "Annotate mode off",
+  annotateModeOff: "Request-change mode off",
   annotationPlaceholder: "Note for the agent",
   annotationField: (ref: string) => `Annotation on ${ref}`,
   annotationPin: (n: number, text: string) => `Annotation ${n}: ${text}`,

@@ -41,7 +41,7 @@ a device or input you do not have.
 
 ## Toolbar
 
-- Controls sit in four places: tools (Select, Annotate, Note, Section) at the bottom centre; zoom out, zoom level, zoom in, show all, and reset view at the bottom right; theme, share, and help at the top right; trash at the bottom left while it holds items. All are icon buttons with tooltips that open away from the screen edge and stay on screen. A bar at the top centre appears only while a change is waiting: Discard and, while any change is unsent, Copy (or Apply, while an agent listens). Nothing shifts under the pointer when it appears or goes. The help list opens on hover or keyboard focus, below the top bar, and describes the canvas region for screen readers.
+- Controls sit in four places: tools (Select, Request change, Note, Section) at the bottom centre; zoom out, zoom level, zoom in, show all, and reset view at the bottom right; theme, share, and help at the top right; trash at the bottom left while it holds items. All are icon buttons with tooltips that open away from the screen edge and stay on screen. A bar at the top centre appears only while a change is waiting: Discard and, while any change is unsent, Copy (or Apply, while an agent listens). Nothing shifts under the pointer when it appears or goes. The help list opens on hover or keyboard focus, below the top bar, and describes the canvas region for screen readers.
 - Narrow windows (375px): the view bar stacks above the tools bar, the changes bar drops under the top bar, notices clear both, and no bar covers another. Show all and revealed items stop short of the top bars and the bottom bars.
 - At narrow widths (375 px) the text labels and separators drop and every control stays on screen, with annotations and trashed items present.
 
@@ -59,7 +59,7 @@ a device or input you do not have.
 
 ## Annotations
 
-- The Annotate button and A (with the canvas, toolbar, or a pin focused) toggle annotate mode; Escape leaves it. A typed inside a preview or a field reaches that field.
+- The Request change button and A (with the canvas, toolbar, or a pin focused) toggle annotate mode; Escape leaves it. A typed inside a preview or a field reaches that field.
 - In annotate mode, hovering outlines elements in plain items and in frames without holding Alt; the outline hides when the camera moves.
 - Clicking an element in a plain item or in a frame places a numbered pin at the click, also right after a zoom, and opens a note showing `Item › role “label”`. The control is not activated, and a link shows no notice and leaves the URL unchanged.
 - Dragging across a plain item or a frame draws a box, kept inside the item, and on release opens a note showing `Item › area W×H at X,Y: …` with the controls, headings, and texts entirely inside it, in item pixels at any zoom. The area keeps its outline, with its pin at the top-left corner; no element note opens too. A press that barely moves stays a click on one element.
@@ -114,7 +114,7 @@ Run `scripts/listen.sh <canvas-url>` in a terminal as the agent would.
 
 Run `scripts/share.sh` on a canvas with a `viewport` item, and open the file from disk in Chrome and Safari.
 
-- Every item renders and works, with no console errors. Annotate, its A shortcut, its help line, and Share are gone; Alt-click still copies a reference.
+- Every item renders and works, with no console errors. Request change, its A shortcut, its help line, and Share are gone; Alt-click still copies a reference.
 - An image an item loads from the app's public folder by root path shows; a root path with no file there is named by share.sh.
 - Wheel, pinch, Space-drag, and Alt-click over a `viewport` item reach the canvas, as on the dev server.
 - The open-alone icon opens the same file with `?item=<id>`, which shows that item alone.
@@ -135,8 +135,8 @@ Before claiming smooth performance, profile a canvas with a realistic number of 
 
 ## Tools, notes, and sections
 
-- The tools bar has Select, Annotate, Note, and Section; exactly one is pressed. Select is the default. Escape or V returns to Select from any of them, A toggles Annotate, N and S pick the Note and Section tools, none of these while typing in a field.
-- Note and Section work without annotate mode. While one is armed the cursor is a crosshair everywhere and every press, also over items, notes, and sections, goes to the canvas; it puts itself down after one use. Picking Annotate or Select puts it down too.
+- The tools bar has Select, Request change, Note, and Section; exactly one is pressed. Select is the default. Escape or V returns to Select from any of them, A toggles Request change, N and S pick the Note and Section tools, none of these while typing in a field.
+- Note and Section work without Request change mode. While one is armed the cursor is a crosshair everywhere and every press, also over items, notes, and sections, goes to the canvas; it puts itself down after one use. Picking Annotate or Select puts it down too.
 - Note: one click places a sticker with its field focused, showing the "Write a note" placeholder and no tag; typing works at once. Escape or a press elsewhere keeps the text. An empty note stays as a draft: placeholder, no state, not counted or sent, kept in browser storage; its discard button removes it. Once it has text it is appended to `notes` in `registry.tsx` with an id made from its text, shows "Saving…", and leaves when the registry has one more note.
 - Section: a drag draws the outline, then a folder with the "Section title" placeholder focused on the tab; Enter keeps it. Left empty it stays as a draft, like a note; with a title it is appended to `sections` the same way. With no dev server a new note or section stays "Not applied yet" and goes to the agent. A drag under 80×60 canvas units makes nothing and keeps the tool.
 - A section looks like a folder: its title is on a raised tab joined to the frame, in tints of the canvas colors in both themes. A note is a sticker with a cut, folded bottom-right corner in fixed colors in both themes.

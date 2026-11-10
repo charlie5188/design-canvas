@@ -77,7 +77,7 @@ test('copied annotations ask for a new version by default', async ({ page, conte
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   const errors = collectErrors(page)
   await page.goto('/')
-  await page.getByRole('button', { name: 'Annotate', exact: true }).click()
+  await page.getByRole('button', { name: 'Request change', exact: true }).click()
   await page.locator('.canvas-preview h2').click()
   const note = page.getByRole('dialog', { name: /^Annotation on/ })
   await expect(note.getByRole('checkbox', { name: 'Apply to a new version' })).toBeChecked()
@@ -104,7 +104,7 @@ test('a note added in annotate mode waits as a ghost and travels with the change
   await expect(ghost).toContainText('Why this version')
   await expect(ghost).toContainText('Not applied yet')
   // Leaving annotate mode with a change waiting says so, so it is not forgotten.
-  await page.getByRole('button', { name: 'Annotate', exact: true }).click()
+  await page.getByRole('button', { name: 'Request change', exact: true }).click()
   await page.keyboard.press('Escape')
   await expect(page.locator('.canvas-toast')).toContainText("1 change isn't applied yet")
   await page.getByRole('button', { name: 'Copy 1 change' }).click()
@@ -320,7 +320,7 @@ test('a registry update in the middle of a drag does not cancel it', async ({ pa
     await page.goto('/')
     await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toBeVisible()
     await page.waitForTimeout(600)
-    await page.getByRole('button', { name: 'Annotate', exact: true }).click()
+    await page.getByRole('button', { name: 'Request change', exact: true }).click()
     const box = (await page.locator('.canvas-preview[data-canvas-preview="example"]').boundingBox())!
     const scale = box.width / 360
     await page.mouse.move(box.x + 4 * scale, box.y + 4 * scale)
@@ -514,13 +514,13 @@ test('Select is the default tool and Escape returns to it', async ({ page }) => 
   await expect(tool('Select')).toHaveAttribute('aria-pressed', 'false')
   await page.keyboard.press('Escape')
   await expect(tool('Select')).toHaveAttribute('aria-pressed', 'true')
-  await tool('Annotate').click()
+  await tool('Request change').click()
   await page.mouse.move(400, 300)
-  await expect(tool('Annotate')).toHaveAttribute('aria-pressed', 'true')
+  await expect(tool('Request change')).toHaveAttribute('aria-pressed', 'true')
   await tool('Select').click()
   await page.mouse.move(400, 300)
   await expect(tool('Select')).toHaveAttribute('aria-pressed', 'true')
-  await expect(tool('Annotate')).toHaveAttribute('aria-pressed', 'false')
+  await expect(tool('Request change')).toHaveAttribute('aria-pressed', 'false')
 })
 
 // Before the agent tests: they leave the agent busy for a while, and then the button sends instead of copying.
@@ -531,7 +531,7 @@ test('a drag annotates an area, and the name annotates the whole item', async ({
   await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toBeVisible()
   // The first paint fits the canvas to the window once fonts load; measure after that moved the camera.
   await page.waitForTimeout(600)
-  await page.getByRole('button', { name: 'Annotate', exact: true }).click()
+  await page.getByRole('button', { name: 'Request change', exact: true }).click()
   const preview = page.locator('.canvas-preview[data-canvas-preview="example"]')
   const box = (await preview.boundingBox())!
   // Item pixels to screen pixels, whatever the zoom: drag across the heading only.
@@ -569,7 +569,7 @@ test('annotations go straight to a listening agent', async ({ page, baseURL }) =
   const exited = new Promise<number | null>((resolve) => listener.on('exit', resolve))
   try {
     await page.goto('/')
-    await page.getByRole('button', { name: 'Annotate', exact: true }).click()
+    await page.getByRole('button', { name: 'Request change', exact: true }).click()
     await page.locator('.canvas-preview h2').click()
     const note = page.getByRole('dialog', { name: /^Annotation on/ })
     await note.getByRole('textbox').fill('Shorter title')
@@ -596,7 +596,7 @@ test('the toolbar shows the agent working until it listens again', async ({ page
   let again: ReturnType<typeof listen> | undefined
   try {
     await page.goto('/')
-    await page.getByRole('button', { name: 'Annotate', exact: true }).click()
+    await page.getByRole('button', { name: 'Request change', exact: true }).click()
     await page.locator('.canvas-preview h2').click()
     const note = page.getByRole('dialog', { name: /^Annotation on/ })
     await note.getByRole('textbox').fill('Shorter title')
@@ -622,9 +622,9 @@ test('a kept listener stays working until the agent says done', async ({ page, r
   // The Codex listener's side: it listens with keep=1 and reconnects right after each message.
   const kept = () => request.get('/__design-canvas/agent/listen?timeout=30&keep=1')
   const firstPoll = kept()
-  await expect(page.getByRole('button', { name: 'Annotate', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Request change', exact: true })).toBeVisible()
   await expect.poll(async () => (await (await request.get('/__design-canvas/agent')).json()).state).toBe('listening')
-  await page.getByRole('button', { name: 'Annotate', exact: true }).click()
+  await page.getByRole('button', { name: 'Request change', exact: true }).click()
   await page.locator('.canvas-preview h2').click()
   const note = page.getByRole('dialog', { name: /^Annotation on/ })
   await note.getByRole('textbox').fill('Shorter title')
@@ -673,7 +673,7 @@ test('a shared file works from disk, frames included, without the agent tools', 
     const url = pathToFileURL(file).href
     await page.goto(url)
     await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toContainText('Canvas is ready')
-    await expect(page.getByRole('button', { name: 'Annotate', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Request change', exact: true })).toHaveCount(0)
     await expect(page.locator('#canvas-help')).not.toContainText('Press A')
     const frame = page.locator('.canvas-item[data-canvas-item="phone"] iframe')
     await expect(page.frameLocator('.canvas-item[data-canvas-item="phone"] iframe').locator('body')).toContainText(
@@ -733,7 +733,7 @@ test('cursors say what a press or drag will do', async ({ page }) => {
   expect(await cursor('.canvas-name')).toBe('grab')
   expect(await cursor('.canvas-handle')).toBe('grab')
   expect(await cursor('.canvas-preview h2')).toBe('auto')
-  await page.getByRole('button', { name: 'Annotate', exact: true }).click()
+  await page.getByRole('button', { name: 'Request change', exact: true }).click()
   expect(await cursor('.canvas-preview h2')).toBe('crosshair')
   expect(await cursor('.canvas-name')).toBe('crosshair')
   await page.locator('.canvas-viewport').evaluate((element) => element.setAttribute('data-gesture', 'pan'))
