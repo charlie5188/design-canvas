@@ -171,3 +171,4 @@ Before claiming smooth performance, profile a canvas with a realistic number of 
 - Items inside a section that is waiting for the agent are one change with it: no tag, not counted twice.
 - Notes inside a section that moves are saved with it, in the same write, and show no tag of their own.
 - An empty draft note or section is never saved; it moves with its section and is discarded with its ✕ button.
+- Opening a canvas whose registry has a generated item (a computed id, `x`/`y`/`width`/`height`, or a `...spread`) shows one notice naming up to three such items, telling the agent to write them out by hand. A canvas with every entry written out shows none. With no dev server or an older one, nothing shows.

@@ -29,7 +29,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Plugin } from "vite";
 import { AGENT_EVENT, AGENT_PATH, EDIT_PATH, SHARE_PATH } from "./channel.ts";
-import { addEntry, applyEdits, type DirectAdd, type DirectEdit, type DirectRemove, removeEntry, validAdd, validEdit, validRemove } from "./registry-edit.ts";
+import { addEntry, applyEdits, type DirectAdd, type DirectEdit, type DirectRemove, placeableItems, removeEntry, validAdd, validEdit, validRemove } from "./registry-edit.ts";
 
 export type AgentState = "off" | "listening" | "working";
 /** What the page hears: `finished` only on the update that ends `handling` because the agent said done. */
@@ -283,6 +283,16 @@ export function agentChannel(): Plugin {
       // Writes run one after another, so two edits never read the same file state.
       let writing: Promise<unknown> = Promise.resolve();
       server.middlewares.use(EDIT_PATH, (request, response, next) => {
+        // Which items a move or resize could be saved for, so the page can warn up front.
+        if (request.method === "GET" && request.url === "/check") {
+          // A same-origin GET carries no Origin header, so the Host check alone applies; it reads only item ids.
+          if (!localHost(request)) return send(response, 403, "Not allowed");
+          readFile(join(server.config.root, "registry.tsx"), "utf8").then(
+            (source) => sendJson(response, { placeable: placeableItems(source) }),
+            (error: unknown) => send(response, 500, error instanceof Error ? error.message : String(error)),
+          );
+          return;
+        }
         if (request.method !== "POST" || (request.url ?? "/") !== "/") return next();
         if (!fromCanvasPage(request)) return send(response, 403, "Not allowed");
         readBody(request).then(

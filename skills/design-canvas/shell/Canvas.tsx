@@ -1112,6 +1112,22 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     },
     [announce],
   );
+  // Warns once, when the canvas opens, about items a move or resize could not be saved for,
+  // instead of letting the first drag fail. Silent when the server is missing or too old to answer.
+  const warnedGenerated = useRef(false);
+  useEffect(() => {
+    if (shared || warnedGenerated.current || !items.length) return;
+    warnedGenerated.current = true;
+    fetch(`${EDIT_PATH}/check`)
+      .then((response) => (response.ok ? (response.json() as Promise<{ placeable?: unknown }>) : undefined))
+      .then((result) => {
+        if (!result || !Array.isArray(result.placeable)) return;
+        const ok = new Set(result.placeable);
+        const bad = items.filter((item) => !ok.has(item.id)).map((item) => item.id);
+        if (bad.length) notify(labels.registryGenerated(bad.slice(0, 3).join(", ") + (bad.length > 3 ? ` and ${bad.length - 3} more` : "")), undefined, true);
+      })
+      .catch(() => {});
+  }, [shared, items, notify]);
   // Share: the dev server builds the canvas into one HTML file and the browser downloads it.
   const [sharing, setSharing] = useState(false);
   const [sharedFile, setSharedFile] = useState<{ name: string; missing: string[] } | null>(null);
