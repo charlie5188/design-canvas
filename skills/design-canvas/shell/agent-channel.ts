@@ -102,6 +102,31 @@ async function buildSharedFile(root: string): Promise<SharedFile> {
   return { name: `${name}-${date}.html`, html: page.source, missing };
 }
 
+const STYLESHEET = /\.(css|less|sass|scss|styl|stylus|pcss|postcss|sss)(?:$|\?)/;
+type HotModule = { id?: string | null; url?: string; importers: Set<HotModule> };
+type HotUpdate = { file: string; modules: HotModule[] };
+
+/**
+ * A save into registry.tsx changes data, not styles. But Tailwind reads every
+ * source file, so Vite lists its stylesheet as depending on the registry, and
+ * each save rebuilt the stylesheet and sent it to every page. The module that
+ * imports the stylesheet (the kit's providers.tsx) then loaded anew, React saw a
+ * new Providers and remounted the whole canvas, and every frame reloaded: the
+ * page flashed on each move, note, or trash. Vite keeps that dependency as a
+ * module of its own, imported only by the stylesheet, so a change to registry.tsx
+ * now leaves that module out and updates only the pages that import the registry.
+ * The next time a stylesheet is built, because another file changed, Tailwind
+ * reads the registry again.
+ */
+function keepStylesOut(file: string, modules: HotModule[], root: string): HotModule[] | undefined {
+  if (file.replace(/\\/g, "/") !== join(root, "registry.tsx").replace(/\\/g, "/")) return undefined;
+  const onlyForStyles = (mod: HotModule) =>
+    mod.importers.size > 0 && [...mod.importers].every((importer) => STYLESHEET.test(importer.id ?? importer.url ?? ""));
+  const kept = modules.filter((mod) => !onlyForStyles(mod));
+  // With nothing left Vite would reload the page, so then it updates as before.
+  return kept.length && kept.length < modules.length ? kept : undefined;
+}
+
 const RENDER = /createRoot\(\s*document\.getElementById\((["'])root\1\)!?\s*\)\.render\(/;
 
 /**
@@ -139,6 +164,11 @@ export function agentChannel(): Plugin {
     transform(code, id) {
       return renderInPlace(code, id, root);
     },
+    // Vite 6 and later call hotUpdate; Vite 5 calls handleHotUpdate. Typed loosely, as Vite 5's types lack hotUpdate.
+    ...({
+      hotUpdate: ({ file, modules }: HotUpdate) => keepStylesOut(file, modules, root),
+      handleHotUpdate: ({ file, modules }: HotUpdate) => keepStylesOut(file, modules, root),
+    } as object),
     configureServer(server) {
       let listener: { response: ServerResponse; timer: Timer } | undefined;
       let busyUntil = 0;

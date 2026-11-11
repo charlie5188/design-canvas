@@ -1,5 +1,5 @@
-// Writes a move, resize, or text change straight into registry.tsx, so it lands
-// in the source as soon as the person makes it, without a message to the agent.
+// Writes a move, resize, text change, or trash change straight into registry.tsx,
+// so it lands in the source as soon as the person makes it, without a message to the agent.
 // Only the fields listed here are touched, and only inside the named array
 // (`notes`, `sections`, or `registry`), so nothing else in the file can change.
 //
@@ -9,14 +9,16 @@
 // is not written, so the change falls back to the agent.
 
 export type DirectKind = "note" | "section" | "item";
-export type DirectEdit = { kind: DirectKind; id: string; set: Record<string, number | string> };
+export type DirectEdit = { kind: DirectKind; id: string; set: Record<string, number | string | boolean> };
 export type ApplyResult = { source: string; applied: string[]; missing: string[] };
 
 const ARRAY: Record<DirectKind, string> = { note: "notes", section: "sections", item: "registry" };
-const FIELDS: Record<DirectKind, Record<string, "number" | "string">> = {
+// A "flag" is written as `key: true` and removed when false, so an entry that does
+// not have it reads as it always did.
+const FIELDS: Record<DirectKind, Record<string, "number" | "string" | "flag">> = {
   note: { x: "number", y: "number", width: "number", height: "number", text: "string" },
   section: { x: "number", y: "number", width: "number", height: "number", title: "string" },
-  item: { x: "number", y: "number", width: "number", height: "number", note: "string" },
+  item: { x: "number", y: "number", width: "number", height: "number", note: "string", trashed: "flag" },
 };
 const COORD_LIMIT = 100_000;
 const MAX_TEXT = 1000;
@@ -27,12 +29,13 @@ export function validEdit(value: unknown): DirectEdit | undefined {
   const e = value as Partial<DirectEdit> | null;
   if (!e || typeof e !== "object" || !(e.kind === "note" || e.kind === "section" || e.kind === "item")) return undefined;
   if (typeof e.id !== "string" || !ID.test(e.id) || !e.set || typeof e.set !== "object") return undefined;
-  const set: Record<string, number | string> = {};
+  const set: Record<string, number | string | boolean> = {};
   for (const [key, raw] of Object.entries(e.set)) {
     const type = FIELDS[e.kind][key];
     if (!type) return undefined;
     if (type === "number" && typeof raw === "number" && Number.isFinite(raw) && Math.abs(raw) <= COORD_LIMIT) set[key] = Math.round(raw);
     else if (type === "string" && typeof raw === "string" && raw.length <= MAX_TEXT) set[key] = raw;
+    else if (type === "flag" && typeof raw === "boolean") set[key] = raw;
     else return undefined;
   }
   return Object.keys(set).length ? { kind: e.kind, id: e.id, set } : undefined;
@@ -111,16 +114,18 @@ function entryOf(source: string, kind: DirectKind, id: string): { open: number; 
   return undefined;
 }
 
-const literalOf = (value: number | string, type: "number" | "string") =>
-  type === "number" ? String(value) : JSON.stringify(value);
+const literalOf = (value: number | string | boolean, type: "number" | "string" | "flag") =>
+  type === "string" ? JSON.stringify(value) : String(value);
 
 /** Replaces one field of an entry, or adds it after the opening brace when the entry has none. Returns false when it cannot place it. */
-function setField(source: string, kind: DirectKind, id: string, key: string, value: number | string): string | undefined {
+function setField(source: string, kind: DirectKind, id: string, key: string, value: number | string | boolean): string | undefined {
   const entry = entryOf(source, kind, id);
   if (!entry) return undefined;
   const type = FIELDS[kind][key]!;
   const body = source.slice(entry.open + 1, entry.close);
   const match = new RegExp(`(^|[^\\w$.])${key}\\s*:\\s*`).exec(mask(body));
+  // A flag that is off has no field: there is nothing to add.
+  if (!match && type === "flag" && value !== true) return source;
   if (!match) {
     // Multi-line entries get the field on its own line, at the indentation of their next line; single-line ones keep their layout.
     const line = /^\s*\n([ \t]*)/.exec(source.slice(entry.open + 1));
@@ -129,7 +134,11 @@ function setField(source: string, kind: DirectKind, id: string, key: string, val
   }
   const valueStart = entry.open + 1 + match.index + match[0].length;
   let valueEnd: number;
-  if (type === "number") {
+  if (type === "flag") {
+    const flag = /^(true|false)\b/.exec(source.slice(valueStart, entry.close));
+    if (!flag) return undefined;
+    valueEnd = valueStart + flag[0].length;
+  } else if (type === "number") {
     const number = /^-?\d+(\.\d+)?/.exec(source.slice(valueStart, entry.close));
     if (!number) return undefined;
     valueEnd = valueStart + number[0].length;
@@ -142,7 +151,29 @@ function setField(source: string, kind: DirectKind, id: string, key: string, val
   }
   // The value must be the whole value: `x: 0 + gap` or `"a" + "b"` is computed, and replacing a part of it would be wrong.
   if (!/^[ \t]*(,|}|\r?\n|\/\/|\/\*|$)/.test(source.slice(valueEnd, valueEnd + 40))) return undefined;
+  if (type === "flag" && value !== true) return withoutField(source, entry.open, entry.open + 1 + match.index + match[1]!.length, valueEnd);
   return source.slice(0, valueStart) + literalOf(value, type) + source.slice(valueEnd);
+}
+
+/** The source without the field from `start` (its key) to `end` (past its value), and the comma that went with it. */
+function withoutField(source: string, open: number, start: number, end: number): string {
+  let after = end;
+  while (source[after] === " " || source[after] === "\t") after++;
+  if (source[after] === ",") {
+    end = after + 1;
+    while (source[end] === " " || source[end] === "\t") end++;
+  } else {
+    // The last field, with no comma of its own: the comma before it goes instead.
+    let before = start;
+    while (before > open + 1 && /\s/.test(source[before - 1]!)) before--;
+    if (source[before - 1] === ",") start = before - 1;
+  }
+  // A field alone on its line takes the line with it.
+  let lineStart = start;
+  while (lineStart > 0 && (source[lineStart - 1] === " " || source[lineStart - 1] === "\t")) lineStart--;
+  const lineEnd = source.startsWith("\r\n", end) ? end + 2 : source[end] === "\n" ? end + 1 : -1;
+  if ((lineStart === 0 || source[lineStart - 1] === "\n") && lineEnd >= 0) return source.slice(0, lineStart) + source.slice(lineEnd);
+  return source.slice(0, start) + source.slice(end);
 }
 
 /** Applies the edits in order. Each edit is written only when every field it names can be placed. */
