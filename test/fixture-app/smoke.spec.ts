@@ -305,6 +305,40 @@ test('Discard changes drops every change not applied yet, and Undo brings them b
   expect(errors).toEqual([])
 })
 
+test('an item sized by a spread is resized in the registry, after the spread', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  // Canvases often share one size object between items; a value written before the spread is overwritten by it.
+  const spread = original
+    .replace(/width: 360,\s*height: 180,/, '...SIZE,')
+    .replace('export const registry', 'const SIZE = { width: 360, height: 180 };\n\nexport const registry')
+  expect(spread).toContain('...SIZE,')
+  try {
+    const errors = collectErrors(page)
+    writeFileSync(REGISTRY, spread)
+    await expect.poll(async () => (await (await page.request.get('/registry.tsx')).text()).includes('SIZE')).toBe(true)
+    await page.goto('/')
+    const item = page.locator('.canvas-item[data-canvas-item="example"]')
+    await expect(item).toContainText('Canvas is ready')
+    await page.waitForTimeout(600)
+    const before = (await item.boundingBox())!
+    const edge = (await item.locator('.canvas-item-edge[data-edge="e"]').boundingBox())!
+    await page.mouse.move(edge.x + edge.width / 2, edge.y + edge.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(edge.x + edge.width / 2 + 100, edge.y + edge.height / 2, { steps: 6 })
+    await page.mouse.up()
+    // Written after the spread, so it takes effect.
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toMatch(/\.\.\.SIZE,\s*(height: 180,\s*)?width: (4\d\d),/)
+    await expect.poll(async () => (await (await page.request.get('/registry.tsx')).text()).match(/width: 4\d\d/) !== null).toBe(true)
+    await page.reload()
+    await expect(item).toContainText('Canvas is ready')
+    const after = (await item.boundingBox())!
+    expect(after.width).toBeGreaterThan(before.width + 50)
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
 test('a moved item is saved to the registry, with no change waiting for the agent', async ({ page }) => {
   const original = readFileSync(REGISTRY, 'utf8')
   try {

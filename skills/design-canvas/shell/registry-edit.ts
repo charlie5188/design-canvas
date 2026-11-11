@@ -117,7 +117,43 @@ function entryOf(source: string, kind: DirectKind, id: string): { open: number; 
 const literalOf = (value: number | string | boolean, type: "number" | "string" | "flag") =>
   type === "string" ? JSON.stringify(value) : String(value);
 
-/** Replaces one field of an entry, or adds it after the opening brace when the entry has none. Returns false when it cannot place it. */
+/**
+ * Where the entry's last top-level spread (`...SIZE`) ends, as an offset in its
+ * body: past the spread's comma, or past the spread itself when it is last and
+ * has none. A field written before a spread that holds the same key is
+ * overwritten by it, so new and moved fields go after this point.
+ */
+function afterLastSpread(body: string): { at: number; comma: boolean; indent: string } | undefined {
+  const masked = mask(body);
+  const start = masked.lastIndexOf("...");
+  if (start < 0) return undefined;
+  const indent = /(?:^|\n)([ \t]*)[^\n]*$/.exec(body.slice(0, start))?.[1] ?? "";
+  const comma = masked.indexOf(",", start);
+  if (comma >= 0) return { at: comma + 1, comma: true, indent };
+  return { at: masked.trimEnd().length, comma: false, indent };
+}
+
+/** The source with `key: value` added to the entry: after its last spread when it has one, else after the opening brace. */
+function addField(source: string, open: number, close: number, key: string, literal: string): string {
+  const body = source.slice(open + 1, close);
+  const spread = afterLastSpread(body);
+  const multiLine = body.includes("\n");
+  if (spread) {
+    const at = open + 1 + spread.at;
+    const field = multiLine ? `\n${spread.indent}${key}: ${literal},` : ` ${key}: ${literal},`;
+    return source.slice(0, at) + (spread.comma ? "" : ",") + field + source.slice(at);
+  }
+  // Multi-line entries get the field on its own line, at the indentation of their next line; single-line ones keep their layout.
+  const line = /^\s*\n([ \t]*)/.exec(source.slice(open + 1));
+  const added = line ? `\n${line[1]}${key}: ${literal},` : ` ${key}: ${literal},`;
+  return source.slice(0, open + 1) + added + source.slice(open + 1);
+}
+
+/**
+ * Replaces one field of an entry, or adds it when the entry has none. A field
+ * that a later spread would overwrite moves after the spread, so the new value
+ * takes effect. Returns undefined when it cannot place it.
+ */
 function setField(source: string, kind: DirectKind, id: string, key: string, value: number | string | boolean): string | undefined {
   const entry = entryOf(source, kind, id);
   if (!entry) return undefined;
@@ -126,12 +162,7 @@ function setField(source: string, kind: DirectKind, id: string, key: string, val
   const match = new RegExp(`(^|[^\\w$.])${key}\\s*:\\s*`).exec(mask(body));
   // A flag that is off has no field: there is nothing to add.
   if (!match && type === "flag" && value !== true) return source;
-  if (!match) {
-    // Multi-line entries get the field on its own line, at the indentation of their next line; single-line ones keep their layout.
-    const line = /^\s*\n([ \t]*)/.exec(source.slice(entry.open + 1));
-    const added = line ? `\n${line[1]}${key}: ${literalOf(value, type)},` : ` ${key}: ${literalOf(value, type)},`;
-    return source.slice(0, entry.open + 1) + added + source.slice(entry.open + 1);
-  }
+  if (!match) return addField(source, entry.open, entry.close, key, literalOf(value, type));
   const valueStart = entry.open + 1 + match.index + match[0].length;
   let valueEnd: number;
   if (type === "flag") {
@@ -151,7 +182,15 @@ function setField(source: string, kind: DirectKind, id: string, key: string, val
   }
   // The value must be the whole value: `x: 0 + gap` or `"a" + "b"` is computed, and replacing a part of it would be wrong.
   if (!/^[ \t]*(,|}|\r?\n|\/\/|\/\*|$)/.test(source.slice(valueEnd, valueEnd + 40))) return undefined;
-  if (type === "flag" && value !== true) return withoutField(source, entry.open, entry.open + 1 + match.index + match[1]!.length, valueEnd);
+  const keyStart = entry.open + 1 + match.index + match[1]!.length;
+  if (type === "flag" && value !== true) return withoutField(source, entry.open, keyStart, valueEnd);
+  // Written before a spread, the field may be overwritten by it: take it out and add it after the spread.
+  const spread = afterLastSpread(body);
+  if (spread && keyStart < entry.open + 1 + spread.at) {
+    const without = withoutField(source, entry.open, keyStart, valueEnd);
+    const moved = entryOf(without, kind, id);
+    return moved && addField(without, moved.open, moved.close, key, literalOf(value, type));
+  }
   return source.slice(0, valueStart) + literalOf(value, type) + source.slice(valueEnd);
 }
 
