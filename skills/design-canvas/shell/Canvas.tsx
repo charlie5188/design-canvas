@@ -34,7 +34,17 @@ import {
   foldedNotes,
   type MoveSent,
 } from "./marks";
-import { frameUrl, fromThisCanvas, NAVIGATE_EVENT, postToFrame, readFrameMessage, shared } from "./bridge";
+import {
+  frameParams,
+  frameSource,
+  frameUrl,
+  fromThisCanvas,
+  hasAddress,
+  NAVIGATE_EVENT,
+  postToFrame,
+  readFrameMessage,
+  shared,
+} from "./bridge";
 import { FrameHost } from "./FrameHost";
 import {
   type Annotation,
@@ -132,7 +142,7 @@ const ItemFrame = memo(function ItemFrame({ item }: { item: CanvasItem }) {
     <iframe
       className="canvas-frame"
       data-canvas-frame={item.id}
-      src={frameUrl(item.id, "canvas")}
+      {...frameSource(item.id, "canvas")}
       title={item.name}
       width={item.width}
       height={item.height}
@@ -661,17 +671,20 @@ function CanvasItemView({
             <GripIcon />
           </button>
           <NameButton name={item.name} announce={announce}>
-            {/* A new tab keeps the canvas, its camera, and preview state intact. */}
-            <a
-              className="canvas-item-action canvas-open"
-              href={frameUrl(item.id)}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label={labels.openAlone(item.name)}
-              data-tip={labels.openAloneHint}
-            >
-              <OpenIcon />
-            </a>
+            {/* A new tab keeps the canvas, its camera, and preview state intact.
+                A shared file shown inside another page has no address to open. */}
+            {hasAddress && (
+              <a
+                className="canvas-item-action canvas-open"
+                href={frameUrl(item.id)}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={labels.openAlone(item.name)}
+                data-tip={labels.openAloneHint}
+              >
+                <OpenIcon />
+              </a>
+            )}
             <button
               type="button"
               className="canvas-item-action"
@@ -736,7 +749,7 @@ function TrashThumb({ item }: { item: CanvasItem }) {
           {item.viewport ? (
             <iframe
               className="canvas-frame"
-              src={frameUrl(item.id, "page")}
+              {...frameSource(item.id, "page")}
               title={item.name}
               width={item.width}
               height={item.height}
@@ -896,10 +909,10 @@ type CanvasProps = {
 
 /**
  * The canvas page. A shared file (scripts/share.sh) is one page for everything,
- * so there it also shows single items and item frames, at ?item=<id>.
+ * so there it also shows single items and item frames (see frameParams).
  */
 export function Canvas(props: CanvasProps) {
-  if (shared && new URLSearchParams(window.location.search).has("item")) return <FrameHost {...props} />;
+  if (shared && frameParams().has("item")) return <FrameHost {...props} />;
   return <CanvasBoard {...props} />;
 }
 

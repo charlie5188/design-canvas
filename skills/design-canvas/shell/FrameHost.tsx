@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
-import { frameUrl, fromThisCanvas, NAVIGATE_EVENT, postToCanvas, readCanvasMessage } from "./bridge";
+import { frameParams, frameSource, fromThisCanvas, NAVIGATE_EVENT, postToCanvas, readCanvasMessage } from "./bridge";
 import { describeArea, describeElement, isEditable, nestedCanScroll, pickElement, previewLink, wheelPixels } from "./dom";
 import { labels } from "./labels";
 import { loadTheme } from "./layout";
@@ -22,7 +22,7 @@ export function FrameHost({
   storageKey?: string;
   theme?: ThemeStore;
 }) {
-  const params = new URLSearchParams(window.location.search);
+  const params = frameParams();
   const id = params.get("item") ?? "";
   const context = params.get("in");
   const item = items.find((entry) => entry.id === id);
@@ -272,7 +272,7 @@ export function FrameHost({
       <div className="canvas-frame-page">
         <iframe
           className="canvas-frame"
-          src={frameUrl(item.id, "page")}
+          {...frameSource(item.id, "page")}
           title={item.name}
           width={item.width}
           height={item.height}

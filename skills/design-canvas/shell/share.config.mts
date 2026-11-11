@@ -79,6 +79,9 @@ function oneFile(publicDir: string | undefined): Plugin {
       const page = bundle["index.html"];
       if (page?.type !== "asset") return;
       let html = String(page.source);
+      // What went inside, by name: Vite 8's bundle can keep listing a deleted
+      // file, which made the report name files that are in the page.
+      const inside = new Set<string>();
       for (const [name, file] of Object.entries(bundle)) {
         const before = html;
         if (file.type === "chunk") {
@@ -91,12 +94,15 @@ function oneFile(publicDir: string | undefined): Plugin {
           const tag = new RegExp(`<link[^>]*href="[^"]*${escapeRegExp(name)}"[^>]*>`);
           html = html.replace(tag, () => `<style>${String(file.source)}</style>`);
         }
-        if (html !== before) delete bundle[name];
+        if (html !== before) {
+          delete bundle[name];
+          inside.add(name);
+        }
       }
       const inlined = inlinePublicFiles(html, publicDir);
       page.source = inlined.html;
 
-      const left = Object.keys(bundle).filter((name) => name !== "index.html");
+      const left = Object.keys(bundle).filter((name) => name !== "index.html" && !inside.has(name));
       this.emitFile({
         type: "asset",
         fileName: SHARE_REPORT,

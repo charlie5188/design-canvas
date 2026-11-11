@@ -719,6 +719,39 @@ test('a shared file works from disk, frames included, without the agent tools', 
     // The same file shows one item alone.
     await page.goto(`${url}?item=example`)
     await expect(page.locator('.canvas-frame-root')).toContainText('Canvas is ready')
+    // Shown inside another page, as a preview pane or an embed shows it, the file
+    // is loaded from memory and has no address to reopen; its frames still load,
+    // and a wheel over one still pans the canvas.
+    const markup = readFileSync(file, 'utf8')
+    await page.route('http://embed.test/', (route) =>
+      route.fulfill({ body: '<!doctype html><title>Host</title>', contentType: 'text/html' }),
+    )
+    for (const way of ['blob', 'srcdoc'] as const) {
+      await page.goto('http://embed.test/')
+      await page.evaluate(
+        ([html, how]) => {
+          const host = document.createElement('iframe')
+          host.style.cssText = 'width:1000px;height:700px;border:0'
+          if (how === 'blob') host.src = URL.createObjectURL(new Blob([html], { type: 'text/html' }))
+          else host.srcdoc = html
+          document.body.append(host)
+        },
+        [markup, way],
+      )
+      const hosted = page.frameLocator('iframe').first()
+      await expect(hosted.frameLocator('.canvas-item[data-canvas-item="phone"] iframe').locator('body'), way).toContainText(
+        'Canvas is ready',
+      )
+      await expect(hosted.getByRole('link', { name: /in a new tab/ }), way).toHaveCount(0)
+      const embeddedWorld = hosted.locator('.canvas-world')
+      const start = await embeddedWorld.evaluate((element) => getComputedStyle(element).transform)
+      const phone = await hosted.locator('.canvas-item[data-canvas-item="phone"] iframe').boundingBox()
+      await page.mouse.move(phone!.x + 40, phone!.y + 40)
+      await page.mouse.wheel(0, 120)
+      await expect
+        .poll(() => embeddedWorld.evaluate((element) => getComputedStyle(element).transform), { message: way })
+        .not.toBe(start)
+    }
   } finally {
     rmSync(copy, { recursive: true, force: true })
   }

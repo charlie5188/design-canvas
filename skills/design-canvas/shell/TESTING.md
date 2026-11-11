@@ -112,12 +112,13 @@ Run `scripts/listen.sh <canvas-url>` in a terminal as the agent would.
 
 ## Shared file
 
-Run `scripts/share.sh` on a canvas with a `viewport` item, and open the file from disk in Chrome and Safari.
+Run `scripts/share.sh` on a canvas with a `viewport` item, and open the file from disk in Chrome and Safari, and inside another page the way a preview pane or an embed shows it (an iframe whose `src` is a blob of the file, or whose `srcdoc` is the file).
 
 - Every item renders and works, with no console errors. Request change, its A shortcut, its help line, and Share are gone; Alt-click still copies a reference.
 - An image an item loads from the app's public folder by root path shows; a root path with no file there is named by share.sh.
 - Wheel, pinch, Space-drag, and Alt-click over a `viewport` item reach the canvas, as on the dev server.
-- The open-alone icon opens the same file with `?item=<id>`, which shows that item alone.
+- The open-alone icon opens the same file with `?item=<id>`, which shows that item alone. Inside another page the file has no address to open, so the icon is not there.
+- Inside another page, every `viewport` frame renders, and wheel over one still pans the canvas.
 - Reload keeps the layout.
 - On the dev server, the Share icon button (tooltip "Share as an HTML file") dims, pulses, and takes no second click while the file builds, then downloads `<canvas-name>-<date>.html` without reloading the page.
 - After the download, a panel under the Share button names the file, any file it could not include, and how to open it, send it, or put it in Figma or Notion. Escape, its close button, or a press outside closes it and returns focus to Share; opening the trash closes it too.
