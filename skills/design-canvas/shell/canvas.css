@@ -886,7 +886,14 @@ html[data-canvas-alt] .canvas-frame-root * {
   inset-inline-start: 0;
   margin-block-end: -1.5px;
   box-sizing: border-box;
-  max-inline-size: 70%;
+  /* The title stays one size on screen at any zoom: it is scaled against the
+     camera, from the frame's corner it sits on. Its width is then a screen
+     width, so the 70% of the frame is converted to screen px (70% x zoom), with
+     a floor so a small frame, or a zoomed-out canvas, still shows a readable
+     title; it may then reach past a very small frame. */
+  max-inline-size: max(calc(70% / var(--canvas-unzoom, 1)), 160px);
+  transform: scale(var(--canvas-unzoom, 1));
+  transform-origin: left bottom;
   padding: 5px 14px 6px;
   border: 1.5px solid var(--section-line);
   border-block-end: 0;
