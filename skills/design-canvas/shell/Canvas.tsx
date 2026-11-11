@@ -34,7 +34,18 @@ import {
   foldedNotes,
   type MoveSent,
 } from "./marks";
-import { frameUrl, fromThisCanvas, NAVIGATE_EVENT, postToFrame, readFrameMessage, shared } from "./bridge";
+import {
+  frameParams,
+  frameSource,
+  frameUrl,
+  fromThisCanvas,
+  hasAddress,
+  NAVIGATE_EVENT,
+  postToFrame,
+  readFrameMessage,
+  shared,
+  sharedStorageKey,
+} from "./bridge";
 import { FrameHost } from "./FrameHost";
 import {
   type Annotation,
@@ -83,6 +94,12 @@ const MOVE_STEP = 8;
 const DRAG_THRESHOLD = 3;
 const SAVE_DELAY = 400;
 const SAVE_MAX_WAIT = 2000;
+/**
+ * How long a trash write the registry took may still hide what the registry says.
+ * Its own update arrives well within it; after it, a change made in source right
+ * after the write (by the agent or another tab) shows instead of staying hidden.
+ */
+const TRASH_WRITE_GRACE = 3000;
 const TOAST_MS = 2500;
 const TOAST_ACTION_MS = 8000;
 /** Space a note keeps from the viewport edge before it opens on the other side. */
@@ -132,7 +149,7 @@ const ItemFrame = memo(function ItemFrame({ item }: { item: CanvasItem }) {
     <iframe
       className="canvas-frame"
       data-canvas-frame={item.id}
-      src={frameUrl(item.id, "canvas")}
+      {...frameSource(item.id, "canvas")}
       title={item.name}
       width={item.width}
       height={item.height}
@@ -661,17 +678,20 @@ function CanvasItemView({
             <GripIcon />
           </button>
           <NameButton name={item.name} announce={announce}>
-            {/* A new tab keeps the canvas, its camera, and preview state intact. */}
-            <a
-              className="canvas-item-action canvas-open"
-              href={frameUrl(item.id)}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label={labels.openAlone(item.name)}
-              data-tip={labels.openAloneHint}
-            >
-              <OpenIcon />
-            </a>
+            {/* A new tab keeps the canvas, its camera, and preview state intact.
+                A shared file shown inside another page has no address to open. */}
+            {hasAddress && (
+              <a
+                className="canvas-item-action canvas-open"
+                href={frameUrl(item.id)}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={labels.openAlone(item.name)}
+                data-tip={labels.openAloneHint}
+              >
+                <OpenIcon />
+              </a>
+            )}
             <button
               type="button"
               className="canvas-item-action"
@@ -736,7 +756,7 @@ function TrashThumb({ item }: { item: CanvasItem }) {
           {item.viewport ? (
             <iframe
               className="canvas-frame"
-              src={frameUrl(item.id, "page")}
+              {...frameSource(item.id, "page")}
               title={item.name}
               width={item.width}
               height={item.height}
@@ -896,11 +916,12 @@ type CanvasProps = {
 
 /**
  * The canvas page. A shared file (scripts/share.sh) is one page for everything,
- * so there it also shows single items and item frames, at ?item=<id>.
+ * so there it also shows single items and item frames (see frameParams).
  */
 export function Canvas(props: CanvasProps) {
-  if (shared && new URLSearchParams(window.location.search).has("item")) return <FrameHost {...props} />;
-  return <CanvasBoard {...props} />;
+  const storageKey = sharedStorageKey(props.storageKey);
+  if (shared && frameParams().has("item")) return <FrameHost {...props} storageKey={storageKey} />;
+  return <CanvasBoard {...props} storageKey={storageKey} />;
 }
 
 function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: sectionsProp = NO_SECTIONS, storageKey, theme }: CanvasProps) {
@@ -934,9 +955,22 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
   // New registry entries appear at their source position until placed.
   const resolved = (item: CanvasItem) => positions[item.id] ?? { x: item.x, y: item.y };
   // The trash hides items on the canvas only; their code stays in the registry,
-  // so any of them can be put back. Most recently trashed first.
-  const [trash, setTrashState] = useState<string[]>(() => saved.trash);
+  // so any of them can be put back. Most recently trashed first. On the dev server
+  // the registry holds it (`trashed`), written only when the person moves an item in
+  // or out, so a shared file, the next session, and every open tab show the same
+  // trash, and no tab overwrites another. The browser keeps the order, the items the
+  // registry could not take, and, from an older shell, a trash it had only here,
+  // written into the registry once (see SavedTrash). A shared file cannot write, so
+  // it starts from the registry and keeps what a viewer changes in the browser.
+  const [trash, setTrashState] = useState<string[]>(() => {
+    const inRegistry = items.filter((item) => item.trashed).map((item) => item.id);
+    if (shared) return saved.camera ? saved.trash.ids : inRegistry;
+    const member = new Set([...inRegistry, ...saved.trash.kept, ...(saved.trash.inRegistry ? [] : saved.trash.ids)]);
+    return [...new Set([...saved.trash.ids.filter((id) => member.has(id)), ...member])];
+  });
   const trashRef = useRef(trash);
+  /** Items whose `trashed` the registry could not take, so their place in the trash is kept in this browser. */
+  const trashKept = useRef(new Set(saved.trash.kept));
   const shown = useMemo(() => items.filter((item) => !trash.includes(item.id)), [items, trash]);
   const shownIds = useMemo(() => new Set(shown.map((item) => item.id)), [shown]);
   const trashedItems = useMemo(
@@ -981,7 +1015,11 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     window.clearTimeout(saveTimer.current);
     saveTimer.current = 0;
     firstQueued.current = 0;
-    saveLayout(storageKey, camera.current, positionsRef.current, theme?.get(), trashRef.current);
+    saveLayout(storageKey, camera.current, positionsRef.current, theme?.get(), {
+      ids: trashRef.current,
+      kept: [...trashKept.current],
+      inRegistry: !shared,
+    });
   }, [storageKey, theme]);
   const queueSave = useCallback(() => {
     const now = performance.now();
@@ -2388,8 +2426,48 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     );
   }, [items, placeFree, reveal, shown]);
 
+  /**
+   * Writes `trashed` into the registry for an item the person moved into or out of
+   * the trash. Until the registry has it, the canvas shows it as made; what the
+   * registry cannot take stays in this browser instead.
+   */
+  const trashPending = useRef(new Map<string, boolean>());
+  const [trashChecks, setTrashChecks] = useState(0);
+  const saveTrashed = useCallback(
+    (item: CanvasItem, want: boolean) => {
+      if (shared) return;
+      if (!want && trashKept.current.delete(item.id)) queueSave();
+      const registered = itemsRef.current.find((entry) => entry.id === item.id);
+      if (!registered) return;
+      // A write the other way may still be on its way, as after a quick Undo: this one must follow it.
+      const pending = trashPending.current.get(item.id);
+      if (pending === want || (pending === undefined && !!registered.trashed === want)) return;
+      trashPending.current.set(item.id, want);
+      const refused = () => {
+        // A put back the registry refused stays put back until the page closes.
+        if (!want || trashPending.current.get(item.id) !== want) return;
+        trashPending.current.delete(item.id);
+        trashKept.current.add(item.id);
+        queueSave();
+      };
+      const edit: DirectEdit = { kind: "item", id: item.id, set: { trashed: want } };
+      fetch(EDIT_PATH, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ edits: [edit] }) })
+        .then((response) => (response.ok ? response.json() : Promise.reject(new Error(`edit ${response.status}`))))
+        .then((result: { missing?: unknown }) => {
+          if (Array.isArray(result.missing) && result.missing.includes(item.id)) return refused();
+          window.setTimeout(() => {
+            if (trashPending.current.get(item.id) !== want) return;
+            trashPending.current.delete(item.id);
+            setTrashChecks((n) => n + 1);
+          }, TRASH_WRITE_GRACE);
+        })
+        .catch(refused);
+    },
+    [queueSave],
+  );
+
   /** Back on the canvas where it was, or beside its row if that spot was taken meanwhile. */
-  const putBack = useCallback(
+  const restore = useCallback(
     (item: CanvasItem) => {
       setTrash(trashRef.current.filter((id) => id !== item.id));
       setFrontId(item.id);
@@ -2402,18 +2480,52 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     },
     [placeFree, reveal, setTrash],
   );
+  const putBack = useCallback(
+    (item: CanvasItem) => {
+      restore(item);
+      saveTrashed(item, false);
+    },
+    [restore, saveTrashed],
+  );
   const moveToTrash = useCallback(
     (item: CanvasItem) => {
       const open = openRef.current && annotationsRef.current.find((a) => a.id === openRef.current?.id);
       if (open && open.itemId === item.id) closeAnnotation();
       setTrash([item.id, ...trashRef.current.filter((id) => id !== item.id)]);
+      saveTrashed(item, true);
       setFrontId((front) => (front === item.id ? null : front));
       // The button that had focus is gone with its item.
       viewportRef.current?.focus({ preventScroll: true });
       notify(labels.movedToTrash(item.name), { label: labels.undo, run: () => putBack(item) });
     },
-    [closeAnnotation, notify, putBack, setTrash],
+    [closeAnnotation, notify, putBack, saveTrashed, setTrash],
   );
+
+  // A trash an older shell kept only in this browser goes into the registry, once.
+  const movedOldTrash = useRef(false);
+  useEffect(() => {
+    if (shared || saved.trash.inRegistry || movedOldTrash.current) return;
+    movedOldTrash.current = true;
+    for (const id of saved.trash.ids) {
+      const item = itemsRef.current.find((entry) => entry.id === id);
+      if (item) saveTrashed(item, true);
+    }
+    queueSave();
+  }, [queueSave, saveTrashed, saved.trash]);
+  // The trash follows the registry: a write landing, or `trashed` changed by the agent or another tab.
+  useEffect(() => {
+    if (shared) return;
+    const inTrash = (item: CanvasItem) => {
+      const pending = trashPending.current.get(item.id);
+      if (pending !== undefined && pending !== !!item.trashed) return pending;
+      trashPending.current.delete(item.id);
+      return !!item.trashed || trashKept.current.has(item.id);
+    };
+    const into = items.filter((item) => inTrash(item) && !trashRef.current.includes(item.id)).map((item) => item.id);
+    if (into.length) setTrash([...into, ...trashRef.current]);
+    for (const item of items) if (!inTrash(item) && trashRef.current.includes(item.id)) restore(item);
+  }, [items, restore, setTrash, trashChecks]);
+
   const closeSharePanel = useCallback(() => {
     setSharedFile(null);
     shareButtonRef.current?.focus({ preventScroll: true });

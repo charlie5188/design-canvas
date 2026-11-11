@@ -99,6 +99,10 @@ Run `scripts/listen.sh <canvas-url>` in a terminal as the agent would.
 - Opening the trash focuses its first entry; Escape closes it and returns focus to the button, and pressing outside it closes it. At 375 px it shows two columns inside the window.
 - Picking an entry closes the trash and puts the item back where it was, or beside its row if that spot is now taken, then brings it into view and to the front. The trash button goes away when the trash is empty.
 - Show all and links to `#<item-id>` ignore trashed items. The trash survives reload; ids no longer in the registry drop out.
+- Moving an item to the trash writes `trashed: true` into its registry entry, and putting it back removes it, leaving the entry as it was. A trash saved only in the browser, by an older shell, is written on the next load.
+- Changing `trashed` in source moves that item into or out of the trash on every open canvas. A new item with `trashed: true` starts in the trash.
+- Opening the canvas never changes `trashed` in the registry, even in a tab or browser whose saved trash differs: it shows the registry's trash. Only moving an item into or out of the trash writes it.
+- An item whose `trashed` cannot be written (its entry is not found exactly once) stays in the trash in this browser, across reloads.
 
 ## New versions
 
@@ -112,13 +116,15 @@ Run `scripts/listen.sh <canvas-url>` in a terminal as the agent would.
 
 ## Shared file
 
-Run `scripts/share.sh` on a canvas with a `viewport` item, and open the file from disk in Chrome and Safari.
+Run `scripts/share.sh` on a canvas with a `viewport` item, and open the file from disk in Chrome and Safari, and inside another page the way a preview pane or an embed shows it (an iframe whose `src` is a blob of the file, or whose `srcdoc` is the file).
 
 - Every item renders and works, with no console errors. Request change, its A shortcut, its help line, and Share are gone; Alt-click still copies a reference.
 - An image an item loads from the app's public folder by root path shows; a root path with no file there is named by share.sh.
 - Wheel, pinch, Space-drag, and Alt-click over a `viewport` item reach the canvas, as on the dev server.
-- The open-alone icon opens the same file with `?item=<id>`, which shows that item alone.
-- Reload keeps the layout.
+- The open-alone icon opens the same file with `?item=<id>`, which shows that item alone. Inside another page the file has no address to open, so the icon is not there.
+- Inside another page, every `viewport` frame renders, and wheel over one still pans the canvas.
+- Items in the trash on the canvas start in the shared file's trash, not on the canvas.
+- Reload keeps the layout. A newer shared file of the same canvas opens as it was shared, not with the layout saved in an older one.
 - On the dev server, the Share icon button (tooltip "Share as an HTML file") dims, pulses, and takes no second click while the file builds, then downloads `<canvas-name>-<date>.html` without reloading the page.
 - After the download, a panel under the Share button names the file, any file it could not include, and how to open it, send it, or put it in Figma or Notion. Escape, its close button, or a press outside closes it and returns focus to Share; opening the trash closes it too.
 
@@ -146,7 +152,7 @@ Before claiming smooth performance, profile a canvas with a realistic number of 
 - The caption under an item's name (its `note`) is edited with a double-click: the text becomes a one-line field, Enter or leaving it saves into `registry.tsx` (the new text shows at once), Escape cancels, an empty or unchanged caption saves nothing. The canvas's keys (A, N, S, Delete) stay out of the field. A shared file cannot edit captions.
 - When an automatic save cannot go through, a notice says why: "Restart this canvas's dev server" when the server does not answer (or does not know the route), or that the item cannot be changed automatically when its registry entry has no plain id or a computed value. The change then waits for the agent as "Not applied yet".
 - ⌘/Ctrl + Z undoes the last saved change from anywhere on the canvas, including with focus on an item's grip, and not inside a text field or a preview: a moved item (and its place in the browser), a resize, an edit, a caption, a new note (removed again), a deleted note or section (put back). Each press undoes one saved change, newest first; "Nothing to undo" shows when there is none, and an undo is not itself saved as new history. It does not survive a reload. The help list mentions it, and in a shared file it is gone.
-- A save never reloads the page (a marker set on `window` survives it), also with a frame page open or `viewport` items on the canvas. Moving, resizing, or editing a note or section from the registry saves it into `registry.tsx` after a short pause: its ghost shows "Saving…" with no discard button and leaves once the registry matches. Putting it back where it began removes the ghost. With no dev server the change falls back to "Not applied yet" and the agent message.
+- A save never reloads the page (a marker set on `window` survives it), also with a frame page open or `viewport` items on the canvas. In an app with Tailwind, a save also keeps the canvas mounted and every `viewport` frame loaded (markers set on the canvas DOM and inside each frame survive it), and the dev server logs an update of `main.tsx` and `frame.tsx` only, with no stylesheet. Moving, resizing, or editing a note or section from the registry saves it into `registry.tsx` after a short pause: its ghost shows "Saving…" with no discard button and leaves once the registry matches. Putting it back where it began removes the ghost. With no dev server the change falls back to "Not applied yet" and the agent message.
 - Ghosts are dashed and tagged "Not applied yet", turn "Sent · waiting for the agent" or "Queued" after sending, stay across a reload, and a ghost section stays behind its items. Moving a sent ghost makes it a new request.
 - The button in the changes bar counts notes, sections, and annotations together and says "Apply N changes" with a listening agent, "Copy N changes" without. Leaving annotate mode with changes waiting shows "N changes aren't applied yet" with a button that applies or copies them.
 - The message lists the changes in words (add, move, resize, text or title) and, for a section, the items inside it with their current positions.

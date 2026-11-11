@@ -31,6 +31,12 @@ async function restoreRegistry(page: Page, original: string) {
   await updated
 }
 
+// Whether the dev server serves the registry with an item in the trash. A write lands in the
+// file before the server sees it; a page loaded or updated after this check gets what it says.
+async function servesTrashed(page: Page) {
+  return (await (await page.request.get('/registry.tsx')).text()).includes('trashed: true')
+}
+
 async function refuseSaves(page: Page) {
   await page.route('**/__design-canvas/edit', (route) => {
     const body = JSON.parse(route.request().postData() ?? '{}') as { edits?: { id: string }[]; adds?: unknown[] }
@@ -55,22 +61,80 @@ test('frame.html renders one item alone', async ({ page }) => {
 })
 
 test('an item moves to the trash and is put back', async ({ page }) => {
-  const errors = collectErrors(page)
-  await page.goto('/')
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    await page.goto('/')
+    const item = page.locator('.canvas-item[data-canvas-item="example"]')
+    await expect(item).toContainText('Canvas is ready')
+    await page.getByRole('button', { name: 'Move Example · replace me to the trash' }).click()
+    await expect(item).toHaveCount(0)
+    // The trash is written into the registry, so the shared file and the next session have it.
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toMatch(/\{\s*trashed: true,\s*id: "example"/)
+    // So a reload keeps it.
+    await expect.poll(() => servesTrashed(page)).toBe(true)
+    await page.reload()
+    await expect(item).toHaveCount(0)
+    await page.getByRole('button', { name: 'Trash, 1 item' }).click()
+    const trash = page.getByRole('dialog', { name: 'Trash' })
+    await expect(trash.locator('.canvas-trash-thumb')).toContainText('Canvas is ready')
+    await trash.getByRole('button', { name: 'Put back Example · replace me' }).click()
+    await expect(item).toContainText('Canvas is ready')
+    await expect(page.getByRole('button', { name: /^Trash/ })).toHaveCount(0)
+    // Put back, the entry reads as it did before.
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toBe(original)
+    await expect.poll(() => servesTrashed(page)).toBe(false)
+    // The agent trashing it in source moves it to the trash on the open canvas, and taking that back returns it.
+    // A source change right after the canvas's own write can wait out TRASH_WRITE_GRACE, hence the longer waits.
+    writeFileSync(REGISTRY, original.replace('id: "example",', 'id: "example",\n    trashed: true,'))
+    await expect(item).toHaveCount(0, { timeout: 10_000 })
+    await expect(page.getByRole('button', { name: 'Trash, 1 item' })).toBeVisible()
+    writeFileSync(REGISTRY, original)
+    await expect(item).toContainText('Canvas is ready', { timeout: 10_000 })
+    await expect(page.getByRole('button', { name: /^Trash/ })).toHaveCount(0)
+    expect(readFileSync(REGISTRY, 'utf8')).toBe(original)
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
+test('the registry holds the trash: a trash saved in a browser never undoes it', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  const trashed = original.replace('id: "example",', 'id: "example",\n    trashed: true,')
   const item = page.locator('.canvas-item[data-canvas-item="example"]')
-  await expect(item).toContainText('Canvas is ready')
-  await page.getByRole('button', { name: 'Move Example · replace me to the trash' }).click()
-  await expect(item).toHaveCount(0)
-  // The trash is saved with the layout.
-  await page.reload()
-  await expect(item).toHaveCount(0)
-  await page.getByRole('button', { name: 'Trash, 1 item' }).click()
-  const trash = page.getByRole('dialog', { name: 'Trash' })
-  await expect(trash.locator('.canvas-trash-thumb')).toContainText('Canvas is ready')
-  await trash.getByRole('button', { name: 'Put back Example · replace me' }).click()
-  await expect(item).toContainText('Canvas is ready')
-  await expect(page.getByRole('button', { name: /^Trash/ })).toHaveCount(0)
-  expect(errors).toEqual([])
+  // Written while no canvas is open. The next page must not load before the dev server serves the change.
+  const writeRegistry = async (source: string) => {
+    writeFileSync(REGISTRY, source)
+    await expect.poll(() => servesTrashed(page)).toBe(source.includes('trashed: true'))
+  }
+  // Saved from frame.html, which never saves a layout, so the canvas cannot overwrite it on its way out.
+  const saveLayout = async (trash: string[], inRegistry: boolean) => {
+    await page.goto('/frame.html?item=example')
+    const doc = { version: 1, camera: { x: 0, y: 0, z: 1 }, positions: {}, trash, trashInRegistry: inRegistry || undefined }
+    await page.evaluate((json) => localStorage.setItem('design-canvas:smoke', json), JSON.stringify(doc))
+  }
+  try {
+    const errors = collectErrors(page)
+    // A browser whose saved trash is empty, as another tab or browser may have, opens a registry with the item trashed.
+    await writeRegistry(trashed)
+    await saveLayout([], true)
+    await page.goto('/')
+    await expect(page.getByRole('button', { name: 'Trash, 1 item' })).toBeVisible()
+    await expect(item).toHaveCount(0)
+    await page.waitForTimeout(1000)
+    expect(readFileSync(REGISTRY, 'utf8')).toBe(trashed)
+    // A trash an older shell kept only in the browser is written into the registry on the next load.
+    await page.goto('/frame.html?item=example')
+    await writeRegistry(original)
+    await saveLayout(['example'], false)
+    await page.goto('/')
+    await expect(item).toHaveCount(0)
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toMatch(/\{\s*trashed: true,\s*id: "example"/)
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
 })
 
 test('copied annotations ask for a new version by default', async ({ page, context }) => {
@@ -694,15 +758,22 @@ test('a shared file works from disk, frames included, without the agent tools', 
   const copy = 'design-canvas/smoke-shared'
   cpSync('design-canvas/smoke', copy, { recursive: true })
   const registry = readFileSync(`${copy}/registry.tsx`, 'utf8')
-  const phone = '  { id: "phone", name: "Phone", component: Example, x: 0, y: 240, width: 375, height: 180, viewport: true },\n];'
-  writeFileSync(`${copy}/registry.tsx`, registry.replace(/\];\s*$/, `${phone}\n`))
-  const file = join(mkdtempSync(join(tmpdir(), 'design-canvas-share-')), 'canvas.html')
+  // And an item in the trash, which the shared file must not show on the canvas.
+  const added =
+    '  { id: "phone", name: "Phone", component: Example, x: 0, y: 240, width: 375, height: 180, viewport: true },\n' +
+    '  { id: "old", name: "Old", component: Example, x: 400, y: 0, width: 360, height: 180, trashed: true },\n];'
+  writeFileSync(`${copy}/registry.tsx`, registry.replace(/\];\s*$/, `${added}\n`))
+  const folder = mkdtempSync(join(tmpdir(), 'design-canvas-share-'))
+  const file = join(folder, 'canvas.html')
   try {
     const shared = spawnSync('bash', [SHARE, copy, file], { encoding: 'utf8' })
     expect(shared.status, shared.stderr).toBe(0)
     const url = pathToFileURL(file).href
     await page.goto(url)
-    await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toContainText('Canvas is ready')
+    const example = page.locator('.canvas-item[data-canvas-item="example"]')
+    await expect(example).toContainText('Canvas is ready')
+    await expect(page.locator('.canvas-item[data-canvas-item="old"]')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Trash, 1 item' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Request change', exact: true })).toHaveCount(0)
     await expect(page.locator('#canvas-help')).not.toContainText('Press A')
     const frame = page.locator('.canvas-item[data-canvas-item="phone"] iframe')
@@ -716,9 +787,55 @@ test('a shared file works from disk, frames included, without the agent tools', 
     await page.mouse.move(box!.x + 40, box!.y + 40)
     await page.mouse.wheel(0, 120)
     await expect.poll(() => world.evaluate((element) => getComputedStyle(element).transform)).not.toBe(before)
+    // What a viewer changes stays across a reload of that file, and a newer file of the
+    // same canvas opens as it was shared: files on disk share one origin, and so storage.
+    await page.getByRole('button', { name: 'Move Example · replace me to the trash' }).click()
+    await expect(example).toHaveCount(0)
+    await page.reload()
+    await expect(page.getByRole('button', { name: 'Trash, 2 items' })).toBeVisible()
+    await expect(example).toHaveCount(0)
+    const newer = join(folder, 'canvas-newer.html')
+    const sharedAgain = spawnSync('bash', [SHARE, copy, newer], { encoding: 'utf8' })
+    expect(sharedAgain.status, sharedAgain.stderr).toBe(0)
+    await page.goto(pathToFileURL(newer).href)
+    await expect(example).toContainText('Canvas is ready')
+    await expect(page.getByRole('button', { name: 'Trash, 1 item' })).toBeVisible()
     // The same file shows one item alone.
     await page.goto(`${url}?item=example`)
     await expect(page.locator('.canvas-frame-root')).toContainText('Canvas is ready')
+    // Shown inside another page, as a preview pane or an embed shows it, the file
+    // is loaded from memory and has no address to reopen; its frames still load,
+    // and a wheel over one still pans the canvas.
+    const markup = readFileSync(file, 'utf8')
+    await page.route('http://embed.test/', (route) =>
+      route.fulfill({ body: '<!doctype html><title>Host</title>', contentType: 'text/html' }),
+    )
+    for (const way of ['blob', 'srcdoc'] as const) {
+      await page.goto('http://embed.test/')
+      await page.evaluate(
+        ([html, how]) => {
+          const host = document.createElement('iframe')
+          host.style.cssText = 'width:1000px;height:700px;border:0'
+          if (how === 'blob') host.src = URL.createObjectURL(new Blob([html], { type: 'text/html' }))
+          else host.srcdoc = html
+          document.body.append(host)
+        },
+        [markup, way],
+      )
+      const hosted = page.frameLocator('iframe').first()
+      await expect(hosted.frameLocator('.canvas-item[data-canvas-item="phone"] iframe').locator('body'), way).toContainText(
+        'Canvas is ready',
+      )
+      await expect(hosted.getByRole('link', { name: /in a new tab/ }), way).toHaveCount(0)
+      const embeddedWorld = hosted.locator('.canvas-world')
+      const start = await embeddedWorld.evaluate((element) => getComputedStyle(element).transform)
+      const phone = await hosted.locator('.canvas-item[data-canvas-item="phone"] iframe').boundingBox()
+      await page.mouse.move(phone!.x + 40, phone!.y + 40)
+      await page.mouse.wheel(0, 120)
+      await expect
+        .poll(() => embeddedWorld.evaluate((element) => getComputedStyle(element).transform), { message: way })
+        .not.toBe(start)
+    }
   } finally {
     rmSync(copy, { recursive: true, force: true })
   }

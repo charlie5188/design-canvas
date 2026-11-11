@@ -1,10 +1,20 @@
 // Camera math and the saved layout. Only the camera, positions keyed by
 // registry ID, and the trash are stored; names, sizes, and membership always
-// come from source.
+// come from source. On the dev server the registry holds the trash (`trashed`),
+// so the browser keeps only its order and the items the registry could not take.
 
 export type Camera = { x: number; y: number; z: number };
 export type Position = { x: number; y: number };
 export type Bounds = { minX: number; minY: number; maxX: number; maxY: number };
+/**
+ * The trash as this browser saved it. `ids`: most recent first; in a shared file,
+ * the whole trash. `kept`: items the registry could not take, kept here instead.
+ * `inRegistry`: this browser's trash has been written into the registry, so `ids`
+ * is only its order. Without it, `ids` is a trash from an older shell, kept only
+ * in the browser, to be written into the registry once.
+ */
+export type SavedTrash = { ids: string[]; kept: string[]; inRegistry: boolean };
+const NO_TRASH: SavedTrash = { ids: [], kept: [], inRegistry: false };
 
 export const ZOOM_MIN = 0.1;
 export const ZOOM_MAX = 3;
@@ -80,18 +90,20 @@ export function loadLayout(
   storageKey: string,
   ids: ReadonlySet<string>,
   themes: ReadonlySet<string> = new Set(),
-): { camera?: Camera; positions: Record<string, Position>; theme?: string; trash: string[] } {
+): { camera?: Camera; positions: Record<string, Position>; theme?: string; trash: SavedTrash } {
   try {
     const raw = window.localStorage.getItem(storageKey);
-    if (!raw || raw.length > MAX_DOCUMENT) return { positions: {}, trash: [] };
+    if (!raw || raw.length > MAX_DOCUMENT) return { positions: {}, trash: NO_TRASH };
     const doc = JSON.parse(raw) as {
       version?: unknown;
       camera?: unknown;
       positions?: unknown;
       theme?: unknown;
       trash?: unknown;
+      trashKept?: unknown;
+      trashInRegistry?: unknown;
     };
-    if (doc?.version !== VERSION) return { positions: {}, trash: [] };
+    if (doc?.version !== VERSION) return { positions: {}, trash: NO_TRASH };
     const positions: Record<string, Position> = {};
     if (doc.positions && typeof doc.positions === "object") {
       const entries = Object.entries(doc.positions as Record<string, unknown>).slice(0, MAX_POSITIONS);
@@ -101,13 +113,15 @@ export function loadLayout(
       }
     }
     const theme = typeof doc.theme === "string" && themes.has(doc.theme) ? doc.theme : undefined;
-    // Trashed item IDs, most recent first. IDs no longer in the registry drop out.
-    const trash = Array.isArray(doc.trash)
-      ? [...new Set(doc.trash.slice(0, MAX_POSITIONS).filter((id): id is string => typeof id === "string" && ids.has(id)))]
-      : [];
+    // Trashed item IDs. IDs no longer in the registry drop out.
+    const idList = (value: unknown) =>
+      Array.isArray(value)
+        ? [...new Set(value.slice(0, MAX_POSITIONS).filter((id): id is string => typeof id === "string" && ids.has(id)))]
+        : [];
+    const trash = { ids: idList(doc.trash), kept: idList(doc.trashKept), inRegistry: doc.trashInRegistry === true };
     return { camera: validCamera(doc.camera), positions, theme, trash };
   } catch {
-    return { positions: {}, trash: [] };
+    return { positions: {}, trash: NO_TRASH };
   }
 }
 
@@ -121,10 +135,18 @@ export function saveLayout(
   camera: Camera,
   positions: Record<string, Position>,
   theme?: string,
-  trash: string[] = [],
+  trash: SavedTrash = NO_TRASH,
 ) {
   try {
-    const doc = JSON.stringify({ version: VERSION, camera, positions, theme, trash: trash.length ? trash : undefined });
+    const doc = JSON.stringify({
+      version: VERSION,
+      camera,
+      positions,
+      theme,
+      trash: trash.ids.length ? trash.ids : undefined,
+      trashKept: trash.kept.length ? trash.kept : undefined,
+      trashInRegistry: trash.inRegistry || undefined,
+    });
     if (doc.length <= MAX_DOCUMENT) window.localStorage.setItem(storageKey, doc);
   } catch {
     // Storage may be unavailable or full; the canvas keeps working without it.

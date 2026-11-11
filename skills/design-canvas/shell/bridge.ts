@@ -4,10 +4,20 @@
 /**
  * A canvas that scripts/share.sh built into one HTML file marks its root
  * element. The file has no frame.html, so item frames load the file itself
- * with ?item=, and the annotation tools, which need the agent and the dev
- * server, are hidden.
+ * (see frameSource), and the annotation tools, which need the agent and the
+ * dev server, are hidden.
  */
 export const shared = document.documentElement.dataset.designCanvas === "shared";
+
+/**
+ * When the shared file was built. Each file keeps its layout under its own key,
+ * so a newer file of the same canvas opens as it was shared, not with the
+ * layout someone saved in an older one: files opened from disk share one origin.
+ */
+export const sharedStorageKey = (storageKey: string) => {
+  const built = document.documentElement.dataset.designCanvasBuilt;
+  return shared && built ? `${storageKey}@${built}` : storageKey;
+};
 
 export const FRAME_PAGE = "frame.html";
 
@@ -17,21 +27,57 @@ export const FRAME_PAGE = "frame.html";
  */
 export type FrameContext = "canvas" | "page";
 
+/**
+ * Whether this page has an address of its own to reopen: on the dev server, a
+ * web address, or a file on disk. A shared file shown inside another page,
+ * such as a preview pane or an embed, is loaded from memory instead (a blob or
+ * srcdoc document) and has none.
+ */
+export const hasAddress = /^(https?|file):$/.test(window.location.protocol);
+
+/** A link that opens one item alone in a tab. Only for a page with an address (hasAddress). */
 export const frameUrl = (id: string, context?: FrameContext) =>
-  `${shared ? "" : FRAME_PAGE}?item=${encodeURIComponent(id)}${context ? `&in=${context}` : ""}`;
+  `${shared ? "" : FRAME_PAGE}?${frameQuery(id, context)}`;
+
+const frameQuery = (id: string, context?: FrameContext) =>
+  `item=${encodeURIComponent(id)}${context ? `&in=${context}` : ""}`;
+
+/**
+ * The shared file's own markup, read before anything renders. Item frames in a
+ * shared file load it from memory (srcdoc) and read their item from their frame
+ * name, so they show wherever the file is opened. Reopening the file's address
+ * with ?item= works from disk and from a web address, but a file shown inside
+ * another page has no address, and every frame stayed blank.
+ */
+const sharedPage = shared ? `<!doctype html>\n${document.documentElement.outerHTML}` : "";
+const FRAME_NAME = "design-canvas-frame?";
+
+/** Where an item frame's document comes from, as props for its iframe. */
+export const frameSource = (id: string, context: FrameContext): { src: string } | { srcDoc: string; name: string } =>
+  shared ? { srcDoc: sharedPage, name: FRAME_NAME + frameQuery(id, context) } : { src: frameUrl(id, context) };
+
+/** This page's item and context: from its frame name in a shared file, otherwise from its address. */
+export const frameParams = () =>
+  shared && window.name.startsWith(FRAME_NAME)
+    ? new URLSearchParams(window.name.slice(FRAME_NAME.length))
+    : new URLSearchParams(window.location.search);
 
 const SOURCE = "design-canvas";
 
-// Opened from disk, as a shared file usually is, every file is its own opaque
-// origin, so a frame's messages to "file://" are dropped. There, both sides
-// address each other with "*" and rely on event.source, which every listener
-// already checks, instead of the origin.
-const fromDisk = window.location.protocol === "file:";
-const messageTarget = fromDisk ? "*" : window.location.origin;
+// Only a page on a web address has an origin that a target origin can name.
+// Opened from disk, every file is its own opaque origin; loaded from memory,
+// the canvas and its srcdoc frames share whatever origin the host page gives
+// them, often an opaque one. There, both sides address each other with "*" and
+// rely on event.source, which every listener already checks, and on their own
+// shared origin.
+const onWeb = /^https?:$/.test(window.location.protocol);
+const messageTarget = onWeb ? window.location.origin : "*";
 
 /** Whether a message comes from a page of this canvas. Listeners also check event.source. */
 export const fromThisCanvas = (event: MessageEvent) =>
-  fromDisk ? event.origin === "null" || event.origin === "file://" : event.origin === window.location.origin;
+  onWeb
+    ? event.origin === window.location.origin
+    : event.origin === self.origin || event.origin === "null" || event.origin === "file://";
 const MAX_LABEL = 200;
 const MAX_HREF = 2000;
 
