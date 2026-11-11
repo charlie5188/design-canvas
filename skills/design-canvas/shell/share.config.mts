@@ -69,12 +69,13 @@ function inlinePublicFiles(html: string, publicDir: string | undefined) {
   return { html: result, missing: [...missing] };
 }
 
-/** Moves everything the page uses into it, and marks it as a shared file (see bridge.ts). */
+/** Moves everything the page uses into it, and marks it as a shared file, with when it was built (see bridge.ts). */
 function oneFile(publicDir: string | undefined): Plugin {
   return {
     name: "design-canvas:one-file",
     enforce: "post",
-    transformIndexHtml: (html) => html.replace(/<html\b/i, '<html data-design-canvas="shared"'),
+    transformIndexHtml: (html) =>
+      html.replace(/<html\b/i, `<html data-design-canvas="shared" data-design-canvas-built="${Date.now().toString(36)}"`),
     generateBundle(_options, bundle) {
       const page = bundle["index.html"];
       if (page?.type !== "asset") return;

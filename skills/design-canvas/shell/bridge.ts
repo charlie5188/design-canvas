@@ -9,6 +9,16 @@
  */
 export const shared = document.documentElement.dataset.designCanvas === "shared";
 
+/**
+ * When the shared file was built. Each file keeps its layout under its own key,
+ * so a newer file of the same canvas opens as it was shared, not with the
+ * layout someone saved in an older one: files opened from disk share one origin.
+ */
+export const sharedStorageKey = (storageKey: string) => {
+  const built = document.documentElement.dataset.designCanvasBuilt;
+  return shared && built ? `${storageKey}@${built}` : storageKey;
+};
+
 export const FRAME_PAGE = "frame.html";
 
 /**

@@ -55,22 +55,42 @@ test('frame.html renders one item alone', async ({ page }) => {
 })
 
 test('an item moves to the trash and is put back', async ({ page }) => {
-  const errors = collectErrors(page)
-  await page.goto('/')
-  const item = page.locator('.canvas-item[data-canvas-item="example"]')
-  await expect(item).toContainText('Canvas is ready')
-  await page.getByRole('button', { name: 'Move Example · replace me to the trash' }).click()
-  await expect(item).toHaveCount(0)
-  // The trash is saved with the layout.
-  await page.reload()
-  await expect(item).toHaveCount(0)
-  await page.getByRole('button', { name: 'Trash, 1 item' }).click()
-  const trash = page.getByRole('dialog', { name: 'Trash' })
-  await expect(trash.locator('.canvas-trash-thumb')).toContainText('Canvas is ready')
-  await trash.getByRole('button', { name: 'Put back Example · replace me' }).click()
-  await expect(item).toContainText('Canvas is ready')
-  await expect(page.getByRole('button', { name: /^Trash/ })).toHaveCount(0)
-  expect(errors).toEqual([])
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    await page.goto('/')
+    const item = page.locator('.canvas-item[data-canvas-item="example"]')
+    await expect(item).toContainText('Canvas is ready')
+    await page.getByRole('button', { name: 'Move Example · replace me to the trash' }).click()
+    await expect(item).toHaveCount(0)
+    // The trash is written into the registry, so the shared file and the next session have it.
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toMatch(/\{\s*trashed: true,\s*id: "example"/)
+    // And saved with the layout.
+    await page.reload()
+    await expect(item).toHaveCount(0)
+    await page.getByRole('button', { name: 'Trash, 1 item' }).click()
+    const trash = page.getByRole('dialog', { name: 'Trash' })
+    await expect(trash.locator('.canvas-trash-thumb')).toContainText('Canvas is ready')
+    const putBackSaved = page.waitForEvent('console', { predicate: (m) => m.text().includes('hot updated'), timeout: 10_000 })
+    await trash.getByRole('button', { name: 'Put back Example · replace me' }).click()
+    await expect(item).toContainText('Canvas is ready')
+    await expect(page.getByRole('button', { name: /^Trash/ })).toHaveCount(0)
+    // Put back, the entry reads as it did before.
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toBe(original)
+    // The page has that update before the next write, so the two are not one update.
+    await putBackSaved
+    // The agent trashing it in source moves it to the trash on the open canvas, and taking that back returns it.
+    writeFileSync(REGISTRY, original.replace('id: "example",', 'id: "example",\n    trashed: true,'))
+    await expect(item).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Trash, 1 item' })).toBeVisible()
+    writeFileSync(REGISTRY, original)
+    await expect(item).toContainText('Canvas is ready')
+    await expect(page.getByRole('button', { name: /^Trash/ })).toHaveCount(0)
+    expect(readFileSync(REGISTRY, 'utf8')).toBe(original)
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
 })
 
 test('copied annotations ask for a new version by default', async ({ page, context }) => {
@@ -694,15 +714,22 @@ test('a shared file works from disk, frames included, without the agent tools', 
   const copy = 'design-canvas/smoke-shared'
   cpSync('design-canvas/smoke', copy, { recursive: true })
   const registry = readFileSync(`${copy}/registry.tsx`, 'utf8')
-  const phone = '  { id: "phone", name: "Phone", component: Example, x: 0, y: 240, width: 375, height: 180, viewport: true },\n];'
-  writeFileSync(`${copy}/registry.tsx`, registry.replace(/\];\s*$/, `${phone}\n`))
-  const file = join(mkdtempSync(join(tmpdir(), 'design-canvas-share-')), 'canvas.html')
+  // And an item in the trash, which the shared file must not show on the canvas.
+  const added =
+    '  { id: "phone", name: "Phone", component: Example, x: 0, y: 240, width: 375, height: 180, viewport: true },\n' +
+    '  { id: "old", name: "Old", component: Example, x: 400, y: 0, width: 360, height: 180, trashed: true },\n];'
+  writeFileSync(`${copy}/registry.tsx`, registry.replace(/\];\s*$/, `${added}\n`))
+  const folder = mkdtempSync(join(tmpdir(), 'design-canvas-share-'))
+  const file = join(folder, 'canvas.html')
   try {
     const shared = spawnSync('bash', [SHARE, copy, file], { encoding: 'utf8' })
     expect(shared.status, shared.stderr).toBe(0)
     const url = pathToFileURL(file).href
     await page.goto(url)
-    await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toContainText('Canvas is ready')
+    const example = page.locator('.canvas-item[data-canvas-item="example"]')
+    await expect(example).toContainText('Canvas is ready')
+    await expect(page.locator('.canvas-item[data-canvas-item="old"]')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Trash, 1 item' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Request change', exact: true })).toHaveCount(0)
     await expect(page.locator('#canvas-help')).not.toContainText('Press A')
     const frame = page.locator('.canvas-item[data-canvas-item="phone"] iframe')
@@ -716,6 +743,19 @@ test('a shared file works from disk, frames included, without the agent tools', 
     await page.mouse.move(box!.x + 40, box!.y + 40)
     await page.mouse.wheel(0, 120)
     await expect.poll(() => world.evaluate((element) => getComputedStyle(element).transform)).not.toBe(before)
+    // What a viewer changes stays across a reload of that file, and a newer file of the
+    // same canvas opens as it was shared: files on disk share one origin, and so storage.
+    await page.getByRole('button', { name: 'Move Example · replace me to the trash' }).click()
+    await expect(example).toHaveCount(0)
+    await page.reload()
+    await expect(page.getByRole('button', { name: 'Trash, 2 items' })).toBeVisible()
+    await expect(example).toHaveCount(0)
+    const newer = join(folder, 'canvas-newer.html')
+    const sharedAgain = spawnSync('bash', [SHARE, copy, newer], { encoding: 'utf8' })
+    expect(sharedAgain.status, sharedAgain.stderr).toBe(0)
+    await page.goto(pathToFileURL(newer).href)
+    await expect(example).toContainText('Canvas is ready')
+    await expect(page.getByRole('button', { name: 'Trash, 1 item' })).toBeVisible()
     // The same file shows one item alone.
     await page.goto(`${url}?item=example`)
     await expect(page.locator('.canvas-frame-root')).toContainText('Canvas is ready')

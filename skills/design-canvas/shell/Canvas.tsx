@@ -44,6 +44,7 @@ import {
   postToFrame,
   readFrameMessage,
   shared,
+  sharedStorageKey,
 } from "./bridge";
 import { FrameHost } from "./FrameHost";
 import {
@@ -912,8 +913,9 @@ type CanvasProps = {
  * so there it also shows single items and item frames (see frameParams).
  */
 export function Canvas(props: CanvasProps) {
-  if (shared && frameParams().has("item")) return <FrameHost {...props} />;
-  return <CanvasBoard {...props} />;
+  const storageKey = sharedStorageKey(props.storageKey);
+  if (shared && frameParams().has("item")) return <FrameHost {...props} storageKey={storageKey} />;
+  return <CanvasBoard {...props} storageKey={storageKey} />;
 }
 
 function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: sectionsProp = NO_SECTIONS, storageKey, theme }: CanvasProps) {
@@ -947,8 +949,12 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
   // New registry entries appear at their source position until placed.
   const resolved = (item: CanvasItem) => positions[item.id] ?? { x: item.x, y: item.y };
   // The trash hides items on the canvas only; their code stays in the registry,
-  // so any of them can be put back. Most recently trashed first.
-  const [trash, setTrashState] = useState<string[]>(() => saved.trash);
+  // so any of them can be put back. Most recently trashed first. Like positions,
+  // the browser's saved trash wins and is written into the registry (`trashed`);
+  // for items the browser has not seen, as in a new browser or a shared file, the registry's is used.
+  const [trash, setTrashState] = useState<string[]>(() => [
+    ...new Set([...saved.trash, ...items.filter((item) => item.trashed && !saved.positions[item.id]).map((item) => item.id)]),
+  ]);
   const trashRef = useRef(trash);
   const shown = useMemo(() => items.filter((item) => !trash.includes(item.id)), [items, trash]);
   const shownIds = useMemo(() => new Set(shown.map((item) => item.id)), [shown]);
@@ -2427,6 +2433,41 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     },
     [closeAnnotation, notify, putBack, setTrash],
   );
+
+  // The trash is written into the registry as `trashed`, like a move, so the shared
+  // file and the next session start with it. Writes still on their way, by item.
+  const trashWrites = useRef(new Map<string, boolean>());
+  const registryTrash = useRef<Map<string, boolean> | null>(null);
+  // `trashed` changed in source while the canvas is open, by the agent or a pull: follow it.
+  useEffect(() => {
+    const before = registryTrash.current;
+    registryTrash.current = new Map(items.map((item) => [item.id, !!item.trashed]));
+    if (!before) return;
+    const changed = items.filter((item) => (before.get(item.id) ?? false) !== !!item.trashed && !trashWrites.current.has(item.id));
+    const into = changed.filter((item) => item.trashed && !trashRef.current.includes(item.id)).map((item) => item.id);
+    if (into.length) setTrash([...into, ...trashRef.current]);
+    for (const item of changed) if (!item.trashed && trashRef.current.includes(item.id)) putBack(item);
+  }, [items, putBack, setTrash]);
+  useEffect(() => {
+    if (shared) return;
+    // The ref, not `trash`: the effect above may have just changed it in this same commit.
+    const inTrash = new Set(trashRef.current);
+    const edits: DirectEdit[] = [];
+    for (const item of items) {
+      const want = inTrash.has(item.id);
+      if (!!item.trashed === want) trashWrites.current.delete(item.id);
+      else if (trashWrites.current.get(item.id) !== want) {
+        trashWrites.current.set(item.id, want);
+        edits.push({ kind: "item", id: item.id, set: { trashed: want } });
+      }
+    }
+    if (!edits.length) return;
+    // A write the registry refuses leaves that change in this browser only, as the trash always was.
+    void fetch(EDIT_PATH, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ edits }) }).catch(
+      () => {},
+    );
+  }, [items, trash]);
+
   const closeSharePanel = useCallback(() => {
     setSharedFile(null);
     shareButtonRef.current?.focus({ preventScroll: true });

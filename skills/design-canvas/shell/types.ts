@@ -24,6 +24,12 @@ export type CanvasItem = {
    * annotations.
    */
   from?: string;
+  /**
+   * In the canvas trash: hidden on the canvas, its code kept. The canvas writes
+   * it when the person moves the item to the trash and removes it when they put
+   * the item back, so the shared file and the next session start with the same trash.
+   */
+  trashed?: boolean;
 };
 
 /**

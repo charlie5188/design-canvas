@@ -99,6 +99,8 @@ Run `scripts/listen.sh <canvas-url>` in a terminal as the agent would.
 - Opening the trash focuses its first entry; Escape closes it and returns focus to the button, and pressing outside it closes it. At 375 px it shows two columns inside the window.
 - Picking an entry closes the trash and puts the item back where it was, or beside its row if that spot is now taken, then brings it into view and to the front. The trash button goes away when the trash is empty.
 - Show all and links to `#<item-id>` ignore trashed items. The trash survives reload; ids no longer in the registry drop out.
+- Moving an item to the trash writes `trashed: true` into its registry entry, and putting it back removes it, leaving the entry as it was. A trash saved only in the browser, by an older shell, is written on the next load.
+- Changing `trashed` in source while the canvas is open moves that item into or out of the trash. A new item with `trashed: true` starts in the trash.
 
 ## New versions
 
@@ -119,7 +121,8 @@ Run `scripts/share.sh` on a canvas with a `viewport` item, and open the file fro
 - Wheel, pinch, Space-drag, and Alt-click over a `viewport` item reach the canvas, as on the dev server.
 - The open-alone icon opens the same file with `?item=<id>`, which shows that item alone. Inside another page the file has no address to open, so the icon is not there.
 - Inside another page, every `viewport` frame renders, and wheel over one still pans the canvas.
-- Reload keeps the layout.
+- Items in the trash on the canvas start in the shared file's trash, not on the canvas.
+- Reload keeps the layout. A newer shared file of the same canvas opens as it was shared, not with the layout saved in an older one.
 - On the dev server, the Share icon button (tooltip "Share as an HTML file") dims, pulses, and takes no second click while the file builds, then downloads `<canvas-name>-<date>.html` without reloading the page.
 - After the download, a panel under the Share button names the file, any file it could not include, and how to open it, send it, or put it in Figma or Notion. Escape, its close button, or a press outside closes it and returns focus to Share; opening the trash closes it too.
 
