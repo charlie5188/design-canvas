@@ -100,7 +100,9 @@ Run `scripts/listen.sh <canvas-url>` in a terminal as the agent would.
 - Picking an entry closes the trash and puts the item back where it was, or beside its row if that spot is now taken, then brings it into view and to the front. The trash button goes away when the trash is empty.
 - Show all and links to `#<item-id>` ignore trashed items. The trash survives reload; ids no longer in the registry drop out.
 - Moving an item to the trash writes `trashed: true` into its registry entry, and putting it back removes it, leaving the entry as it was. A trash saved only in the browser, by an older shell, is written on the next load.
-- Changing `trashed` in source while the canvas is open moves that item into or out of the trash. A new item with `trashed: true` starts in the trash.
+- Changing `trashed` in source moves that item into or out of the trash on every open canvas. A new item with `trashed: true` starts in the trash.
+- Opening the canvas never changes `trashed` in the registry, even in a tab or browser whose saved trash differs: it shows the registry's trash. Only moving an item into or out of the trash writes it.
+- An item whose `trashed` cannot be written (its entry is not found exactly once) stays in the trash in this browser, across reloads.
 
 ## New versions
 
