@@ -55,8 +55,10 @@ Prices and limits are as of November 2026 and change often. Check each link for 
 ## Install
 
 ```sh
-npx skills add charlie5188/design-canvas
+npx skills add charlie5188/design-canvas --skill '*'
 ```
+
+This installs two skills. `design-canvas` builds the canvas. `design-directions` helps the agent make directions that are clearly different from each other, after it looks at how other products, and their help docs, solve the same job. The canvas works without it, but its directions are more likely to look alike.
 
 Then ask your agent, for example:
 
@@ -84,6 +86,7 @@ The file is a snapshot, so share again after changes. It holds every item's data
 - `skills/design-canvas/scripts/share.sh`: builds a canvas into one self-contained HTML file in `<canvas>/shared/`, with every script, style, image, and font inside it, including files from the app's public folder. The toolbar's Share button builds the same file through the dev server and downloads it.
 - `skills/design-canvas/scripts/check-version.sh`: when a canvas is installed or updated, reads the skill's version number from this repository on GitHub, and the agent tells you when a newer version is out. Set `DESIGN_CANVAS_NO_UPDATE_CHECK=1` to turn it off.
 - `skills/design-canvas/references/making-a-kit.md`: the checklist the agent follows to finish fitting your app, and how to save that fit as a private kit in `~/.agents/design-canvas-kits/` so the next install needs none.
+- `skills/design-directions/SKILL.md`: how the agent plans directions before it builds them. It looks at how a few real products solve the same job, keeps the product's design system fixed, gives each direction one bet in its structure, and reworks any two that look alike. Your own instructions about directions come first.
 
 Canvases are prototypes. Commit one only when teammates need to change it; to let people try it, share it as a file.
 
@@ -157,8 +160,10 @@ design-canvas にはデザインファイルがありません。キャンバス
 ### インストール
 
 ```sh
-npx skills add charlie5188/design-canvas
+npx skills add charlie5188/design-canvas --skill '*'
 ```
+
+2 つのスキルが入ります。`design-canvas` はキャンバスを作ります。`design-directions` は、他の製品やそのヘルプ記事が同じ課題をどう解いているかを調べたうえで、互いにはっきり違う方向性をエージェントが作れるようにします。キャンバスはこれがなくても動きますが、方向性が似たものになりやすくなります。
 
 あとはエージェントに、たとえばこう頼みます。
 
@@ -186,6 +191,7 @@ npx skills add charlie5188/design-canvas
 - `skills/design-canvas/scripts/share.sh`：キャンバスを、スクリプト、スタイル、画像、フォント（アプリの public フォルダのファイルも含む）をすべて含む 1 つの HTML ファイルにして、`<canvas>/shared/` に保存します。ツールバーの Share ボタンは、開発サーバーで同じファイルを作ってダウンロードします。
 - `skills/design-canvas/scripts/check-version.sh`：キャンバスのインストール時と更新時に、GitHub 上のこのリポジトリからスキルのバージョン番号を読み取ります。新しいバージョンが出ていれば、エージェントが知らせます。オフにするには `DESIGN_CANVAS_NO_UPDATE_CHECK=1` を設定します。
 - `skills/design-canvas/references/making-a-kit.md`：アプリへの設定を仕上げるためにエージェントが使うチェックリストです。仕上がった設定を `~/.agents/design-canvas-kits/` にプライベートキットとして保存し、次回からは設定なしでインストールする方法も書かれています。
+- `skills/design-directions/SKILL.md`：エージェントが方向性を作る前の進め方です。いくつかの実在する製品が同じ課題をどう解いているかを調べ、製品のデザインシステムは変えずに、各方向性に構造上の賭けを 1 つずつ持たせ、似すぎた 2 つは作り直します。方向性についてのユーザー自身の指示が優先されます。
 
 キャンバスはプロトタイプです。チームメンバーが変更する必要があるときだけコミットしてください。試してもらうだけなら、ファイルとして共有できます。
 
