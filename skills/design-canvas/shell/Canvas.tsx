@@ -1030,15 +1030,26 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     frame.current = requestAnimationFrame(() => {
       frame.current = 0;
       const { x, y, z } = camera.current;
+      // Each frame of a pan or zoom touches the page as little as it can. Adding or
+      // removing any node (setting textContent does both) makes the browser re-check
+      // `:has()` rules up the whole tree, and an item's or the app's CSS often has some:
+      // on a canvas of plain items that meant restyling every element on every frame
+      // (~35 ms). So nothing is written that did not change, and the zoom label edits
+      // its text node in place instead of replacing it.
       if (worldRef.current) {
         worldRef.current.style.transform = `translate(${x}px, ${y}px) scale(${z})`;
         // Annotation pins counter-scale with this, so they keep one size on screen.
-        worldRef.current.style.setProperty("--canvas-unzoom", String(1 / z));
+        const unzoom = String(1 / z);
+        if (worldRef.current.style.getPropertyValue("--canvas-unzoom") !== unzoom) worldRef.current.style.setProperty("--canvas-unzoom", unzoom);
       }
       // The outline is drawn in screen space; after the camera moves it would
       // point at the wrong place, so it waits for the next pointer move.
-      if (pickRef.current) pickRef.current.hidden = true;
-      if (zoomLabelRef.current) zoomLabelRef.current.textContent = `${Math.round(z * 100)}%`;
+      if (pickRef.current && !pickRef.current.hidden) pickRef.current.hidden = true;
+      const label = zoomLabelRef.current?.firstChild;
+      const zoomText = `${Math.round(z * 100)}%`;
+      if (label instanceof Text) {
+        if (label.data !== zoomText) label.data = zoomText;
+      } else if (zoomLabelRef.current) zoomLabelRef.current.textContent = zoomText;
     });
   }, []);
 
