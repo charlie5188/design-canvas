@@ -595,6 +595,10 @@ function ItemCaption({ text, editable, onSave }: { text: string; editable: boole
   );
 }
 
+/** The eight places an item can be grabbed to resize it, like the border of an OS window. */
+type ResizeEdge = Corner | "n" | "s" | "e" | "w";
+const RESIZE_EDGES: ResizeEdge[] = ["n", "s", "e", "w", "nw", "ne", "sw", "se"];
+
 function CanvasItemView({
   item,
   position,
@@ -624,7 +628,7 @@ function CanvasItemView({
   onTitlePointerDown: (event: ReactPointerEvent<HTMLElement>, item: CanvasItem) => void;
   onHandleKey: (item: CanvasItem, dx: number, dy: number) => void;
   /** Absent where nothing can be saved or while annotating. */
-  onResize?: (event: ReactPointerEvent<HTMLElement>, item: CanvasItem, corner: Corner) => void;
+  onResize?: (event: ReactPointerEvent<HTMLElement>, item: CanvasItem, edge: ResizeEdge) => void;
   announce: (text: string) => void;
   /** This item's annotations with their list numbers. */
   pins: { annotation: Annotation; number?: number }[];
@@ -717,14 +721,9 @@ function CanvasItemView({
           {item.viewport ? <ItemFrame item={item} /> : <Preview component={item.component} />}
         </div>
         {onResize &&
-          (["nw", "ne", "sw", "se"] as const).map((corner) => (
-            <span
-              key={corner}
-              className="canvas-resize canvas-item-resize"
-              data-corner={corner}
-              aria-hidden="true"
-              onPointerDown={(event) => onResize(event, item, corner)}
-            />
+          RESIZE_EDGES.map((edge) => (
+            // Invisible: only the cursor changes over them, like an OS window's border.
+            <span key={edge} className="canvas-item-edge" data-edge={edge} aria-hidden="true" onPointerDown={(event) => onResize(event, item, edge)} />
           ))}
         {pins.length > 0 && (
           <div className="canvas-pins">
@@ -2326,8 +2325,8 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
   // where it is, so a north or west grip also moves the item (the move saves
   // itself like any other). Width and height are what `viewport` items use
   // for their breakpoints, so the frame re-lays-out as it is dragged.
-  const resizeItemImpl = useRef<(event: ReactPointerEvent<HTMLElement>, item: CanvasItem, corner: Corner) => void>(() => {});
-  resizeItemImpl.current = (event, item, corner) => {
+  const resizeItemImpl = useRef<(event: ReactPointerEvent<HTMLElement>, item: CanvasItem, edge: ResizeEdge) => void>(() => {});
+  resizeItemImpl.current = (event, item, edge) => {
     if (event.button !== 0 || spaceArmed.current || boardToolRef.current) return;
     event.stopPropagation();
     event.preventDefault();
@@ -2335,20 +2334,23 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     const w0 = item.width;
     const h0 = item.height;
     const least = item.viewport ? { w: 200, h: 120 } : { w: 80, h: 40 };
-    const east = corner.endsWith("e");
-    const south = corner.startsWith("s");
+    const east = edge.includes("e");
+    const west = edge.includes("w");
+    const south = edge.includes("s");
+    const north = edge.includes("n");
     dragBoard(
       event,
       () => {},
       (dx, dy) => {
-        const w = Math.round(Math.max(least.w, w0 + (east ? dx : -dx)));
-        const h = Math.round(Math.max(least.h, h0 + (south ? dy : -dy)));
+        // An edge changes one dimension, a corner both.
+        const w = Math.round(Math.max(least.w, east ? w0 + dx : west ? w0 - dx : w0));
+        const h = Math.round(Math.max(least.h, south ? h0 + dy : north ? h0 - dy : h0));
         const raw = itemsRawRef.current.find((entry) => entry.id === item.id);
         if (!raw) return;
         setSizes((prev) => ({ ...prev, [item.id]: { w, h, bw: raw.width, bh: raw.height } }));
-        if (!east || !south) {
-          const x = east ? origin.x : origin.x + w0 - w;
-          const y = south ? origin.y : origin.y + h0 - h;
+        if (west || north) {
+          const x = west ? origin.x + w0 - w : origin.x;
+          const y = north ? origin.y + h0 - h : origin.y;
           setPositions((prev) => ({ ...prev, [item.id]: { x, y } }));
         }
       },
@@ -2356,7 +2358,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     );
   };
   const onResizeItem = useCallback(
-    (event: ReactPointerEvent<HTMLElement>, item: CanvasItem, corner: Corner) => resizeItemImpl.current(event, item, corner),
+    (event: ReactPointerEvent<HTMLElement>, item: CanvasItem, edge: ResizeEdge) => resizeItemImpl.current(event, item, edge),
     [],
   );
 
