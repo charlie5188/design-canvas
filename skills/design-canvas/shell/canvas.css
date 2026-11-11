@@ -1004,6 +1004,75 @@ html[data-canvas-alt] .canvas-frame-root * {
   transform-origin: center;
 }
 
+/* An item resizes from its border like an OS window: invisible grab zones that
+   straddle the edge, one size on screen at any zoom, with only the cursor
+   changing. Corners come after edges in the markup, so they win where they meet. */
+.canvas-item-edge {
+  --edge: calc(10px * var(--canvas-unzoom, 1));
+  position: absolute;
+  z-index: 3;
+  touch-action: none;
+}
+.canvas-item-edge[data-edge="n"],
+.canvas-item-edge[data-edge="s"] {
+  inset-inline: 0;
+  block-size: var(--edge);
+  cursor: ns-resize;
+}
+.canvas-item-edge[data-edge="e"],
+.canvas-item-edge[data-edge="w"] {
+  inset-block: 0;
+  inline-size: var(--edge);
+  cursor: ew-resize;
+}
+.canvas-item-edge[data-edge="n"] {
+  inset-block-start: 0;
+  translate: 0 -50%;
+}
+.canvas-item-edge[data-edge="s"] {
+  inset-block-end: 0;
+  translate: 0 50%;
+}
+.canvas-item-edge[data-edge="w"] {
+  inset-inline-start: 0;
+  translate: -50% 0;
+}
+.canvas-item-edge[data-edge="e"] {
+  inset-inline-end: 0;
+  translate: 50% 0;
+}
+.canvas-item-edge[data-edge="nw"],
+.canvas-item-edge[data-edge="ne"],
+.canvas-item-edge[data-edge="sw"],
+.canvas-item-edge[data-edge="se"] {
+  inline-size: calc(var(--edge) * 1.6);
+  block-size: calc(var(--edge) * 1.6);
+}
+.canvas-item-edge[data-edge="nw"] {
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  translate: -50% -50%;
+  cursor: nwse-resize;
+}
+.canvas-item-edge[data-edge="ne"] {
+  inset-block-start: 0;
+  inset-inline-end: 0;
+  translate: 50% -50%;
+  cursor: nesw-resize;
+}
+.canvas-item-edge[data-edge="sw"] {
+  inset-block-end: 0;
+  inset-inline-start: 0;
+  translate: -50% 50%;
+  cursor: nesw-resize;
+}
+.canvas-item-edge[data-edge="se"] {
+  inset-block-end: 0;
+  inset-inline-end: 0;
+  translate: 50% 50%;
+  cursor: nwse-resize;
+}
+
 /* While a Note or Section tool is armed, the whole canvas takes the press, and
    the cursor says so. */
 .canvas-viewport[data-board-tool],
