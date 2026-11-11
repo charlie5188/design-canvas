@@ -51,6 +51,8 @@ fi
 mkdir -p "$dest/canvas"
 rsync -a --exclude kit.env --exclude setup.sh "$kit_dir/" "$dest/"
 rsync -a --exclude TESTING.md "$skill_dir/shell/" "$dest/canvas/"
+# The canvas page compares this with the newest version to offer an update.
+cp "$skill_dir/VERSION" "$dest/canvas/VERSION"
 
 # A stable port per canvas folder (4300-4999), so each canvas keeps one URL and
 # its own saved layout, and an open tab never reloads into another canvas.

@@ -42,7 +42,7 @@ rm "$canvas/annotations.ts"
 echo '// older' >> "$canvas/Canvas.tsx"
 touch "$canvas/dropped.ts"
 bash ../../skills/design-canvas/scripts/update.sh design-canvas/smoke
-diff -r -x TESTING.md ../../skills/design-canvas/shell "$canvas"
+diff -r -x TESTING.md -x VERSION ../../skills/design-canvas/shell "$canvas"
 bash ../../skills/design-canvas/scripts/update.sh design-canvas/smoke | grep -q 'already up to date'
 
 step "Typecheck the canvas"
