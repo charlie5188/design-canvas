@@ -21,7 +21,7 @@ dir="${dir%/}"
   die "$dir is not a canvas with the React shell (expected registry.tsx and canvas/Canvas.tsx). Pass the canvas folder, usually <app>/design-canvas/<name>. A shell ported to another framework takes shell changes by hand."
 
 # TESTING.md is not installed, and Finder's .DS_Store is not part of the shell.
-skip() { [[ "$1" == TESTING.md || "$(basename "$1")" == .DS_Store ]]; }
+skip() { [[ "$1" == TESTING.md || "$1" == VERSION || "$(basename "$1")" == .DS_Store ]]; }
 
 changes=""
 while IFS= read -r -d '' f; do
@@ -45,8 +45,10 @@ channel_note() {
 if [[ -z "$changes" ]]; then
   echo "The canvas is already up to date: $dir"
 else
-  rsync -a --delete --exclude TESTING.md --exclude .DS_Store "$shell/" "$dir/canvas/"
+  rsync -a --delete --exclude TESTING.md --exclude VERSION --exclude .DS_Store "$shell/" "$dir/canvas/"
   printf 'Updated the canvas shell in %s:\n%s' "$dir" "$changes"
 fi
+# Written after the sync, so a canvas that was already current still learns its version.
+cp "$skill_dir/VERSION" "$dir/canvas/VERSION"
 channel_note
 bash "$skill_dir/scripts/check-version.sh" || true

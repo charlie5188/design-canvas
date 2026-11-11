@@ -524,6 +524,30 @@ test('opening a canvas with generated entries warns before the first drag', asyn
   }
 })
 
+test('a newer version shows one notice, and its button copies a request for the agent', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  await page.route('**/__design-canvas/version', (route) => route.fulfill({ json: { current: 13, latest: 99, folder: '/work/my-canvas' } }))
+  await page.goto('/')
+  const toast = page.locator('.canvas-toast')
+  await expect(toast).toContainText('Version 99 of this canvas is out')
+  await toast.getByRole('button', { name: 'Ask the agent to update' }).click()
+  await expect(toast).toContainText('Paste it to the agent')
+  const copied = await page.evaluate(() => navigator.clipboard.readText())
+  expect(copied).toContain('scripts/update.sh')
+  expect(copied).toContain('/work/my-canvas')
+  // The same version is not offered again in this browser.
+  await page.reload()
+  await page.waitForTimeout(600)
+  await expect(page.locator('.canvas-toast')).toHaveCount(0)
+})
+
+test('the dev server knows the canvas version', async ({ page }) => {
+  await page.goto('/')
+  const v = (await (await page.request.get('/__design-canvas/version')).json()) as { current: number | null; folder: string }
+  expect(v.current).toBe(Number(readFileSync('../../skills/design-canvas/VERSION', 'utf8')))
+  expect(v.folder).toContain('smoke')
+})
+
 test('a save the dev server cannot take says why, and the change waits for the agent', async ({ page }) => {
   // A server started before the canvas was updated does not know the route.
   await page.route('**/__design-canvas/edit', (route) => route.fulfill({ status: 404, body: 'not found' }))
