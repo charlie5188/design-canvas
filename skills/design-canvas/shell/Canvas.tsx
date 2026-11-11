@@ -83,7 +83,7 @@ import {
 } from "./layout";
 import { type ThemeStore, useThemeId } from "./theme";
 import type { CanvasItem, CanvasNote, CanvasSection } from "./types";
-import { EDIT_PATH } from "./channel.ts";
+import { EDIT_PATH, VERSION_PATH } from "./channel.ts";
 import type { DirectAdd, DirectEdit, DirectRemove } from "./registry-edit.ts";
 import "./canvas.css";
 
@@ -1030,15 +1030,26 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     frame.current = requestAnimationFrame(() => {
       frame.current = 0;
       const { x, y, z } = camera.current;
+      // Each frame of a pan or zoom touches the page as little as it can. Adding or
+      // removing any node (setting textContent does both) makes the browser re-check
+      // `:has()` rules up the whole tree, and an item's or the app's CSS often has some:
+      // on a canvas of plain items that meant restyling every element on every frame
+      // (~35 ms). So nothing is written that did not change, and the zoom label edits
+      // its text node in place instead of replacing it.
       if (worldRef.current) {
         worldRef.current.style.transform = `translate(${x}px, ${y}px) scale(${z})`;
         // Annotation pins counter-scale with this, so they keep one size on screen.
-        worldRef.current.style.setProperty("--canvas-unzoom", String(1 / z));
+        const unzoom = String(1 / z);
+        if (worldRef.current.style.getPropertyValue("--canvas-unzoom") !== unzoom) worldRef.current.style.setProperty("--canvas-unzoom", unzoom);
       }
       // The outline is drawn in screen space; after the camera moves it would
       // point at the wrong place, so it waits for the next pointer move.
-      if (pickRef.current) pickRef.current.hidden = true;
-      if (zoomLabelRef.current) zoomLabelRef.current.textContent = `${Math.round(z * 100)}%`;
+      if (pickRef.current && !pickRef.current.hidden) pickRef.current.hidden = true;
+      const label = zoomLabelRef.current?.firstChild;
+      const zoomText = `${Math.round(z * 100)}%`;
+      if (label instanceof Text) {
+        if (label.data !== zoomText) label.data = zoomText;
+      } else if (zoomLabelRef.current) zoomLabelRef.current.textContent = zoomText;
     });
   }, []);
 
@@ -1125,6 +1136,46 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
         const ok = new Set(result.placeable);
         const bad = items.filter((item) => !ok.has(item.id)).map((item) => item.id);
         if (bad.length) notify(labels.registryGenerated(bad.slice(0, 3).join(", ") + (bad.length > 3 ? ` and ${bad.length - 3} more` : "")), undefined, true);
+      })
+      .catch(() => {});
+  }, [shared, items, notify]);
+  // A newer version of the skill than this canvas has: one notice per version, with a button that asks the agent
+  // to update (the agent knows whether the skill is a git checkout or an npx copy). With no agent listening,
+  // the same request is copied instead. Silent when the server cannot tell, so an old server shows nothing.
+  const askedUpdate = useRef(false);
+  useEffect(() => {
+    if (shared || askedUpdate.current || !items.length) return;
+    askedUpdate.current = true;
+    fetch(VERSION_PATH)
+      .then((response) => (response.ok ? (response.json() as Promise<{ current?: unknown; latest?: unknown; folder?: unknown }>) : undefined))
+      .then((v) => {
+        if (!v || typeof v.current !== "number" || typeof v.latest !== "number" || typeof v.folder !== "string" || v.latest <= v.current) return;
+        const key = `design-canvas:update-notice:${v.latest}`;
+        try {
+          if (localStorage.getItem(key)) return;
+          localStorage.setItem(key, "1");
+        } catch {
+          // Without storage the notice shows each time the canvas opens.
+        }
+        const request = labels.updateRequest(v.folder, v.current, v.latest);
+        notify(
+          labels.updateAvailable(v.latest),
+          {
+            label: labels.updateAsk,
+            run: () => {
+              void sendToAgent(request).then(async (result) => {
+                if (result.delivered) return notify(labels.updateSent);
+                try {
+                  await writeClipboard(request);
+                  notify(labels.updateCopied);
+                } catch {
+                  notify(labels.updateCopied, undefined, true);
+                }
+              });
+            },
+          },
+          true,
+        );
       })
       .catch(() => {});
   }, [shared, items, notify]);

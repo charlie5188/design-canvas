@@ -28,13 +28,13 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Plugin } from "vite";
-import { AGENT_EVENT, AGENT_PATH, EDIT_PATH, SHARE_PATH } from "./channel.ts";
+import { AGENT_EVENT, AGENT_PATH, EDIT_PATH, SHARE_PATH, VERSION_PATH } from "./channel.ts";
 import { addEntry, applyEdits, type DirectAdd, type DirectEdit, type DirectRemove, placeableItems, removeEntry, validAdd, validEdit, validRemove } from "./registry-edit.ts";
 
 export type AgentState = "off" | "listening" | "working";
 /** What the page hears: `finished` only on the update that ends `handling` because the agent said done. */
 export type AgentStatus = { state: AgentState; handling: boolean; finished?: boolean };
-export { AGENT_EVENT, AGENT_PATH, EDIT_PATH, SHARE_PATH } from "./channel.ts";
+export { AGENT_EVENT, AGENT_PATH, EDIT_PATH, SHARE_PATH, VERSION_PATH } from "./channel.ts";
 /** The shared file the Share button downloads, and the files that could not go inside it. */
 export type SharedFile = { name: string; html: string; missing: string[] };
 
@@ -346,6 +346,37 @@ export function agentChannel(): Plugin {
             );
           },
           () => send(response, 413, "Too large"),
+        );
+      });
+
+      // The canvas's own version (written by install.sh and update.sh) and GitHub's newest, asked at most once an hour.
+      // Offline, or with DESIGN_CANVAS_NO_UPDATE_CHECK set, there is no answer, and the page shows nothing.
+      let latest: { at: number; value: number | null } | undefined;
+      const newest = async () => {
+        if (process.env.DESIGN_CANVAS_NO_UPDATE_CHECK) return null;
+        if (latest && Date.now() - latest.at < 3_600_000) return latest.value;
+        const url = process.env.DESIGN_CANVAS_VERSION_URL ?? "https://raw.githubusercontent.com/charlie5188/design-canvas/main/skills/design-canvas/VERSION";
+        let value: number | null = null;
+        try {
+          const response = await fetch(url, { signal: AbortSignal.timeout(3000) });
+          const number = parseInt((await response.text()).replace(/\D/g, ""), 10);
+          if (response.ok && Number.isFinite(number)) value = number;
+        } catch {
+          // Offline: no answer.
+        }
+        latest = { at: Date.now(), value };
+        return value;
+      };
+      server.middlewares.use(VERSION_PATH, (request, response, next) => {
+        if (request.method !== "GET" || (request.url ?? "/") !== "/") return next();
+        // A same-origin GET carries no Origin header, so the Host check alone applies; it reads only version numbers and this folder's path.
+        if (!localHost(request)) return send(response, 403, "Not allowed");
+        Promise.all([readFile(join(server.config.root, "canvas", "VERSION"), "utf8").catch(() => ""), newest()]).then(
+          ([own, newer]) => {
+            const current = parseInt(own.replace(/\D/g, ""), 10);
+            sendJson(response, { current: Number.isFinite(current) ? current : null, latest: newer, folder: server.config.root });
+          },
+          (error: unknown) => send(response, 500, error instanceof Error ? error.message : String(error)),
         );
       });
 

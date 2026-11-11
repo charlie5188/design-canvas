@@ -199,6 +199,11 @@ body,
   user-select: all;
 }
 .canvas-preview {
+  /* A fence: --canvas-unzoom changes on every zoom frame and is inherited, so
+     without this every element of every item restyled with it (~35 ms a frame
+     on a canvas of plain items). Nothing inside a preview uses it; the pins
+     and resize edges that do are its siblings. */
+  --canvas-unzoom: 1;
   position: relative;
   overflow: hidden;
   border: 1px solid var(--canvas-border-color);
