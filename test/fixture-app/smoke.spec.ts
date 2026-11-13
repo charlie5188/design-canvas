@@ -685,6 +685,12 @@ async function withSection(page: Page, original: string) {
   )
   expect(sectioned).not.toBe(original)
   writeFileSync(REGISTRY, sectioned)
+  // Loaded only once the dev server serves the new registry. On a slow machine the
+  // page could otherwise load the old one before the server sees the file change,
+  // and miss the hot update that follows.
+  await expect
+    .poll(async () => (await (await page.request.get('/registry.tsx')).text()).includes('id: "group"'), { timeout: 15_000 })
+    .toBe(true)
   await page.goto('/')
   await expect(page.locator('.canvas-section[data-board-id="group"]')).toBeVisible()
   await page.waitForTimeout(600)
