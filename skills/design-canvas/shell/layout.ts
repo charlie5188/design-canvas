@@ -61,10 +61,11 @@ export function zoomAt(camera: Camera, factor: number, px: number, py: number): 
   return { x: px - worldX * z, y: py - worldY * z, z };
 }
 
-export function fitBounds(bounds: Bounds, width: number, height: number, padding = 48): Camera {
+/** The camera that shows `bounds` whole and centred. `max` caps the zoom: fit all stops at 100%, a zoom to an area may go further. */
+export function fitBounds(bounds: Bounds, width: number, height: number, padding = 48, max = 1): Camera {
   const w = Math.max(1, bounds.maxX - bounds.minX);
   const h = Math.max(1, bounds.maxY - bounds.minY);
-  const z = clampZoom(Math.min((width - padding * 2) / w, (height - padding * 2) / h, 1));
+  const z = clampZoom(Math.min((width - padding * 2) / w, (height - padding * 2) / h, max));
   return {
     x: (width - w * z) / 2 - bounds.minX * z,
     y: (height - h * z) / 2 - bounds.minY * z,

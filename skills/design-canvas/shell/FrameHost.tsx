@@ -7,6 +7,9 @@ import type { ThemeStore } from "./theme";
 import type { CanvasItem } from "./types";
 import "./canvas.css";
 
+/** Z by key position or by letter: Alt changes the letter on a Mac (Ω), and other layouts move the key. */
+const zoomKey = (event: KeyboardEvent) => event.code === "KeyZ" || event.key === "z" || event.key === "Z";
+
 /**
  * One canvas item alone, at its real size. The canvas loads it in an iframe
  * for `viewport` items; opened directly (frame.html?item=<id>) it is a clean
@@ -68,19 +71,25 @@ export function FrameHost({
       if (event.key === "Alt" && pointer.x >= 0) showPick(document.elementFromPoint(pointer.x, pointer.y));
       // Keys inside a frame never reach the canvas page, so Escape is handed over.
       if (event.key === "Escape" && annotating) postToCanvas({ type: "escape" });
-      if (event.code !== "Space" || event.repeat) return;
       const active = document.activeElement;
-      if (active && active !== document.body && isEditable(active)) return;
+      const typing = !!active && active !== document.body && isEditable(active);
+      // Z held is the canvas's zoom, as in Figma, unless a field here takes the letter.
+      if (zoomKey(event) && !event.metaKey && !event.ctrlKey && !typing && !event.repeat) {
+        postToCanvas({ type: "zoom-key", down: true, out: event.altKey });
+      }
+      if (event.code !== "Space" || event.repeat || typing) return;
       event.preventDefault();
       postToCanvas({ type: "space", down: true });
     };
     const onKeyUp = (event: KeyboardEvent) => {
       if (event.code === "Space") postToCanvas({ type: "space", down: false });
+      if (zoomKey(event)) postToCanvas({ type: "zoom-key", down: false, out: false });
       if (event.key === "Alt") document.documentElement.removeAttribute("data-canvas-alt");
       if (event.key === "Alt" && !annotating) hidePick();
     };
     const onBlur = () => {
       postToCanvas({ type: "space", down: false });
+      postToCanvas({ type: "zoom-key", down: false, out: false });
       hidePick();
       cancelDraw();
       document.documentElement.removeAttribute("data-canvas-alt");

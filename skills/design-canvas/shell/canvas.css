@@ -217,12 +217,14 @@ body,
   display: block;
   border: 0;
 }
-/* While Space is held or a gesture runs, frames let the canvas take the pointer. */
+/* While Space or Z is held or a gesture runs, frames let the canvas take the pointer. */
 .canvas-viewport[data-space="true"] .canvas-frame,
+.canvas-viewport[data-zoom] .canvas-frame,
 .canvas-viewport[data-gesture] .canvas-frame {
   pointer-events: none;
 }
 .canvas-viewport[data-space="true"] .canvas-preview,
+.canvas-viewport[data-zoom] .canvas-preview,
 .canvas-viewport[data-gesture] .canvas-preview {
   user-select: none;
 }
@@ -482,10 +484,10 @@ body,
 }
 /* Annotations. In annotate mode previews take a crosshair and stop reacting;
    pins and the open annotation use the chrome tokens and font. */
-.canvas-viewport[data-annotating] .canvas-preview,
-.canvas-viewport[data-annotating] .canvas-preview *,
-.canvas-viewport[data-annotating] .canvas-item-title,
-.canvas-viewport[data-annotating] .canvas-item-title *:not(.canvas-item-action, .canvas-item-action *) {
+.canvas-viewport[data-annotating]:where(:not([data-zoom])) .canvas-preview,
+.canvas-viewport[data-annotating]:where(:not([data-zoom])) .canvas-preview *,
+.canvas-viewport[data-annotating]:where(:not([data-zoom])) .canvas-item-title,
+.canvas-viewport[data-annotating]:where(:not([data-zoom])) .canvas-item-title *:not(.canvas-item-action, .canvas-item-action *) {
   cursor: crosshair !important;
 }
 html[data-canvas-annotating] .canvas-frame-root,
@@ -506,9 +508,22 @@ html[data-canvas-annotating] .canvas-frame-root * {
   cursor: grabbing !important;
 }
 /* Alt-click copies a reference. */
-.canvas-viewport[data-alt]:not([data-space="true"], [data-gesture]) .canvas-preview,
-.canvas-viewport[data-alt]:not([data-space="true"], [data-gesture]) .canvas-preview * {
+.canvas-viewport[data-alt]:not([data-space="true"], [data-gesture], [data-zoom]) .canvas-preview,
+.canvas-viewport[data-alt]:not([data-space="true"], [data-gesture], [data-zoom]) .canvas-preview * {
   cursor: copy !important;
+}
+/* Holding Z zooms as in Figma: click to zoom in, Alt-click to zoom out, drag to
+   zoom to an area. The crosshair and copy cursors step aside while Z is held
+   (their :where(:not([data-zoom])), which adds no specificity, so a pan's
+   grabbing hand still wins over them), since Z + Alt-click zooms out instead of
+   copying a reference. */
+.canvas-viewport[data-zoom="in"],
+.canvas-viewport[data-zoom="in"] * {
+  cursor: zoom-in !important;
+}
+.canvas-viewport[data-zoom="out"],
+.canvas-viewport[data-zoom="out"] * {
+  cursor: zoom-out !important;
 }
 html[data-canvas-alt] .canvas-frame-root,
 html[data-canvas-alt] .canvas-frame-root * {
@@ -1087,8 +1102,8 @@ html[data-canvas-alt] .canvas-frame-root * {
 
 /* While a Note or Section tool is armed, the whole canvas takes the press, and
    the cursor says so. */
-.canvas-viewport[data-board-tool],
-.canvas-viewport[data-board-tool] * {
+.canvas-viewport[data-board-tool]:where(:not([data-zoom])),
+.canvas-viewport[data-board-tool]:where(:not([data-zoom])) * {
   cursor: crosshair !important;
 }
 .canvas-viewport[data-board-tool] .canvas-item,
@@ -1207,42 +1222,84 @@ html[data-canvas-alt] .canvas-frame-root * {
 .canvas-section[data-interactive] .canvas-section-tab:hover .canvas-section-grip {
   opacity: 1;
 }
-.canvas-section-edge {
+/* Notes and sections resize from their border like items (and OS windows):
+   invisible zones that straddle each edge and corner, one size on screen at any
+   zoom, where only the cursor changes (Board.tsx). A section's frame ignores
+   presses, so its zones take them back. */
+.canvas-board-edge {
+  --edge: calc(10px * var(--canvas-unzoom, 1));
   position: absolute;
-  display: none;
+  z-index: 2;
   pointer-events: auto;
-  cursor: grab;
+  touch-action: none;
 }
-.canvas-section[data-interactive] .canvas-section-edge {
-  display: block;
-}
-.canvas-section-edge[data-side="top"],
-.canvas-section-edge[data-side="bottom"] {
+.canvas-board-edge[data-edge="n"],
+.canvas-board-edge[data-edge="s"] {
   inset-inline: 0;
-  block-size: 10px;
+  block-size: var(--edge);
+  cursor: ns-resize;
 }
-.canvas-section-edge[data-side="left"],
-.canvas-section-edge[data-side="right"] {
+.canvas-board-edge[data-edge="e"],
+.canvas-board-edge[data-edge="w"] {
   inset-block: 0;
-  inline-size: 10px;
+  inline-size: var(--edge);
+  cursor: ew-resize;
 }
-.canvas-section-edge[data-side="top"] {
-  inset-block-start: -5px;
+.canvas-board-edge[data-edge="n"] {
+  inset-block-start: 0;
+  translate: 0 -50%;
 }
-.canvas-section-edge[data-side="bottom"] {
-  inset-block-end: -5px;
+.canvas-board-edge[data-edge="s"] {
+  inset-block-end: 0;
+  translate: 0 50%;
 }
-.canvas-section-edge[data-side="left"] {
-  inset-inline-start: -5px;
+.canvas-board-edge[data-edge="w"] {
+  inset-inline-start: 0;
+  translate: -50% 0;
 }
-.canvas-section-edge[data-side="right"] {
-  inset-inline-end: -5px;
+.canvas-board-edge[data-edge="e"] {
+  inset-inline-end: 0;
+  translate: 50% 0;
 }
-.canvas-section:has(.canvas-section-edge:hover):not([data-selected]) .canvas-section-frame,
+.canvas-board-edge[data-edge="nw"],
+.canvas-board-edge[data-edge="ne"],
+.canvas-board-edge[data-edge="sw"],
+.canvas-board-edge[data-edge="se"] {
+  inline-size: calc(var(--edge) * 1.6);
+  block-size: calc(var(--edge) * 1.6);
+}
+.canvas-board-edge[data-edge="nw"] {
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  translate: -50% -50%;
+  cursor: nwse-resize;
+}
+.canvas-board-edge[data-edge="ne"] {
+  inset-block-start: 0;
+  inset-inline-end: 0;
+  translate: 50% -50%;
+  cursor: nesw-resize;
+}
+.canvas-board-edge[data-edge="sw"] {
+  inset-block-end: 0;
+  inset-inline-start: 0;
+  translate: -50% 50%;
+  cursor: nesw-resize;
+}
+.canvas-board-edge[data-edge="se"] {
+  inset-block-end: 0;
+  inset-inline-end: 0;
+  translate: 50% 50%;
+  cursor: nwse-resize;
+}
+/* The tab moves a section, so it wins over the top edge it sits on. */
+.canvas-section-tab {
+  z-index: 3;
+}
 .canvas-section:has(.canvas-section-tab:hover):not([data-selected]) .canvas-section-frame {
   border-color: color-mix(in srgb, var(--canvas-focus-color) 70%, var(--canvas-bg-color));
 }
-.canvas-viewport[data-board-tool] .canvas-section-edge {
+.canvas-viewport[data-board-tool] .canvas-board-edge {
   pointer-events: none;
 }
 

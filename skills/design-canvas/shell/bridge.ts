@@ -84,6 +84,8 @@ const MAX_HREF = 2000;
 export type FrameMessage =
   | { type: "wheel"; dx: number; dy: number; x: number; y: number; zoom: boolean }
   | { type: "space"; down: boolean }
+  /** Z pressed or released inside the frame: the canvas's Figma-style zoom. `out`: Alt was down too. */
+  | { type: "zoom-key"; down: boolean; out: boolean }
   | { type: "pick"; label: string }
   /** A link the frame blocked; the canvas reveals or reports it. */
   | { type: "link"; href: string }
@@ -110,6 +112,9 @@ export function readFrameMessage(data: unknown): FrameMessage | undefined {
     return { type: "wheel", dx: m.dx, dy: m.dy, x: m.x, y: m.y, zoom: m.zoom };
   }
   if (m.type === "space" && typeof m.down === "boolean") return { type: "space", down: m.down };
+  if (m.type === "zoom-key" && typeof m.down === "boolean" && typeof m.out === "boolean") {
+    return { type: "zoom-key", down: m.down, out: m.out };
+  }
   if (m.type === "pick" && typeof m.label === "string" && m.label.length <= MAX_LABEL) {
     return { type: "pick", label: m.label };
   }

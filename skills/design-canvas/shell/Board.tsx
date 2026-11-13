@@ -12,12 +12,14 @@ import { labels } from "./labels";
 import type { CanvasNote, CanvasSection } from "./types";
 
 export type Corner = "nw" | "ne" | "sw" | "se";
+/** What a resize pulls: a corner changes both sides it touches, an edge only its own. */
+export type BoardEdge = Corner | "n" | "e" | "s" | "w";
 /** A real note or section (`ghost` false) or the ghost of a mark. */
 export type BoardRef = { kind: BoardKind; id: string; ghost: boolean };
 export type BoardHandlers = {
   select: (ref: BoardRef | null) => void;
   move: (event: ReactPointerEvent<HTMLElement>, ref: BoardRef) => void;
-  resize: (event: ReactPointerEvent<HTMLElement>, ref: BoardRef, corner: Corner) => void;
+  resize: (event: ReactPointerEvent<HTMLElement>, ref: BoardRef, edge: BoardEdge) => void;
   edit: (ref: BoardRef) => void;
   nudge: (ref: BoardRef, dx: number, dy: number) => void;
 };
@@ -74,21 +76,27 @@ function Grip() {
   );
 }
 
+const BORDER: BoardEdge[] = ["n", "e", "s", "w", ...CORNERS];
+
 /**
- * Pulling a section by its frame: four strips along the border. The frame itself
- * ignores presses, so empty space inside a section still pans the canvas.
+ * Notes and sections resize from their border the way items do, like an OS
+ * window: invisible grab zones on every edge and corner, where only the cursor
+ * changes. No selection is needed first, so one rule covers everything on the
+ * canvas. A section's border only resizes it, never moves it: a stray press
+ * there changes the frame alone, not the items inside, and ⌘/Ctrl + Z puts it
+ * back. Corners come last in the markup, so they win where they meet an edge.
  */
-function Edges({ refer, handlers }: { refer: BoardRef; handlers: BoardHandlers }) {
+function Border({ refer, handlers }: { refer: BoardRef; handlers: BoardHandlers }) {
   return (
     <>
-      {(["top", "right", "bottom", "left"] as const).map((side) => (
-        <span key={side} className="canvas-section-edge" data-side={side} aria-hidden="true" onPointerDown={(event) => handlers.move(event, refer)} />
+      {BORDER.map((edge) => (
+        <span key={edge} className="canvas-board-edge" data-edge={edge} aria-hidden="true" onPointerDown={(event) => handlers.resize(event, refer, edge)} />
       ))}
     </>
   );
 }
 
-/** Four corner grips on the selected note or section. */
+/** Four corner grips on the selected note or section: the visible part of a border that resizes it. */
 function Handles({ refer, handlers }: { refer: BoardRef; handlers: BoardHandlers }) {
   return (
     <>
@@ -108,8 +116,9 @@ function Handles({ refer, handlers }: { refer: BoardRef; handlers: BoardHandlers
 
 /**
  * A section's frame, behind the items, with its title on a raised tab like a
- * folder's. The tab moves it and a double-click edits the title; the corners
- * resize it. The frame itself ignores presses, so empty space inside still pans.
+ * folder's. The tab moves it and a double-click edits the title; the border
+ * resizes it. A click on empty space inside selects it. The frame itself ignores
+ * presses, so a drag inside still pans.
  */
 export function SectionView({
   section,
@@ -136,7 +145,7 @@ export function SectionView({
       style={{ transform: place(section.x, section.y), inlineSize: section.width, blockSize: section.height }}
     >
       <div className="canvas-section-frame" />
-      {interactive && <Edges refer={ref} handlers={handlers} />}
+      {interactive && <Border refer={ref} handlers={handlers} />}
       {/* biome-ignore lint/a11y/useSemanticElements: a tab that drags like an item's grip; the keys below move and edit it. */}
       <div
         className="canvas-section-tab"
@@ -190,6 +199,7 @@ export function NoteView({
       onKeyDown={(event) => interactive && onKey(event, ref, handlers)}
     >
       <div className="canvas-note-body">{note.text}</div>
+      {interactive && <Border refer={ref} handlers={handlers} />}
       {interactive && selected && <Handles refer={ref} handlers={handlers} />}
     </div>
   );
@@ -295,6 +305,7 @@ export function MarkView({
       >
         {tag}
         {open ? <div className="canvas-note-body">{field}</div> : content}
+        {interactive && <Border refer={ref} handlers={handlers} />}
         {interactive && selected && <Handles refer={ref} handlers={handlers} />}
       </div>
     );
@@ -306,7 +317,7 @@ export function MarkView({
       {...common}
     >
       <div className="canvas-section-frame" />
-      {interactive && <Edges refer={ref} handlers={handlers} />}
+      {interactive && <Border refer={ref} handlers={handlers} />}
       {tag}
       {/* biome-ignore lint/a11y/useSemanticElements: a tab that drags like an item's grip; the keys below move and edit it. */}
       <div
