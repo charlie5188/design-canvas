@@ -12,7 +12,7 @@ import {
   useState,
 } from "react";
 import { downloadSharedFile, sendToAgent, useAgentStatus } from "./agent";
-import { type BoardHandlers, type BoardRef, type Corner, DiscardButton, MarkView, NoteView, SectionView } from "./Board";
+import { type BoardEdge, type BoardHandlers, type BoardRef, DiscardButton, MarkView, NoteView, SectionView } from "./Board";
 import {
   type BoardContext,
   type BoardKind,
@@ -75,6 +75,7 @@ import {
   fitBounds,
   loadLayout,
   nextZoomStop,
+  ZOOM_MAX,
   type Position,
   sanitizeCamera,
   sanitizePosition,
@@ -596,7 +597,7 @@ function ItemCaption({ text, editable, onSave }: { text: string; editable: boole
 }
 
 /** The eight places an item can be grabbed to resize it, like the border of an OS window. */
-type ResizeEdge = Corner | "n" | "s" | "e" | "w";
+type ResizeEdge = BoardEdge;
 const RESIZE_EDGES: ResizeEdge[] = ["n", "s", "e", "w", "nw", "ne", "sw", "se"];
 
 function CanvasItemView({
@@ -1446,8 +1447,13 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     if (Date.now() < quietUntil.current) return;
     savedHistory.current = [...savedHistory.current, change].slice(-HISTORY_LIMIT);
   }, []);
+  // A drag in progress is never saved: a pause mid-drag would write a halfway
+  // position, and the registry update would end the drag of a note or section.
+  // The drag's end triggers the save (dragEnds).
+  const dragging = useRef(false);
+  const [dragEnds, setDragEnds] = useState(0);
   const flushDirect = useCallback(async () => {
-    if (shared) return;
+    if (shared || dragging.current) return;
     const open = openMarkRef.current;
     const pending = marksRef.current.filter((m) => m.direct && m.sent === undefined && m.id !== open);
     const pendingMarks = pending.filter((m) => m.target);
@@ -1458,6 +1464,21 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       const s = moveStatesRef.current[m.id];
       return !(s && s.x === m.x && s.y === m.y);
     });
+    // Items a moving section carries are saved with it, in the same write, so one
+    // undo puts the frame and its contents back together. They are not moves of
+    // their own (movedItems leaves out items inside a pending section), so without
+    // this they would be saved later, as a second change and a second undo.
+    const pendingFrames = pendingMarks.filter((m) => m.kind === "section" && m.w && m.h);
+    for (const item of pendingFrames.length ? itemsRef.current : []) {
+      if (pendingMoves.some((m) => m.id === item.id) || !elements.current.has(item.id)) continue;
+      const p = positionsRef.current[item.id];
+      if (!p || (Math.abs(p.x - item.x) <= 1 && Math.abs(p.y - item.y) <= 1)) continue;
+      const cx = p.x + item.width / 2;
+      const cy = p.y + (ITEM_HEAD + item.height) / 2;
+      if (pendingFrames.some((f) => cx >= f.x && cx <= f.x + (f.w ?? 0) && cy >= f.y && cy <= f.y + (f.h ?? 0))) {
+        pendingMoves.push({ id: item.id, name: item.name, x: p.x, y: p.y });
+      }
+    }
     // A resized item is pending until its size has been sent once.
     const pendingSizes = Object.entries(sizesRef.current).filter(([id, s]) => sentSizes.current[id] !== `${s.w}x${s.h}`);
     const edits: DirectEdit[] = [];
@@ -1515,11 +1536,13 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     // A new mark is applied once the registry holds one more entry of its kind, in request order.
     const targets = sentTargets(pendingNew, countsRef.current);
     // Marked in flight first, so a second save does not start for the same change.
-    setMarks((prev) => prev.map((m) => (markIds.has(m.id) ? { ...m, sent: 0 } : targets.has(m.id) ? { ...m, sent: targets.get(m.id) } : m)));
-    setMoveStates((prev) => ({
-      ...prev,
-      ...Object.fromEntries(pendingMoves.map((m) => [m.id, { x: m.x, y: m.y, state: "saving" as const }])),
-    }));
+    // The refs too: an undo can start a save before the next render (see undoSaved).
+    const inFlight = (m: BoardMark) => (markIds.has(m.id) ? { ...m, sent: 0 } : targets.has(m.id) ? { ...m, sent: targets.get(m.id) } : m);
+    marksRef.current = marksRef.current.map(inFlight);
+    setMarks((prev) => prev.map(inFlight));
+    const saving = Object.fromEntries(pendingMoves.map((m) => [m.id, { x: m.x, y: m.y, state: "saving" as const }]));
+    moveStatesRef.current = { ...moveStatesRef.current, ...saving };
+    setMoveStates((prev) => ({ ...prev, ...saving }));
     let failed = new Set<string>();
     let rejected = new Set<number>();
     let ids: (string | null)[] = [];
@@ -1572,11 +1595,21 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       ...Object.fromEntries(pendingMoves.filter((m) => failed.has(m.id)).map((m) => [m.id, { x: m.x, y: m.y, state: "failed" as const }])),
     }));
   }, [notify, remember, shared]);
+  // Saves still on their way, so an undo can wait for them (see undoSaved).
+  const savesInFlight = useRef(new Set<Promise<void>>());
+  const flushTracked = useCallback(() => {
+    const run = flushDirect();
+    savesInFlight.current.add(run);
+    void run.finally(() => savesInFlight.current.delete(run));
+    return run;
+  }, [flushDirect]);
+  const flushTrackedRef = useRef(flushTracked);
+  flushTrackedRef.current = flushTracked;
   // Saves once the person pauses, so a drag or a line of typing is one write.
   useEffect(() => {
-    const timer = window.setTimeout(() => void flushDirect(), 300);
+    const timer = window.setTimeout(() => void flushTracked(), 300);
     return () => window.clearTimeout(timer);
-  }, [flushDirect, marks, positions, sizes]);
+  }, [flushTracked, marks, positions, sizes, dragEnds]);
   // An item whose position matches the registry again is applied, or was put back.
   useEffect(() => {
     const moved = new Set(movedItems.map((m) => m.id));
@@ -1789,6 +1822,10 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
   deleteBoardRef.current = deleteSelected;
   // ⌘/Ctrl + Z: puts back what the last saved change replaced.
   const undoSaved = async () => {
+    // A change made just before the key may still wait for its pause or its write.
+    // It goes first, so the key undoes it rather than the change before it.
+    await flushTrackedRef.current();
+    await Promise.all([...savesInFlight.current]);
     const change = savedHistory.current[savedHistory.current.length - 1];
     if (!change) {
       notify(labels.nothingToUndo);
@@ -1796,6 +1833,18 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     }
     savedHistory.current = savedHistory.current.slice(0, -1);
     quietUntil.current = Date.now() + 2000;
+    // A ghost still waiting for the registry to show the change this undoes would
+    // wait forever once the undo writes the old values: the entry shows instead,
+    // and keeps the selection.
+    const undone = new Set(change.edits.map((edit) => `${edit.kind}:${edit.id}`));
+    const settled = marksRef.current.filter((m) => m.direct && m.target && undone.has(`${m.kind}:${m.target}`));
+    if (settled.length) {
+      const chosen = settled.find((m) => selectedRef.current === `g:${m.kind}:${m.id}`);
+      if (chosen?.target) select({ kind: chosen.kind, id: chosen.target, ghost: false });
+      const gone = new Set(settled.map((m) => m.id));
+      marksRef.current = marksRef.current.filter((m) => !gone.has(m.id));
+      setMarks(marksRef.current);
+    }
     // Items go back in the browser too, or their saved layout would be saved again.
     if (Object.keys(change.positions).length) {
       const next = { ...positionsRef.current };
@@ -1880,11 +1929,16 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     visibleAnnotations.filter((a) => a.sent || a.queued).length +
     standalone(marks.filter((m) => (m.sent !== undefined || m.queued) && !m.direct), marks).length +
     movedItems.filter((m) => moveStateOf(m) === "sent" || moveStateOf(m) === "queued").length;
-  // A press anywhere but on a note or section lets go of the selection.
+  // A press anywhere but on a note or section lets go of the selection. A press on
+  // empty canvas decides when it ends: a click selects the section under it or
+  // nothing, and a pan keeps the selection (tapSurface). Camera gestures (Space,
+  // Z, the middle button) never change it.
   useEffect(() => {
     if (!selected) return;
     const onDown = (event: PointerEvent) => {
-      if (event.target instanceof Element && event.target.closest(".canvas-note-card, .canvas-section-tab, .canvas-section-edge, .canvas-resize")) return;
+      if (event.target instanceof Element && event.target.closest(".canvas-note-card, .canvas-section-tab, .canvas-board-edge, .canvas-resize")) return;
+      if (event.target === viewportRef.current || event.target === worldRef.current) return;
+      if (event.button === 1 || spaceArmed.current || zoomArmed.current) return;
       select(null);
     };
     window.addEventListener("pointerdown", onDown, true);
@@ -1892,11 +1946,16 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
   }, [select, selected]);
   // A mark leaves once the registry shows it.
   useEffect(() => {
-    const done = new Set(marksRef.current.filter((m) => isApplied(m, counts, boardContext)).map((m) => m.id));
-    if (!done.size) return;
+    const applied = marksRef.current.filter((m) => isApplied(m, counts, boardContext));
+    if (!applied.length) return;
+    const done = new Set(applied.map((m) => m.id));
     if (openMarkRef.current && done.has(openMarkRef.current)) setMarkOpen(null);
+    // A note or section stays selected once its move or resize is saved: the
+    // selection passes from the ghost to the entry it changed.
+    const chosen = applied.find((m) => selectedRef.current === `g:${m.kind}:${m.id}`);
+    if (chosen?.target) select({ kind: chosen.kind, id: chosen.target, ghost: false });
     setMarks((prev) => prev.filter((m) => !done.has(m.id)));
-  }, [boardContext, counts, setMarkOpen]);
+  }, [boardContext, counts, select, setMarkOpen]);
   // Discards every change not applied yet: annotations, notes and sections, and
   // moved items, which go back to the registry's positions. Annotations on
   // trashed items wait for them. Undo brings all of it back.
@@ -2260,6 +2319,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       if (!moved) {
         if (Math.hypot(e.clientX - start.x, e.clientY - start.y) <= DRAG_THRESHOLD) return;
         moved = true;
+        dragging.current = true;
         first();
       }
       const z = camera.current.z;
@@ -2274,8 +2334,10 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
         if (e.type === "pointerup") tap?.();
         return;
       }
+      dragging.current = false;
       suppressNextClick();
       done();
+      setDragEnds((n) => n + 1);
     };
     viewport.addEventListener("pointermove", move);
     viewport.addEventListener("pointerup", end);
@@ -2284,7 +2346,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
   boardImpl.current = {
     move: (event, ref) => {
       if (event.button !== 0 || spaceArmed.current || boardToolRef.current) return;
-      if (event.target instanceof Element && event.target.closest("textarea, button, .canvas-resize")) return;
+      if (event.target instanceof Element && event.target.closest("textarea, button, .canvas-resize, .canvas-board-edge")) return;
       const origin = boardOrigin(ref);
       if (!origin) return;
       event.stopPropagation();
@@ -2324,7 +2386,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
         },
       );
     },
-    resize: (event, ref, corner: Corner) => {
+    resize: (event, ref, edge: BoardEdge) => {
       if (event.button !== 0 || spaceArmed.current) return;
       const origin = boardOrigin(ref);
       if (!origin) return;
@@ -2337,8 +2399,11 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       const w0 = origin.w ?? drawn?.offsetWidth ?? NOTE_WIDTH;
       const h0 = origin.h ?? drawn?.offsetHeight ?? 80;
       const least = ref.kind === "section" ? { w: 120, h: 80 } : { w: 120, h: 60 };
-      const east = corner.endsWith("e");
-      const south = corner.startsWith("s");
+      // An edge changes one dimension, a corner both.
+      const east = edge.includes("e");
+      const west = edge.includes("w");
+      const south = edge.includes("s");
+      const north = edge.includes("n");
       let id = ref.ghost ? ref.id : "";
       dragBoard(
         event,
@@ -2349,17 +2414,19 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
         },
         (dx, dy) => {
           if (!id) return;
-          const w = Math.max(least.w, w0 + (east ? dx : -dx));
-          const h = Math.max(least.h, h0 + (south ? dy : -dy));
-          // The edge opposite the grip stays where it was.
+          const w = Math.max(least.w, east ? w0 + dx : west ? w0 - dx : w0);
+          const h = Math.max(least.h, south ? h0 + dy : north ? h0 - dy : h0);
+          // The edge opposite the one pulled stays where it was.
           updateMark(id, {
-            x: Math.round(east ? origin.x : origin.x + w0 - w),
-            y: Math.round(south ? origin.y : origin.y + h0 - h),
+            x: Math.round(west ? origin.x + w0 - w : origin.x),
+            y: Math.round(north ? origin.y + h0 - h : origin.y),
             w: Math.round(w),
             h: Math.round(h),
           });
         },
         pruneUnchanged,
+        // A click on the border, like one inside, selects it.
+        () => select(ref),
       );
     },
     edit: editBoard,
@@ -2751,6 +2818,58 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     [setCamera],
   );
 
+  // Figma's view keys, read by the key handler below: Shift + 0 zooms to 100%
+  // around the centre and keeps the place (plain 0 also moves the camera back to
+  // the start), Shift + 2 fits the selected note or section. With nothing
+  // selected Shift + 2 does nothing, as in Figma.
+  const viewKeys = useRef({ actualSize: () => {}, selection: () => {} });
+  viewKeys.current = {
+    actualSize: () => {
+      const viewport = viewportRef.current;
+      if (!viewport) return;
+      setCamera(zoomAt(camera.current, 1 / camera.current.z, viewport.clientWidth / 2, viewport.clientHeight / 2));
+    },
+    selection: () => {
+      const viewport = viewportRef.current;
+      const key = selectedRef.current;
+      if (!viewport || !key) return;
+      const [side, kind, id] = key.split(":") as ["g" | "e", BoardKind, string];
+      const attr = side === "g" ? "data-board-ghost" : "data-board-id";
+      const element = worldRef.current?.querySelector<HTMLElement>(
+        kind === "section" ? `.canvas-section[${attr}="${CSS.escape(id)}"] .canvas-section-frame` : `.canvas-note-card[${attr}="${CSS.escape(id)}"]`,
+      );
+      if (!element) return;
+      const rect = element.getBoundingClientRect();
+      const view = viewport.getBoundingClientRect();
+      const { x, y, z } = camera.current;
+      const bounds = {
+        minX: (rect.left - view.left - x) / z,
+        minY: (rect.top - view.top - y) / z - (kind === "section" ? SECTION_TITLE_ROOM : 0),
+        maxX: (rect.right - view.left - x) / z,
+        maxY: (rect.bottom - view.top - y) / z,
+      };
+      setCamera(fitBounds(bounds, viewport.clientWidth, viewport.clientHeight, FIT_PADDING, ZOOM_MAX));
+    },
+  };
+
+  // A click on empty canvas selects the section under it, the innermost one
+  // where sections overlap, or lets go of the selection when there is none. The
+  // frame takes no presses (a drag inside still pans), so this is a hit test.
+  const tapSurfaceRef = useRef<(clientX: number, clientY: number) => void>(() => {});
+  tapSurfaceRef.current = (clientX, clientY) => {
+    if (shared || boardToolRef.current) return;
+    let best: { ref: BoardRef; area: number } | null = null;
+    for (const element of worldRef.current?.querySelectorAll<HTMLElement>(".canvas-section[data-interactive]") ?? []) {
+      const frame = element.querySelector(".canvas-section-frame")?.getBoundingClientRect();
+      if (!frame || clientX < frame.left || clientX > frame.right || clientY < frame.top || clientY > frame.bottom) continue;
+      const ghost = element.dataset.boardGhost;
+      const id = ghost ?? element.dataset.boardId;
+      const area = frame.width * frame.height;
+      if (id && (!best || area < best.area)) best = { ref: { kind: "section", id, ghost: ghost !== undefined }, area };
+    }
+    select(best?.ref ?? null);
+  };
+
   // First paint: apply the saved camera, or fit everything once layout settles
   // and the viewport has a real size. A tab opened in the background can
   // report a zero-size viewport, which would fit everything at minimum zoom.
@@ -2814,12 +2933,15 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
 
   // Gesture ownership. Only one gesture owns the pointer at a time.
   const gesture = useRef<
-    | { kind: "pan"; pointerId: number; lastX: number; lastY: number; moved: number }
+    // `tap`: a press on empty canvas, which selects a section if it never travels.
+    | { kind: "pan"; pointerId: number; lastX: number; lastY: number; moved: number; tap: boolean }
     | { kind: "move"; pointerId: number; id: string; startX: number; startY: number; origin: Position; moved: number }
     | { kind: "pinch"; startMid: Position; startDistance: number; startCamera: Camera }
     | null
   >(null);
   const spaceArmed = useRef(false);
+  /** Z held, as in Figma: presses zoom instead of reaching items, notes, sections, or previews. */
+  const zoomArmed = useRef(false);
   const touches = useRef(new Map<number, Position>());
 
   const suppressNextClick = useCallback(() => {
@@ -2949,9 +3071,68 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       spaceArmed.current = false;
       viewport.removeAttribute("data-space");
     };
+    // Z held: the cursor shows which way a click zooms; Alt flips it to zoom out.
+    const armZoom = (out: boolean) => {
+      zoomArmed.current = true;
+      viewport.setAttribute("data-zoom", out ? "out" : "in");
+      hidePick();
+    };
+    const clearZoom = () => {
+      zoomArmed.current = false;
+      viewport.removeAttribute("data-zoom");
+    };
+    const isZoomKey = (event: KeyboardEvent) => event.code === "KeyZ" || event.key === "z" || event.key === "Z";
 
-    const startPan = (event: PointerEvent) => {
-      gesture.current = { kind: "pan", pointerId: event.pointerId, lastX: event.clientX, lastY: event.clientY, moved: 0 };
+    // A press while Z is held: a click zooms one step in (Alt: out) around the
+    // pointer, a drag zooms to the area it draws, as Figma's zoom does.
+    let zoomDrag: { pointerId: number; x: number; y: number; moved: boolean } | null = null;
+    const startZoom = (event: PointerEvent) => {
+      zoomDrag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, moved: false };
+      try {
+        viewport.setPointerCapture(event.pointerId);
+      } catch {
+        // The pointer may already be gone.
+      }
+    };
+    const zoomArea = (current: NonNullable<typeof zoomDrag>, clientX: number, clientY: number) => ({
+      left: Math.min(current.x, clientX),
+      top: Math.min(current.y, clientY),
+      right: Math.max(current.x, clientX),
+      bottom: Math.max(current.y, clientY),
+    });
+    const moveZoom = (event: PointerEvent) => {
+      if (!zoomDrag || event.pointerId !== zoomDrag.pointerId) return false;
+      if (!zoomDrag.moved && Math.hypot(event.clientX - zoomDrag.x, event.clientY - zoomDrag.y) <= DRAG_THRESHOLD) return true;
+      zoomDrag.moved = true;
+      placeBox(drawRef.current, zoomArea(zoomDrag, event.clientX, event.clientY));
+      return true;
+    };
+    const endZoom = (event: PointerEvent) => {
+      if (!zoomDrag || event.pointerId !== zoomDrag.pointerId) return false;
+      const current = zoomDrag;
+      zoomDrag = null;
+      if (drawRef.current) drawRef.current.hidden = true;
+      if (event.type !== "pointerup") return true;
+      // The release must not also click what is under it, copy a reference, or place an annotation.
+      suppressNextClick();
+      const area = zoomArea(current, event.clientX, event.clientY);
+      const rect = viewport.getBoundingClientRect();
+      const { x, y, z } = camera.current;
+      // An area too thin to mean anything is a click.
+      if (current.moved && area.right - area.left > 8 && area.bottom - area.top > 8) {
+        const toWorld = (cx: number, cy: number) => ({ x: (cx - rect.left - x) / z, y: (cy - rect.top - y) / z });
+        const a = toWorld(area.left, area.top);
+        const b = toWorld(area.right, area.bottom);
+        setCamera(fitBounds({ minX: a.x, minY: a.y, maxX: b.x, maxY: b.y }, viewport.clientWidth, viewport.clientHeight, 0, ZOOM_MAX));
+      } else {
+        const factor = nextZoomStop(z, event.altKey ? -1 : 1) / z;
+        setCamera(zoomAt(camera.current, factor, event.clientX - rect.left, event.clientY - rect.top));
+      }
+      return true;
+    };
+
+    const startPan = (event: PointerEvent, tap = false) => {
+      gesture.current = { kind: "pan", pointerId: event.pointerId, lastX: event.clientX, lastY: event.clientY, moved: 0, tap };
       viewport.setAttribute("data-gesture", "pan");
       try {
         viewport.setPointerCapture(event.pointerId);
@@ -2972,7 +3153,26 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       };
     };
 
+    // Moving, resizing, and selecting cancel the press's default to stop text
+    // selection, which also keeps keyboard focus where it was. If that was in a
+    // preview, ⌘/Ctrl + Z, Delete, and the tool keys would go to the preview after
+    // the drag, so a press on the canvas outside previews takes focus back.
+    const releasePreviewFocus = (target: EventTarget | null) => {
+      const active = document.activeElement;
+      if (!active || active === viewport || !world.contains(active) || !active.closest(".canvas-preview")) return;
+      if (target instanceof Element && target.closest(".canvas-preview")) return;
+      viewport.focus({ preventScroll: true });
+    };
+
     const onPointerDown = (event: PointerEvent) => {
+      if (event.button === 0 && zoomArmed.current && event.pointerType !== "touch") {
+        // Z wins over everything under the pointer, as Space does.
+        event.preventDefault();
+        event.stopPropagation();
+        startZoom(event);
+        return;
+      }
+      if (event.button === 0 && !spaceArmed.current) releasePreviewFocus(event.target);
       if (boardPressRef.current(event)) return;
       if (event.pointerType === "touch") {
         touches.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
@@ -2980,7 +3180,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
           // Two fingers always belong to the canvas, even over a preview.
           if (gesture.current?.kind === "move") endGesture();
           startPinch();
-        } else if (touches.current.size === 1 && isSurface(event.target)) startPan(event);
+        } else if (touches.current.size === 1 && isSurface(event.target)) startPan(event, true);
         return;
       }
       const middle = event.button === 1;
@@ -2990,7 +3190,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       event.preventDefault();
       if (middle || spacePan) event.stopPropagation();
       if (surface) viewport.focus({ preventScroll: true });
-      startPan(event);
+      startPan(event, surface && !spacePan);
     };
 
     const onPointerMove = (event: PointerEvent) => {
@@ -3010,6 +3210,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
           return;
         }
       }
+      if (moveZoom(event)) return;
       const pan = gesture.current;
       if (pan?.kind !== "pan" || pan.pointerId !== event.pointerId) return;
       const dx = event.clientX - pan.lastX;
@@ -3021,12 +3222,17 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     };
 
     const onPointerEnd = (event: PointerEvent) => {
+      if (endZoom(event)) return;
       if (event.pointerType === "touch") {
         touches.current.delete(event.pointerId);
         if (gesture.current?.kind === "pinch" && touches.current.size < 2) endGesture();
       }
       const current = gesture.current;
-      if (current && "pointerId" in current && current.pointerId === event.pointerId) endGesture();
+      if (current && "pointerId" in current && current.pointerId === event.pointerId) {
+        const tapped = current.kind === "pan" && current.tap && current.moved <= DRAG_THRESHOLD && event.type === "pointerup";
+        endGesture();
+        if (tapped) tapSurfaceRef.current(event.clientX, event.clientY);
+      }
     };
 
     // Middle-button autoscroll starts on mousedown, so it is cancelled there too.
@@ -3168,6 +3374,12 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       pointer.y = event.clientY;
       // Alt shows the copy cursor over previews (canvas.css); the key event alone can be missed.
       viewport.toggleAttribute("data-alt", event.altKey);
+      if (zoomArmed.current) {
+        // With Z held, Alt means zoom out, never a reference.
+        viewport.setAttribute("data-zoom", event.altKey ? "out" : "in");
+        hidePick();
+        return;
+      }
       if (moveDraw(event)) return;
       if ((event.altKey || annotatingRef.current) && !gesture.current) {
         const head = annotatingRef.current && !event.altKey ? headItem(event.target) : null;
@@ -3178,6 +3390,8 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     // In annotate mode previews stop reacting to presses, except the ones that
     // pan (Space held, middle button).
     const blockPick = (event: MouseEvent) => {
+      // A press with Z held zooms (onPointerDown), so it must reach the canvas.
+      if (zoomArmed.current) return;
       const annotatePress = annotatingRef.current && event.button === 0 && !spaceArmed.current;
       const pick = pickTarget(event.target);
       if ((!event.altKey && !annotatePress) || !pick) return;
@@ -3218,7 +3432,14 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Alt") viewport.setAttribute("data-alt", "");
-      if (event.key === "Alt" && pointer.x >= 0) showPick(document.elementFromPoint(pointer.x, pointer.y));
+      if (event.key === "Alt" && zoomArmed.current) viewport.setAttribute("data-zoom", "out");
+      else if (event.key === "Alt" && pointer.x >= 0) showPick(document.elementFromPoint(pointer.x, pointer.y));
+      // Hold Z to zoom, as in Figma, unless a field takes the letter. Repeats arm it
+      // too, so it comes back if a frame's focus loss let it go while the key is down.
+      if (isZoomKey(event) && !event.metaKey && !event.ctrlKey && !(event.target instanceof Element && typingIn(event.target))) {
+        if (!zoomArmed.current) armZoom(event.altKey);
+        if (event.target === viewport || event.target === document.body) event.preventDefault();
+      }
       // A toggles annotate mode, Escape leaves it, as long as nothing editable has focus.
       const plain = !event.metaKey && !event.ctrlKey && !event.altKey;
       // Previews keep their own keys; the canvas, its toolbar, and pins take these.
@@ -3290,9 +3511,20 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
           event.preventDefault();
         }
       }
-      if (event.target !== viewport || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      // The view keys work wherever the tool keys do; arrow keys pan only from the
+      // canvas itself, since a focused note or section moves with them.
+      if (!canvasFocus || (event.target instanceof Element && typingIn(event.target))) return;
+      // Figma's: Shift + 0 is 100%, Shift + 1 fits all, Shift + 2 fits the selection.
+      // By key position, since Shift changes the character (and differs by layout).
+      const figmaView = event.shiftKey ? { Digit0: viewKeys.current.actualSize, Digit1: fitAll, Digit2: viewKeys.current.selection }[event.code] : undefined;
+      if (figmaView) {
+        event.preventDefault();
+        figmaView();
+        return;
+      }
       const step = event.shiftKey ? KEY_PAN * 5 : KEY_PAN;
-      const pan = { ArrowLeft: [step, 0], ArrowRight: [-step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] }[event.key];
+      const pan = event.target === viewport ? { ArrowLeft: [step, 0], ArrowRight: [-step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] }[event.key] : undefined;
       if (pan) {
         event.preventDefault();
         setCamera({ ...camera.current, x: camera.current.x + pan[0]!, y: camera.current.y + pan[1]! });
@@ -3313,11 +3545,14 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
 
     const onKeyUp = (event: KeyboardEvent) => {
       if (event.code === "Space") clearHeld();
+      if (isZoomKey(event)) clearZoom();
       if (event.key === "Alt") viewport.removeAttribute("data-alt");
+      if (event.key === "Alt" && zoomArmed.current) viewport.setAttribute("data-zoom", "in");
       if (event.key === "Alt" && !annotatingRef.current) hidePick();
     };
     const onBlur = () => {
       clearHeld();
+      clearZoom();
       hidePick();
       cancelDraw();
       viewport.removeAttribute("data-alt");
@@ -3351,6 +3586,9 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       } else if (message.type === "space") {
         if (message.down) armSpace();
         else clearHeld();
+      } else if (message.type === "zoom-key") {
+        if (message.down) armZoom(message.out);
+        else clearZoom();
       } else if (message.type === "pick") {
         void copyReference(`${item.name} › ${message.label}`);
       } else if (message.type === "annotate") {

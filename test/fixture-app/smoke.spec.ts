@@ -677,6 +677,140 @@ test('the zoom buttons and keys step between fixed levels', async ({ page }) => 
   expect(errors).toEqual([])
 })
 
+// A section around the example item, for the tests below. Waits for the page to take it.
+async function withSection(page: Page, original: string) {
+  const sectioned = original.replace(
+    'export const sections: CanvasSection[] = [];',
+    'export const sections: CanvasSection[] = [\n  { id: "group", title: "Group", x: -40, y: -60, width: 640, height: 420 },\n];',
+  )
+  expect(sectioned).not.toBe(original)
+  writeFileSync(REGISTRY, sectioned)
+  await page.goto('/')
+  await expect(page.locator('.canvas-section[data-board-id="group"]')).toBeVisible()
+  await page.waitForTimeout(600)
+  return sectioned
+}
+
+test('a section resizes from its border like an item, and a click inside selects it', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    const sectioned = await withSection(page, original)
+    const section = page.locator('.canvas-section[data-board-id="group"]')
+    const frame = section.locator('.canvas-section-frame')
+    const item = page.locator('.canvas-item[data-canvas-item="example"]')
+    const box = (await frame.boundingBox())!
+    const itemBefore = (await item.boundingBox())!
+    // No selection needed: the right edge resizes the frame alone, as an item's border does.
+    await page.mouse.move(box.x + box.width, box.y + box.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(box.x + box.width + 80, box.y + box.height / 2, { steps: 6 })
+    await page.mouse.up()
+    const resized = (await frame.boundingBox())!
+    expect(Math.abs(resized.x - box.x)).toBeLessThan(1)
+    expect(resized.width).toBeGreaterThan(box.width + 60)
+    expect((await item.boundingBox())!.x).toBe(itemBefore.x)
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).not.toContain('width: 640')
+    expect(readFileSync(REGISTRY, 'utf8')).toContain('x: -40, y: -60')
+    // The resize selected it, and it stays selected once saved; ⌘/Ctrl + Z puts it back.
+    await expect(page.locator('.canvas-section[data-board-id="group"][data-selected]')).toBeVisible()
+    await page.keyboard.press('ControlOrMeta+z')
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toBe(sectioned)
+    // A click outside lets go; a click on empty space inside selects it and shows its grips.
+    await page.mouse.click(box.x + box.width + 160, box.y + box.height / 2)
+    await expect(section).not.toHaveAttribute('data-selected')
+    await page.mouse.click(box.x + box.width - 30, box.y + box.height - 30)
+    await expect(section).toHaveAttribute('data-selected', 'true')
+    await expect(section.locator('.canvas-resize')).toHaveCount(4)
+    // A drag inside pans and keeps the selection.
+    await page.mouse.move(box.x + box.width - 30, box.y + box.height - 30)
+    await page.mouse.down()
+    await page.mouse.move(box.x + box.width + 30, box.y + box.height - 30, { steps: 6 })
+    await page.mouse.up()
+    expect(Math.abs((await frame.boundingBox())!.x - box.x - 60)).toBeLessThan(3)
+    await expect(section).toHaveAttribute('data-selected', 'true')
+    expect(readFileSync(REGISTRY, 'utf8')).toBe(sectioned)
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
+test('after typing in a preview, one Undo puts back a section dragged with its items', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    const sectioned = await withSection(page, original)
+    // Keyboard focus in a preview's field, as after typing in it.
+    await page.locator('.canvas-preview').first().evaluate((preview) => {
+      const field = document.createElement('input')
+      preview.append(field)
+      field.focus()
+    })
+    const tab = (await page.locator('.canvas-section[data-board-id="group"] .canvas-section-tab').boundingBox())!
+    await page.mouse.move(tab.x + 30, tab.y + tab.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(tab.x + 80, tab.y + 40, { steps: 3 })
+    // A pause mid-drag saves nothing; the frame keeps following the pointer.
+    await page.waitForTimeout(700)
+    expect(readFileSync(REGISTRY, 'utf8')).toBe(sectioned)
+    await page.mouse.move(tab.x + 130, tab.y + 80, { steps: 3 })
+    await page.mouse.up()
+    // At once, before the save lands: the drag goes first, and this undoes it.
+    await page.keyboard.press('ControlOrMeta+z')
+    await expect(page.locator('.canvas-toast')).toContainText('Undone')
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toBe(sectioned)
+    await expect(page.locator('.canvas-section[data-board-id="group"]')).toBeVisible()
+    await expect(page.locator('[data-board-ghost]')).toHaveCount(0)
+    await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)')
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
+test('holding Z zooms as in Figma, and Shift + 0 and 1 set the view', async ({ page }) => {
+  const errors = collectErrors(page)
+  await page.goto('/')
+  await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toBeVisible()
+  await page.waitForTimeout(600)
+  const zoom = page.locator('.canvas-zoom')
+  const viewport = page.locator('.canvas-viewport')
+  await page.getByRole('button', { name: 'Reset view (actual size)' }).click()
+  await expect(zoom).toHaveText('100%')
+  await page.mouse.move(400, 300)
+  await viewport.focus()
+  await page.keyboard.down('z')
+  await expect(viewport).toHaveAttribute('data-zoom', 'in')
+  // Over a preview too: the click zooms and reaches nothing under it.
+  const preview = (await page.locator('.canvas-preview').first().boundingBox())!
+  await page.mouse.click(preview.x + 40, preview.y + 40)
+  await expect(zoom).toHaveText('200%')
+  await page.keyboard.down('Alt')
+  await page.mouse.move(400, 300)
+  await expect(viewport).toHaveAttribute('data-zoom', 'out')
+  await page.mouse.click(400, 300)
+  await expect(zoom).toHaveText('100%')
+  await page.keyboard.up('Alt')
+  // A drag zooms to fit the area it draws.
+  await page.mouse.move(300, 250)
+  await page.mouse.down()
+  await page.mouse.move(500, 350, { steps: 6 })
+  await page.mouse.up()
+  await expect(zoom).not.toHaveText('100%')
+  await page.keyboard.up('z')
+  await expect(viewport).not.toHaveAttribute('data-zoom')
+  await expect(page.locator('.canvas-toast')).toHaveCount(0)
+  // Fit all stops at 100% for this one small item; Shift + 0 is 100% from any level.
+  await page.keyboard.press('Shift+Digit1')
+  await expect(zoom).toHaveText('100%')
+  await page.keyboard.press('=')
+  await expect(zoom).toHaveText('200%')
+  await page.keyboard.press('Shift+Digit0')
+  await expect(zoom).toHaveText('100%')
+  expect(errors).toEqual([])
+})
+
 test('Select is the default tool and Escape returns to it', async ({ page }) => {
   await page.goto('/')
   const tool = (name: string) => page.getByRole('button', { name, exact: true })
@@ -965,4 +1099,14 @@ test('cursors say what a press or drag will do', async ({ page }) => {
   expect(await cursor('.canvas-name')).toBe('crosshair')
   await page.locator('.canvas-viewport').evaluate((element) => element.setAttribute('data-gesture', 'pan'))
   expect(await cursor('.canvas-preview h2')).toBe('grabbing')
+  // Z held wins over the crosshair and the copy cursor; Alt turns it to zoom out.
+  await page.locator('.canvas-viewport').evaluate((element) => {
+    element.removeAttribute('data-gesture')
+    element.setAttribute('data-alt', '')
+    element.setAttribute('data-zoom', 'in')
+  })
+  expect(await cursor('.canvas-preview h2')).toBe('zoom-in')
+  expect(await cursor('.canvas-name')).toBe('zoom-in')
+  await page.locator('.canvas-viewport').evaluate((element) => element.setAttribute('data-zoom', 'out'))
+  expect(await cursor('.canvas-preview h2')).toBe('zoom-out')
 })

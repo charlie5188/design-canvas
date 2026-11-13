@@ -2,7 +2,8 @@
 const ANNOTATE_HELP =
   "Press A to request a change: click an element, drag across an area, or click an item's name for the whole item, and say what to change; then apply or copy them all at once";
 
-const EDIT_HELP = "Double-click a caption, a note, or a section's title to edit it; select a note or section and press Delete to remove it";
+const EDIT_HELP =
+  "Drag the border of an item, a note, or a section to resize it. Click a note, or empty space in a section, to select it, then press Delete to remove it. Double-click a caption, a note, or a section's title to edit it";
 const SAVE_HELP = "Moves, edits, and new notes save into registry.tsx as you make them; ⌘/Ctrl + Z undoes the last one";
 
 export const labels = {
@@ -22,14 +23,14 @@ export const labels = {
   helpLines: [
     "Drag empty space to pan",
     "Drag an item's name or grip to move it",
-    "⌘/Ctrl + scroll or pinch to zoom",
+    "⌘/Ctrl + scroll or pinch to zoom. Or hold Z and click to zoom in, add ⌥/Alt to zoom out, or drag to zoom to an area",
     "Hold Space or the middle button and drag to pan anywhere",
     "Hold ⌥/Alt and click an element to copy a reference to it",
     ANNOTATE_HELP,
     "Hover an item's name to open it alone or move it to the trash",
     SAVE_HELP,
     EDIT_HELP,
-    "With the canvas focused: arrow keys pan, + and − step the zoom (25, 50, 100, 200%), 0 resets, 1 fits all",
+    "With the canvas focused: arrow keys pan, + and − step the zoom (25, 50, 100, 200%), 0 resets, 1 or Shift + 1 fits all, Shift + 0 zooms to 100%, Shift + 2 zooms to the selected note or section",
   ],
   linkBlocked: (target: string) => `Links stay on the canvas: ${target}`,
   formBlocked: "Forms don't submit on the canvas",
