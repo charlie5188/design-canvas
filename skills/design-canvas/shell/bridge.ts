@@ -210,3 +210,11 @@ export function readCanvasMessage(data: unknown): CanvasMessage | undefined {
 
 /** Mocked app routers dispatch this so a programmatic navigation also stays on the canvas. */
 export const NAVIGATE_EVENT = "design-canvas:navigate";
+
+/**
+ * A planned card's own buttons (Planned.tsx) dispatch this from inside their
+ * item, and it bubbles to the canvas: "build" asks the agent to build that card
+ * in place, "drop" moves it to the trash.
+ */
+export const PLAN_EVENT = "design-canvas:plan";
+export type PlanAction = "build" | "drop";

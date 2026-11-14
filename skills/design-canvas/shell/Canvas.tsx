@@ -51,6 +51,7 @@ import {
   fromThisCanvas,
   hasAddress,
   NAVIGATE_EVENT,
+  PLAN_EVENT,
   postToFrame,
   readFrameMessage,
   shared,
@@ -3052,6 +3053,47 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     },
     [closeAnnotation, notify, putBack, saveTrashed, setTrash],
   );
+
+  // A planned card's own buttons (Planned.tsx). Drop is the ordinary trash, Undo
+  // included. Build is a note on the whole card, changed in place (the card
+  // becomes the built version, so there is no original to keep), and it goes out
+  // at once with anything else waiting: the button says "Build", so a second
+  // press on Apply would be a step the person did not expect.
+  useEffect(() => {
+    if (shared) return;
+    const onPlan = (event: Event) => {
+      const action = (event as CustomEvent<{ action?: unknown } | null>).detail?.action;
+      const element = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-canvas-item]") : null;
+      const item = element ? itemsRef.current.find((entry) => entry.id === element.dataset.canvasItem) : undefined;
+      if (!element || !item) return;
+      if (action === "drop") {
+        moveToTrash(item);
+        return;
+      }
+      if (action !== "build") return;
+      // Asked already (a card remounts with its buttons back): send what waits, add nothing.
+      if (!annotationsRef.current.some((a) => a.itemId === item.id && a.text === labels.buildPlanned)) {
+        const preview = element.querySelector<HTMLElement>("[data-canvas-preview]");
+        const annotation: Annotation = {
+          id: newAnnotationId(),
+          itemId: item.id,
+          x: 0,
+          y: 0,
+          w: preview?.offsetWidth ?? item.width,
+          h: preview?.offsetHeight ?? item.height,
+          ref: item.name,
+          text: labels.buildPlanned,
+          version: false,
+        };
+        // The send below reads the ref, and the state has not rendered yet.
+        annotationsRef.current = [...annotationsRef.current, annotation];
+        setAnnotations(annotationsRef.current);
+      }
+      void sendRef.current();
+    };
+    window.addEventListener(PLAN_EVENT, onPlan);
+    return () => window.removeEventListener(PLAN_EVENT, onPlan);
+  }, [moveToTrash]);
 
   // A trash an older shell kept only in this browser goes into the registry, once.
   const movedOldTrash = useRef(false);

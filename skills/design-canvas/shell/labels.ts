@@ -84,6 +84,8 @@ export const labels = {
   sentNoteSection: "Sent. Clears when the agent adds or removes an item; edit it to send again.",
   queuedNote: "Queued. The agent gets it when it's free; edit it to take it back.",
   newVersion: "Apply to a new version",
+  /** The note a planned card's Build button sends for its item. The skill tells the agent what it means. */
+  buildPlanned: "Build this planned direction",
   saveAnnotation: "Save",
   deleteAnnotation: "Delete annotation",
   // The toolbar button says what it does for the person: the canvas is source files, so nothing shows up until the agent applies it.

@@ -61,6 +61,86 @@ test('frame.html renders one item alone', async ({ page }) => {
   expect(errors).toEqual([])
 })
 
+test('a planned direction shows as a card with a sketch, and its own buttons build or drop it', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  const original = readFileSync(REGISTRY, 'utf8')
+  // The card's text and sketch sit inside the entry, braces, tags and quotes included; a save must still find the entry's own fields.
+  const withPlan = original
+    .replace('import { Example }', 'import { Block, planned } from "./canvas/Planned";\nimport { Example }')
+    .replace(
+      'export const registry: CanvasItem[] = [',
+      `export const registry: CanvasItem[] = [
+  {
+    id: "grouped",
+    name: "Inbox · grouped by matter",
+    component: planned({
+      bet: "People think in matters, so group by matter {first}.",
+      givesUp: "Doesn't show the newest on top.",
+      reference: "Another product's triage view",
+      sketch: (
+        <Block row>
+          <Block size="40%" label="Matters" lines={3} />
+          <Block label="Requests in it" emphasis lines={2}>
+            <Block size={8} row>
+              <Block label="Approve" />
+            </Block>
+          </Block>
+        </Block>
+      ),
+    }),
+    x: 420,
+    y: 0,
+    width: 360,
+    height: 420,
+  },`,
+    )
+  expect(withPlan).toContain('planned({')
+  try {
+    const errors = collectErrors(page)
+    writeFileSync(REGISTRY, withPlan)
+    await expect.poll(async () => (await (await page.request.get('/registry.tsx')).text()).includes('grouped')).toBe(true)
+    await page.goto('/')
+    const card = page.locator('.canvas-item[data-canvas-item="grouped"]')
+    await expect(card.locator('[data-canvas-planned]')).toContainText('Planned, not built yet')
+    await expect(card).toContainText('People think in matters')
+    await expect(card).toContainText("Doesn't show the newest on top.")
+    await expect(card).toContainText("Another product's triage view")
+    await expect(card.locator('[data-canvas-sketch]')).toContainText('Requests in it')
+    // A block given a size smaller than its label grows to show it.
+    const approve = card.locator('[data-canvas-sketch]').getByText('Approve')
+    const label = (await approve.boundingBox())!
+    const block = (await approve.locator('..').boundingBox())!
+    expect(block.height).toBeGreaterThanOrEqual(label.height)
+    // Build asks for this card in place and goes out at once; with no agent listening it is copied.
+    await card.getByRole('button', { name: 'Build this', exact: true }).click()
+    await expect(page.locator('.canvas-toast')).toContainText('Copied 1 change')
+    await expect(card).toContainText('Asked the agent to build this')
+    const text = await page.evaluate(() => navigator.clipboard.readText())
+    expect(text).toContain('1. Inbox · grouped by matter\n   Build this planned direction')
+    expect(text).not.toContain('Keep the original')
+    // A second press after a reload adds no second note.
+    await page.reload()
+    await card.getByRole('button', { name: 'Build this', exact: true }).click()
+    await expect(card).toContainText('Asked the agent to build this')
+    await expect(card.locator('.canvas-pin')).toHaveCount(1)
+    // Drop is the ordinary trash, written into the card's own entry.
+    await page.reload()
+    await card.getByRole('button', { name: 'Drop', exact: true }).click()
+    await expect(card).toHaveCount(0)
+    await expect(page.locator('.canvas-toast')).toContainText('Moved Inbox · grouped by matter to the trash')
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toMatch(/\{\s*trashed: true,\s*id: "grouped"/)
+    expect(readFileSync(REGISTRY, 'utf8')).toContain('<Block size="40%" label="Matters" lines={3} />')
+    await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toContainText('Canvas is ready')
+    // Its own page shows the card without the buttons: nothing there could act on them.
+    await page.goto('/frame.html?item=grouped')
+    await expect(page.locator('[data-canvas-planned]')).toContainText('People think in matters')
+    await expect(page.getByRole('button', { name: 'Build this', exact: true })).toHaveCount(0)
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
 test('an item moves to the trash and is put back', async ({ page }) => {
   const original = readFileSync(REGISTRY, 'utf8')
   try {

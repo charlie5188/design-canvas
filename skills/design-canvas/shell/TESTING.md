@@ -35,6 +35,8 @@ a device or input you do not have.
 - Previews keep clicking, typing, text selection, focus, and their own keyboard shortcuts. Space inside an input types a space.
 - Menus, popovers, and dialogs open in the right place at 50%, 100%, and 200% zoom.
 - Touching or focusing an item brings it above overlapping items, so a covered handle becomes reachable; only one item is in front.
+- A planned direction (`component: planned({ … })` from `Planned.tsx`) shows its sketch, its bet, what it gives up, and its reference in the canvas's own colors and font, whatever the app's stylesheet does, and fills its item. In the sketch, a `Block` with a `size` is at least that size and never cuts off its label; blocks without one share the rest. It moves, resizes, goes to the trash and comes back, takes annotations, and has its text rewritten in place like any item, and each of those is saved into its registry entry, sketch included.
+- On the canvas page a planned card has two buttons. **Drop** moves it to the trash with the usual Undo. **Build this** adds a sent note on the whole card and sends it at once with anything else waiting: with a listening agent the card's item shows "Agent working" and the card says it asked; with no agent the note is copied. The message has no new-version line. Once the agent replaces the card's component, the pin clears. The buttons do not show in the shared file, on an item's own page, in a `viewport` frame, or in the trash's previews. A press in annotate mode annotates the button and does not press it.
 
 ## Navigation
 
