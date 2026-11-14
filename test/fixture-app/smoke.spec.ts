@@ -141,6 +141,186 @@ test('a planned direction shows as a card with a sketch, and its own buttons bui
   }
 })
 
+// Three versions side by side for the pick tests: the example at 0,0 and two more beside it.
+const withVersions = (source: string, extra = '') =>
+  source.replace(
+    /\];\s*$/,
+    `  { id: "b", name: "Version B", component: Example, x: 400, y: 0, width: 360, height: 180 },
+  { id: "c", name: "Version C", component: Example, x: 800, y: 0, width: 360, height: 220 },
+${extra}];
+`,
+  )
+const servesId = async (page: Page, id: string) =>
+  expect.poll(async () => (await (await page.request.get('/registry.tsx')).text()).includes(`id: "${id}"`), { timeout: 15_000 }).toBe(true)
+// The section a pick makes, as the registry holds it. Anchored to a line of its own:
+// the installed registry's comment shows an example entry with the same id.
+const setAsideFrames = () =>
+  [...readFileSync(REGISTRY, 'utf8').matchAll(/^\s+\{ id: "set-aside", title: "Set aside", x: (-?\d+), y: (-?\d+), width: (\d+), height: (\d+) \},?$/gm)].map(
+    (m) => m.slice(1).map(Number) as [number, number, number, number],
+  )
+const entryOf = (id: string) => {
+  const source = readFileSync(REGISTRY, 'utf8')
+  const at = source.indexOf(`id: "${id}"`)
+  return source.slice(source.lastIndexOf('{', at), source.indexOf('}', at) + 1)
+}
+
+test('picking a version marks it and sets the others aside in one step, and Undo takes all of it back', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  const three = withVersions(original)
+  try {
+    const errors = collectErrors(page)
+    writeFileSync(REGISTRY, three)
+    await servesId(page, 'c')
+    await page.goto('/')
+    const item = (id: string) => page.locator(`.canvas-item[data-canvas-item="${id}"]`)
+    await expect(item('c')).toBeVisible()
+    await page.waitForTimeout(400)
+    const before = (await item('example').boundingBox())!
+    await page.getByRole('button', { name: 'Pick Version B and set the others aside' }).click()
+    await expect(page.locator('.canvas-toast')).toContainText('Picked Version B. Set 2 others aside.')
+    // The mark shows at once, and the picked version stays where it was.
+    await expect(item('b')).toHaveAttribute('data-picked', 'true')
+    // In the item's one status slot, a tab hanging from the card's bottom edge, with no "Saving…" beside the moved ones.
+    const pickedTag = item('b').locator('.canvas-item-tag[data-state="picked"]')
+    await expect(pickedTag).toHaveText('Picked')
+    await expect(page.locator('.canvas-item-tag')).toHaveCount(1)
+    const card = (await page.locator('[data-canvas-preview="b"]').boundingBox())!
+    const tab = (await pickedTag.boundingBox())!
+    expect(Math.abs(tab.y - (card.y + card.height))).toBeLessThan(3)
+    expect(tab.x + tab.width).toBeLessThanOrEqual(card.x + card.width)
+    expect(tab.x).toBeGreaterThan(card.x + card.width / 2)
+    // One write: the mark, one section for the others, and their new places in it, in reading order.
+    await expect.poll(() => entryOf('b')).toContain('picked: true')
+    expect(setAsideFrames()).toHaveLength(1)
+    const [frameX, frameY, frameW, frameH] = setAsideFrames()[0]!
+    const place = (id: string) => ({ x: Number(/\bx: (-?\d+)/.exec(entryOf(id))![1]), y: Number(/\by: (-?\d+)/.exec(entryOf(id))![1]) })
+    expect(place('b')).toEqual({ x: 400, y: 0 })
+    expect(place('example').y).toBe(place('c').y)
+    expect(place('example').x).toBeLessThan(place('c').x)
+    // Below everything that was on the canvas, and inside the frame.
+    expect(frameY).toBeGreaterThan(220 + 48)
+    for (const [id, width, height] of [['example', 360, 180], ['c', 360, 220]] as const) {
+      expect(place(id).x).toBeGreaterThanOrEqual(frameX)
+      expect(place(id).x + width).toBeLessThanOrEqual(frameX + frameW)
+      expect(place(id).y).toBeGreaterThanOrEqual(frameY)
+      expect(place(id).y + 48 + height).toBeLessThanOrEqual(frameY + frameH)
+    }
+    await expect(page.locator('.canvas-section-tab')).toHaveText('Set aside')
+    expect((await item('example').boundingBox())!.y).toBeGreaterThan(before.y + 100)
+    // Set aside, they are out of the running: no pick is offered on them, and none on the picked one.
+    await expect(page.getByRole('button', { name: /^Pick / })).toHaveCount(0)
+    // The toast's Undo is the whole pick: the registry reads as it did before.
+    await page.locator('.canvas-toast').getByRole('button', { name: 'Undo' }).click()
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toBe(three)
+    await expect(item('b')).not.toHaveAttribute('data-picked', 'true')
+    await expect(page.locator('.canvas-section-tab')).toHaveCount(0)
+    await expect.poll(async () => Math.round((await item('example').boundingBox())!.y)).toBe(Math.round(before.y))
+    // Picked again, ⌘/Ctrl + Z does the same.
+    await page.getByRole('button', { name: 'Pick Version C and set the others aside' }).click()
+    await expect.poll(() => entryOf('c')).toContain('picked: true')
+    await page.locator('.canvas-viewport').focus()
+    await page.keyboard.press('ControlOrMeta+z')
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toBe(three)
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
+test('a later pick sets the earlier one aside too, in the same section', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    writeFileSync(REGISTRY, withVersions(original))
+    await servesId(page, 'c')
+    await page.goto('/')
+    const item = (id: string) => page.locator(`.canvas-item[data-canvas-item="${id}"]`)
+    await expect(item('c')).toBeVisible()
+    await page.getByRole('button', { name: 'Pick Version B and set the others aside' }).click()
+    await expect.poll(() => entryOf('b')).toContain('picked: true')
+    const first = setAsideFrames()[0]!
+    // The agent adds a new version beside the picked one; the person likes it better.
+    writeFileSync(
+      REGISTRY,
+      readFileSync(REGISTRY, 'utf8').replace(/\];\s*$/, '  { id: "d", name: "Version D", from: "b", component: Example, x: 800, y: 0, width: 360, height: 180 },\n];\n'),
+    )
+    await servesId(page, 'd')
+    await expect(item('d')).toBeVisible()
+    await page.getByRole('button', { name: 'Pick Version D and set the others aside' }).click()
+    await expect(page.locator('.canvas-toast')).toContainText('Picked Version D. Set 1 other aside.')
+    await expect.poll(() => entryOf('d')).toContain('picked: true')
+    // The earlier pick loses its mark and joins the row at its right end; the frame grows, and there is still one.
+    expect(entryOf('b')).not.toContain('picked')
+    expect(setAsideFrames()).toHaveLength(1)
+    const second = setAsideFrames()[0]!
+    expect(second[0]).toBe(first[0])
+    expect(second[1]).toBe(first[1])
+    expect(second[2]).toBeGreaterThan(first[2])
+    const xOf = (id: string) => Number(/\bx: (-?\d+)/.exec(entryOf(id))![1])
+    expect(xOf('b')).toBeGreaterThan(xOf('c') + 360)
+    expect(xOf('b') + 360).toBeLessThanOrEqual(second[0] + second[2])
+    await expect(item('b')).not.toHaveAttribute('data-picked', 'true')
+    await expect(item('d')).toHaveAttribute('data-picked', 'true')
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
+test('a pick inside a section leaves the items outside it where they are', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    // The example and B share a section; C sits outside it.
+    const grouped = withVersions(original).replace(
+      'export const sections: CanvasSection[] = [];',
+      'export const sections: CanvasSection[] = [\n  { id: "cards", title: "Cards", x: -20, y: -20, width: 800, height: 300 },\n];',
+    )
+    expect(grouped).toContain('id: "cards"')
+    writeFileSync(REGISTRY, grouped)
+    await servesId(page, 'cards')
+    await page.goto('/')
+    await expect(page.locator('.canvas-item[data-canvas-item="c"]')).toBeVisible()
+    await page.getByRole('button', { name: 'Pick Example · replace me and set the others aside' }).click()
+    await expect(page.locator('.canvas-toast')).toContainText('Set 1 other aside.')
+    await expect.poll(() => entryOf('example')).toContain('picked: true')
+    expect(entryOf('c')).toContain('x: 800, y: 0')
+    expect(entryOf('b')).not.toContain('y: 0,')
+    // C was not part of that comparison, so it can still be picked among its own.
+    await expect(page.getByRole('button', { name: 'Pick Version C and set the others aside' })).toHaveCount(1)
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
+test('a pick the registry cannot take leaves nothing half done', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  const three = withVersions(original)
+  try {
+    const errors = collectErrors(page)
+    writeFileSync(REGISTRY, three)
+    await servesId(page, 'c')
+    await refuseSaves(page)
+    await page.goto('/')
+    const item = (id: string) => page.locator(`.canvas-item[data-canvas-item="${id}"]`)
+    await expect(item('c')).toBeVisible()
+    await page.waitForTimeout(400)
+    const before = (await item('example').boundingBox())!
+    await page.getByRole('button', { name: 'Pick Version B and set the others aside' }).click()
+    await expect(page.locator('.canvas-toast')).toContainText("Couldn't save the pick")
+    // No mark, no move, no section, and nothing waiting for the agent.
+    await expect(item('b')).not.toHaveAttribute('data-picked', 'true')
+    await expect.poll(async () => Math.round((await item('example').boundingBox())!.y)).toBe(Math.round(before.y))
+    await expect(page.locator('.canvas-section-tab')).toHaveCount(0)
+    await expect(page.locator('.canvas-item-tag')).toHaveCount(0)
+    expect(readFileSync(REGISTRY, 'utf8')).toBe(three)
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
 test('an item moves to the trash and is put back', async ({ page }) => {
   const original = readFileSync(REGISTRY, 'utf8')
   try {
@@ -441,6 +621,38 @@ test('a moved item is saved to the registry, with no change waiting for the agen
     await expect(page.locator('.canvas-item-tag')).toHaveCount(0)
     await expect(page.getByRole('button', { name: /^(Copy|Apply) \d+ change/ })).toHaveCount(0)
     expect(await page.evaluate(() => (window as unknown as { __samePage?: boolean }).__samePage)).toBe(true)
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
+test('a save says nothing unless it is overdue', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    // The write is held for four seconds, as on a machine that is slow or stuck.
+    await page.route('**/__design-canvas/edit', async (route) => {
+      if (route.request().method() === 'POST') await new Promise((resolve) => setTimeout(resolve, 4000))
+      await route.continue()
+    })
+    await page.goto('/')
+    const name = page.locator('.canvas-item[data-canvas-item="example"] .canvas-name')
+    await expect(name).toBeVisible()
+    await page.waitForTimeout(600)
+    const box = (await name.boundingBox())!
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(box.x + box.width / 2 + 120, box.y + box.height / 2 + 80, { steps: 6 })
+    await page.mouse.up()
+    const tag = page.locator('.canvas-item-tag')
+    // A save that goes through is done well within this time, and it would have shown nothing.
+    await page.waitForTimeout(1500)
+    await expect(tag).toHaveCount(0)
+    // Still on its way: now the person is told their move is not in the registry yet.
+    await expect(tag).toHaveText('Saving…', { timeout: 4000 })
+    await expect(tag).toHaveCount(0, { timeout: 8000 })
+    expect(readFileSync(REGISTRY, 'utf8')).not.toBe(original)
     expect(errors).toEqual([])
   } finally {
     await restoreRegistry(page, original)

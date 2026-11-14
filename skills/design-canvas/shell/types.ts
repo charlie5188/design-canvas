@@ -30,6 +30,13 @@ export type CanvasItem = {
    * the item back, so the shared file and the next session start with the same trash.
    */
   trashed?: boolean;
+  /**
+   * The version the person chose. The canvas writes it when they pick an item
+   * (and moves the versions it was compared with into the `set-aside` section),
+   * and removes it on Undo or when they pick another one. It shows as a mark on
+   * the item, in the shared file too, so a reader sees which version won.
+   */
+  picked?: boolean;
 };
 
 /**

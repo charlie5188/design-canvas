@@ -1437,7 +1437,8 @@ html[data-canvas-alt] .canvas-frame-root * {
   }
 }
 .canvas-ghost-tag[data-state="working"],
-.canvas-ghost-tag[data-state="fresh"] {
+.canvas-ghost-tag[data-state="fresh"],
+.canvas-ghost-tag[data-state="picked"] {
   /* Readable at any zoom, like a section's title. */
   transform: scale(var(--canvas-unzoom, 1));
   transform-origin: right bottom;
@@ -1497,4 +1498,40 @@ html[data-canvas-alt] .canvas-frame-root * {
   resize: none;
   field-sizing: content;
   user-select: text;
+}
+
+/* An item's state sits on its card: just under the preview's bottom-right corner,
+   a few pixels from the frame it is about. Above the item, a tag had the name and
+   the caption between it and the card, and read as a note about the title. Under
+   the card nothing is in the way, at any caption length, and the eye finds the
+   state where it finds the frame. (Notes and sections keep their tag above the
+   top-right corner: they have no header, so it already touches them.)
+   The tag lets presses through, so the resize edge under it still works; only a
+   button inside it takes one. */
+.canvas-item > .canvas-ghost-tag {
+  inset-block: 100% auto;
+  margin-block: 6px 0;
+  transform-origin: right top;
+  pointer-events: none;
+}
+.canvas-item > .canvas-ghost-tag button {
+  pointer-events: auto;
+}
+/* The version the person picked: a lasting fact about the frame, so it is drawn
+   as part of the frame. The ring is the frame; the tag is a tab hanging from the
+   ring's bottom edge, in the same color, clear of the rounded corner. It shows
+   whenever no more urgent state does, and the ring shows always, so the pick
+   reads zoomed out, while the tag says something else, and in the shared file.
+   One color, the canvas's focus color: the chrome's only state color, so a kit's
+   theme carries it. */
+.canvas-item > .canvas-ghost-tag[data-state="picked"] {
+  inset-inline-end: calc(var(--canvas-radius-size) + 4px);
+  margin-block-start: 1px;
+  padding: 2px 10px 3px 6px;
+  border-radius: 0 0 8px 8px;
+  background: var(--canvas-focus-color);
+}
+.canvas-item[data-picked] .canvas-preview {
+  border-color: var(--canvas-focus-color);
+  box-shadow: 0 0 0 1px var(--canvas-focus-color);
 }

@@ -212,6 +212,28 @@ export function NoteView({
 }
 
 /**
+ * A save is usually done before anyone could read a word about it, so saying
+ * "Saving…" on every move, resize, and edit is noise, and noise that looks like a
+ * warning. It is said only once a save has been on its way this long: by then
+ * something is slow or stuck, and the person should know their change is not in
+ * the registry yet. A save that fails says so by itself ("Not applied yet").
+ */
+export const SAVE_OVERDUE_MS = 2500;
+/** True once `on` has held, without a break, for `ms`. */
+export function useOverdue(on: boolean, ms: number): boolean {
+  const [late, setLate] = useState(false);
+  useEffect(() => {
+    if (!on) {
+      setLate(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setLate(true), ms);
+    return () => window.clearTimeout(timer);
+  }, [on, ms]);
+  return on && late;
+}
+
+/**
  * The tag on anything the agent is working on: an item or section with a note
  * sent about it, or a sent note, section, or move. In the place of the "Saving…"
  * and "Sent" tags, so every change says what it is waiting for where it is. A
@@ -295,6 +317,8 @@ export function MarkView({
     return () => cancelAnimationFrame(frame);
   }, [open]);
   const sentState = mark.sent !== undefined;
+  // A change on its way into the registry says nothing unless it is overdue (see useOverdue).
+  const savingLate = useOverdue(!!mark.direct && sentState, SAVE_OVERDUE_MS);
   const state = mark.direct ? labels.boardSaving : sentState ? labels.boardSent : mark.queued ? labels.boardQueued : labels.boardNotApplied;
   const field = (
     <textarea
@@ -331,7 +355,7 @@ export function MarkView({
   // a change, so it has no state, only a way to discard it.
   const tag = folded ? null : sentState && agentWorking ? (
     <WorkingTag />
-  ) : (
+  ) : mark.direct && !empty && !savingLate ? null : (
     <span className="canvas-ghost-tag">
       {!empty && state}
       {(!mark.direct || empty) && <DiscardButton keepFocus onClick={() => onDelete(mark.id)} />}
