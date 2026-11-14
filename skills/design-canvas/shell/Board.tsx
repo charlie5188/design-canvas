@@ -6,7 +6,7 @@
 // Moving, resizing, and editing text are the same gestures for both. They start
 // here and run in Canvas.tsx, which owns the camera and the marks.
 
-import { type KeyboardEvent, type PointerEvent as ReactPointerEvent, useEffect, useRef } from "react";
+import { type KeyboardEvent, type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
 import { type BoardKind, type BoardMark, NOTE_WIDTH } from "./marks";
 import { labels } from "./labels";
 import type { CanvasNote, CanvasSection } from "./types";
@@ -125,6 +125,7 @@ export function SectionView({
   hidden,
   interactive,
   selected,
+  working = false,
   handlers,
 }: {
   section: CanvasSection;
@@ -132,6 +133,8 @@ export function SectionView({
   hidden: boolean;
   interactive: boolean;
   selected: boolean;
+  /** The agent is working on a note sent about this section. */
+  working?: boolean;
   handlers: BoardHandlers;
 }) {
   if (hidden) return null;
@@ -142,9 +145,12 @@ export function SectionView({
       data-board-id={section.id}
       data-selected={selected || undefined}
       data-interactive={interactive || undefined}
+      data-working={working || undefined}
       style={{ transform: place(section.x, section.y), inlineSize: section.width, blockSize: section.height }}
     >
       <div className="canvas-section-frame" />
+      <WorkingBeam on={working} />
+      {working && <WorkingTag />}
       {interactive && <Border refer={ref} handlers={handlers} />}
       {/* biome-ignore lint/a11y/useSemanticElements: a tab that drags like an item's grip; the keys below move and edit it. */}
       <div
@@ -205,6 +211,48 @@ export function NoteView({
   );
 }
 
+/**
+ * The tag on anything the agent is working on: an item or section with a note
+ * sent about it, or a sent note, section, or move. In the place of the "Saving…"
+ * and "Sent" tags, so every change says what it is waiting for where it is. A
+ * quiet caption: the beam already shows the work going on.
+ */
+export function WorkingTag() {
+  return (
+    <span className="canvas-ghost-tag" data-state="working">
+      {labels.agentWorking}
+    </span>
+  );
+}
+
+/** How long the beam takes to fade out once the agent is done with the box. */
+const BEAM_FADE_MS = 500;
+
+/**
+ * A beam riding the border of an item's preview or a section's frame while the
+ * agent works on it: a short comet of colour going round, over a soft glow
+ * (canvas.css, .canvas-beam). It lays over the box rather than wrapping it, so
+ * the preview is never remounted, and fades out before it unmounts.
+ */
+export function WorkingBeam({ on }: { on: boolean }) {
+  const [shown, setShown] = useState(on);
+  useEffect(() => {
+    if (on) {
+      setShown(true);
+      return;
+    }
+    const timer = window.setTimeout(() => setShown(false), BEAM_FADE_MS);
+    return () => window.clearTimeout(timer);
+  }, [on]);
+  if (!shown) return null;
+  return (
+    <span className="canvas-beam" data-leaving={!on || undefined} aria-hidden="true">
+      <span className="canvas-beam-glow" />
+      <span className="canvas-beam-line" />
+    </span>
+  );
+}
+
 /** A mark waiting for the agent: a dashed ghost of a new or changed note or section, with its state on top. */
 export function MarkView({
   mark,
@@ -212,6 +260,7 @@ export function MarkView({
   folded,
   interactive,
   selected,
+  agentWorking = false,
   handlers,
   onText,
   onClose,
@@ -223,6 +272,8 @@ export function MarkView({
   folded: boolean;
   interactive: boolean;
   selected: boolean;
+  /** The agent is handling a message; a sent mark is part of it. */
+  agentWorking?: boolean;
   handlers: BoardHandlers;
   onText: (id: string, text: string) => void;
   onClose: () => void;
@@ -278,7 +329,9 @@ export function MarkView({
   );
   // An empty new note or section is a draft: it shows its placeholder and is not
   // a change, so it has no state, only a way to discard it.
-  const tag = folded ? null : (
+  const tag = folded ? null : sentState && agentWorking ? (
+    <WorkingTag />
+  ) : (
     <span className="canvas-ghost-tag">
       {!empty && state}
       {(!mark.direct || empty) && <DiscardButton keepFocus onClick={() => onDelete(mark.id)} />}

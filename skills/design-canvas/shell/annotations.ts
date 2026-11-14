@@ -1,5 +1,6 @@
 // Annotations: notes pinned to elements in previews, to an area drawn over a
-// preview, or to a whole item, sent to a listening agent or copied to the
+// preview, to a whole item, or to a whole section (its title clicked), sent to
+// a listening agent or copied to the
 // conversation as one numbered list. Saved beside the layout
 // so a hot reload, which the agent's own edits often cause, never loses unsent
 // annotations.
@@ -15,10 +16,12 @@
 // of a change to it. The original never changes then, so it is sent with the
 // number of items that name it as `from`, and leaves once that number grows.
 
+import { renderedHtml } from "./dom";
 import { labels } from "./labels";
 
 export type Annotation = {
   id: string;
+  /** The item's id, or sectionKey(id) for a note on a whole section. */
   itemId: string;
   /** Pin point in the item's preview, in unscaled canvas units: an area's top-left corner. */
   x: number;
@@ -61,6 +64,16 @@ const COORD_LIMIT = 100_000;
 
 const keyOf = (storageKey: string) => `${storageKey}:annotations`;
 const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
+
+// A note on a section is about the items inside it as a set, for example "make
+// one flow from these". Its pin sits in the section's top-left corner, it has no
+// "new version" choice (there is no one original to keep), and the items it
+// covers are read when it is sent, so moving one in or out later still counts.
+const SECTION = "section:";
+export const sectionKey = (id: string) => SECTION + id;
+/** The section an annotation is on, or null for one on an item. */
+export const sectionOf = ({ itemId }: { itemId: string }) =>
+  itemId.startsWith(SECTION) ? itemId.slice(SECTION.length) : null;
 
 let counter = 0;
 export const newAnnotationId = () => `c${Date.now().toString(36)}${(counter++).toString(36)}`;
@@ -114,7 +127,8 @@ export const limitText = (text: string) => text.slice(0, MAX_TEXT);
 
 /**
  * A short fingerprint of what an item renders: its preview markup, or the
- * frame's root for `viewport` items (same origin, so readable). Undefined when
+ * frame's root for `viewport` items (same origin, so readable), without new
+ * words shown in place of a text (dom.ts showPending). Undefined when
  * the content is not there yet, for example a frame still loading.
  */
 export function fingerprintItem(preview: Element | null): string | undefined {
@@ -123,12 +137,13 @@ export function fingerprintItem(preview: Element | null): string | undefined {
   let html: string | undefined;
   if (frame) {
     try {
-      html = frame.contentDocument?.querySelector(".canvas-frame-root")?.innerHTML;
+      const root = frame.contentDocument?.querySelector(".canvas-frame-root");
+      html = root ? renderedHtml(root) : undefined;
     } catch {
       return undefined;
     }
   } else {
-    html = preview.innerHTML;
+    html = renderedHtml(preview);
   }
   if (!html) return undefined;
   // FNV-1a, 32-bit: enough to tell "changed" from "same".
@@ -146,10 +161,17 @@ export function fingerprintItem(preview: Element | null): string | undefined {
  * should get a new version, a last line names them with their numbers; the
  * rest change in place.
  */
-export function formatAnnotations(annotations: Annotation[], nameOf: (itemId: string) => string) {
+export function formatAnnotations(
+  annotations: Annotation[],
+  nameOf: (itemId: string) => string,
+  /** A section's reference as it is now: its title and what is inside it. */
+  sectionRef: (id: string) => string | undefined = () => undefined,
+) {
   const entries = annotations.map((annotation, index) => {
     const body = annotation.text.trim().split(/\r?\n/).join("\n   ");
-    return `${index + 1}. ${annotation.ref}\n   ${body}`;
+    const section = sectionOf(annotation);
+    const ref = (section !== null && sectionRef(section)) || annotation.ref;
+    return `${index + 1}. ${ref}\n   ${body}`;
   });
   const versioned = new Map<string, number[]>();
   annotations.forEach((annotation, index) => {

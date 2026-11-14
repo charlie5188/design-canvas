@@ -80,6 +80,9 @@ export const fromThisCanvas = (event: MessageEvent) =>
     : event.origin === self.origin || event.origin === "null" || event.origin === "file://";
 const MAX_LABEL = 200;
 const MAX_HREF = 2000;
+// An edited text's words, before or after: as long as an annotation's note may be.
+const MAX_WORDS = 4000;
+const ANNOTATION_ID = /^[\w-]{1,40}$/;
 
 export type FrameMessage =
   | { type: "wheel"; dx: number; dy: number; x: number; y: number; zoom: boolean }
@@ -95,6 +98,16 @@ export type FrameMessage =
   | { type: "annotate"; label: string; x: number; y: number }
   /** In annotate mode: an area drawn in the frame, described by the frame. */
   | { type: "annotate-area"; label: string; x: number; y: number; w: number; h: number }
+  /** In annotate mode: a text edit in the frame started (`on`), or ended with no change. */
+  | { type: "text-edit"; on: boolean }
+  /**
+   * In annotate mode: a text edited in the frame, double-clicked at (x, y), with
+   * the words it renders and the words kept. `id` names the annotation, whose new
+   * words the frame now shows; `was`: the words it showed before, when the text
+   * already had new words (that annotation then changes). `after` equal to
+   * `before` takes that annotation back.
+   */
+  | { type: "annotate-text"; id: string; label: string; x: number; y: number; before: string; after: string; was?: string }
   /** Escape pressed inside the frame while annotating. */
   | { type: "escape" };
 
@@ -138,6 +151,32 @@ export function readFrameMessage(data: unknown): FrameMessage | undefined {
   ) {
     return { type: "annotate-area", label: m.label, x: m.x, y: m.y, w: m.w, h: m.h };
   }
+  if (m.type === "text-edit" && typeof m.on === "boolean") return { type: "text-edit", on: m.on };
+  if (
+    m.type === "annotate-text" &&
+    typeof m.id === "string" &&
+    ANNOTATION_ID.test(m.id) &&
+    (m.was === undefined || (typeof m.was === "string" && m.was.length <= MAX_WORDS)) &&
+    typeof m.label === "string" &&
+    m.label.length <= MAX_LABEL &&
+    finite(m.x) &&
+    finite(m.y) &&
+    typeof m.before === "string" &&
+    m.before.length <= MAX_WORDS &&
+    typeof m.after === "string" &&
+    m.after.length <= MAX_WORDS
+  ) {
+    return {
+      type: "annotate-text",
+      id: m.id,
+      label: m.label,
+      x: m.x,
+      y: m.y,
+      before: m.before,
+      after: m.after,
+      ...(typeof m.was === "string" ? { was: m.was } : {}),
+    };
+  }
   if (m.type === "escape") return { type: "escape" };
   return undefined;
 }
@@ -149,7 +188,11 @@ const MAX_THEME = 64;
 export type CanvasMessage =
   | { type: "theme"; id: string }
   /** Annotate mode: frames outline on hover and turn clicks into annotations. */
-  | { type: "annotate-mode"; on: boolean };
+  | { type: "annotate-mode"; on: boolean }
+  /** A press outside the frame ends its text edit and keeps it. */
+  | { type: "text-edit-end" }
+  /** The annotation went (deleted, discarded, or applied): the frame shows the text's own words again. */
+  | { type: "text-revert"; id: string };
 
 export function postToFrame(frame: Window, message: CanvasMessage) {
   frame.postMessage({ source: SOURCE, ...message }, messageTarget);
@@ -160,6 +203,8 @@ export function readCanvasMessage(data: unknown): CanvasMessage | undefined {
   if (!m || typeof m !== "object" || m.source !== SOURCE) return undefined;
   if (m.type === "theme" && typeof m.id === "string" && m.id.length <= MAX_THEME) return { type: "theme", id: m.id };
   if (m.type === "annotate-mode" && typeof m.on === "boolean") return { type: "annotate-mode", on: m.on };
+  if (m.type === "text-edit-end") return { type: "text-edit-end" };
+  if (m.type === "text-revert" && typeof m.id === "string" && ANNOTATION_ID.test(m.id)) return { type: "text-revert", id: m.id };
   return undefined;
 }
 

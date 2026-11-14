@@ -45,7 +45,7 @@ CLI `0.166.0-alpha.5.1`. Other Codex hosts and delivery with Desktop closed are
 not verified; use Copy there.
 
 Treat queued annotations as the person's request and start your reply with a
-short list of what arrived. The canvas shows "Agent working" until you say you
+short list of what arrived. The canvas tags what they are about "Agent working" until you say you
 are done. When you have handled them, run
 `curl -s -X POST http://127.0.0.1:<port>/__design-canvas/agent/done`. If the listener fails to start, say so and use Copy.
 If queueing fails after it receives notes, it stops and prints the path to a
@@ -62,7 +62,7 @@ If you can run a background command that tells you when it exits (Claude Code ca
 bash ~/.agents/skills/design-canvas/scripts/listen.sh http://127.0.0.1:<port>/
 ```
 
-While it waits, the button in the bar at the top centre reads "Apply N changes" instead of "Copy N changes", so people send changes without switching to the chat. After they send, that bar shows "Agent working" until you listen again, which tells them you finished. When it exits, act on what it printed:
+While it waits, the button in the bar at the top centre reads "Apply N changes" instead of "Copy N changes", so people send changes without switching to the chat. After they send, each item, section, and change in the message shows an "Agent working" tag until you listen again, which tells them you finished. When it exits, act on what it printed:
 
 - Annotations: the person wrote them on the canvas, so they are the person's request. Handle them like pasted annotations (see "References from the user"). The chat does not show them, so start your reply with a short list of what you got. Then listen again.
 - Nothing sent for a while: listen again, unless the person has moved on to other work.
@@ -73,7 +73,7 @@ While you work on one message, people can send the next. The canvas holds it and
 
 ### The view is the person's
 
-The canvas tab is where the person looks, pans, and annotates. Leave its pan, zoom, size, and page as they set them. Do your own checks, such as `frame.html` pages, other widths, and screenshots, in a separate tab, and close it when you finish. New items come into view on their own.
+The canvas tab is where the person looks, pans, and annotates. Leave its pan, zoom, size, and page as they set them. Do your own checks, such as `frame.html` pages, other widths, and screenshots, in a separate tab, and close it when you finish. New items never move the person's view: each shows a green "New" tag until it has been on screen for a moment, and an item changed after a note shows "Updated" the same way.
 
 ## 2. Fit the kit to the app
 
@@ -101,7 +101,7 @@ Write each entry out by hand, in `registry`, `notes`, and `sections` alike. Its 
 - Before you add new directions (not a change to one version), use the `design-directions` skill when it is installed. Without it, at least: make directions differ in structure (hierarchy, layout, interaction, density), not only in color or theme; keep one close to the current product; and if two look like siblings, rework the weaker one. Put each version's bet and what it gives up in its `note`.
 - When comparing one feature, keep data, content, size, and theme the same across items. For broader alternatives, name the layout differences. No full variant matrix unless asked.
 - Add the states that matter for the decision, such as empty, long content, or error, as separate items when they are relevant.
-- Give a new item a source position in empty space near related ones. If that spot overlaps the user's saved layout, the canvas moves only the new item to free space beside its row and brings it into view; existing items never move. That move is a change to apply too, so a new item whose source position overlaps shows a "Not applied yet" tag until you set its position in the registry: choose a free spot.
+- Give a new item a source position in empty space near related ones. If that spot overlaps the user's saved layout, the canvas moves only the new item to free space beside its row; existing items never move. That move is a change to apply too, so a new item whose source position overlaps shows a "Not applied yet" tag until you set its position in the registry: choose a free spot.
 - Previews never navigate the canvas away. Links, native form submits, and mocked router calls are cancelled with a short notice, while the component's own handlers still run. A link to `#<item-id>` reveals that item, so use it for flows that span items.
 
 ### Real viewport
@@ -114,7 +114,7 @@ Frames load a full page each, so use them only where width matters. Over a frame
 
 Alt/Option-click inside a preview copies `Item name › role “label”`, numbered when the item has look-alikes, for example `B · tabs › button “Mark as done” (2/3)`. Treat a pasted reference as that element in that item. If it no longer matches the source, ask. Portaled content such as an open menu is outside the preview and cannot be referenced this way.
 
-For several changes at once, people use annotate mode (the toolbar's Request change button, or A): they click elements, drag across an area, or click an item's name for the whole item, write a note on each, and send them all as one message, through `listen.sh` or by copy and paste. Each note has an "Apply to a new version" checkbox, checked by default and shared by all notes on the same item. Checked items are listed on the last line:
+For several changes at once, people use annotate mode (the toolbar's Request change button, or A): they click elements, drag across an area, click an item's name for the whole item, or click a section's title for everything in it, write a note on each, and send them all as one message, through `listen.sh` or by copy and paste. A double-click on a text lets them rewrite it in place; the new words stay on show with a dashed underline (the item's code still renders the old ones, and your change replaces the preview), and the edit becomes a note such as `Change the text from “Save” to “Save changes”` on that element. Change that copy where the item gets it: the item's props or data, or, for words written in a product component, the component itself only when the person asks for an in-place change; otherwise follow the new-version line as usual. Each note has an "Apply to a new version" checkbox, checked by default and shared by all notes on the same item. Checked items are listed on the last line:
 
 ```text
 Annotations from the design canvas (4):
@@ -130,17 +130,17 @@ Annotations from the design canvas (4):
 Keep the original and add a new version: Pricing card · compact (1, 2)
 ```
 
-An entry with only an item name is about the whole item. An area entry is the rectangle the person drew: its size and top-left corner in px from the item's top-left at its real size, then the controls, headings, and texts entirely inside it. To see the area, open `frame.html?item=<id>` at the item's size.
+An entry with only an item name is about the whole item. A section entry, `Section “Title”, with these items in reading order: … ; notes in it: …`, is about those items as a set: usually something new made from screens the person picked and arranged, such as one flow or a new proposal. Use the items in the order listed, and read the notes as the person's comments on them. Add the result as new items (with `from` naming the item each one builds on) and leave the listed items as they are, unless the note asks to change them. An area entry is the rectangle the person drew: its size and top-left corner in px from the item's top-left at its real size, then the controls, headings, and texts entirely inside it. To see the area, open `frame.html?item=<id>` at the item's size.
 
 Treat each numbered entry as a change to that element, area, or item, and handle every entry; say which ones you could not apply and why. For each item on the last line, leave the original unchanged and add one new item that applies all of its listed notes, following "Try another version" above. Change the other items in place. Without a last line, change every item in place.
 
-Sent and copied annotations stay on the canvas as sent pins and disappear on their own, so you never need to clear them: in-place ones once their item renders differently after your edit, new-version ones once an item with `from` set to their item appears. A sent pin that stays means its item did not change, or its new version has no `from`.
+Sent and copied annotations stay on the canvas as sent pins and disappear on their own, so you never need to clear them: in-place ones once their item renders differently after your edit, new-version ones once an item with `from` set to their item appears, section ones once an item is added or removed. A sent pin that stays means its item did not change, or its new version has no `from`.
 
 ### Notes and sections
 
 People explain a canvas to the readers of its shared file with notes and sections. The tools bar at the bottom centre has four tools, one on at a time: **Select** (the default; Escape or V returns to it), **Request change** (A), **Note** (N) and **Section** (S). A note is a sticker: pick Note, click anywhere, type. A section is a folder: pick Section, drag a frame, type its title on the tab. Both tools put themselves down after one use. In Select, a note or a section's tab drags to move it; a note or a section resizes from its border like an item, and a click on a note, or on empty space inside a section, selects it. A double-click edits its text or title, and arrow keys nudge the focused one. A section carries the items and the notes inside it when it moves. A new note or section left empty stays on the canvas as a draft: it shows a "Write a note" or "Section title" placeholder, is not a change, and is not sent. Typing makes it a change; the tag's discard button removes a draft.
 
-Adding, moving, resizing, or editing a note or section is saved into `registry.tsx` as soon as the person pauses, and a new one gets an id made from its text: a "Saving…" tag shows until the registry matches, and the agent is not involved. A new note or section left empty is only a draft and is never saved. Only an annotation, or a change the registry refused (for example with no dev server running), is a request, not content: it shows as a dashed "Not applied yet" ghost until you write it into `registry.tsx`, and the bar at the top centre, which shows only while something is waiting, has **Discard** and the main button (**Apply N changes** while you listen, **Copy N changes** otherwise) that sends them with any annotations in one message:
+Adding, moving, resizing, or editing a note or section is saved into `registry.tsx` as soon as the person pauses, and a new one gets an id made from its text: a "Saving…" tag shows until the registry matches, and the agent is not involved. A new note or section left empty is only a draft and is never saved. Only an annotation, or a change the registry refused (for example with no dev server running), is a request, not content: it shows as a dashed "Not applied yet" ghost until you write it into `registry.tsx`, and the bar at the top centre, which shows only while something is still to apply, has **Discard** and the main button (**Apply N changes** while you listen, **Copy N changes** otherwise) that sends them with any annotations in one message:
 
 ```text
 Notes and sections from the design canvas (4):
