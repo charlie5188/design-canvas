@@ -1,6 +1,6 @@
 // Canvas chrome copy. Edit here to change the language of the controls.
 const ANNOTATE_HELP =
-  "Press A to request a change: click an element, drag across an area, or click an item's name or a section's title for all of it, and say what to change. Double-click a text to rewrite it in place. Then apply or copy them all at once";
+  "Press A to ask the agent: click an element, drag across an area, or click an item's name or a section's title for all of it, then ask for a change or ask a question. Double-click a text to rewrite it in place. Then send or copy them all at once. An answer shows beside its pin";
 
 const EDIT_HELP =
   "Drag the border of an item, a note, or a section to resize it. Click a note, or empty space in a section, to select it, then press Delete to remove it. Double-click a caption, a note, or a section's title to edit it";
@@ -12,7 +12,7 @@ export const labels = {
   toolsBar: "Tools",
   viewBar: "View",
   canvasBar: "Canvas",
-  changesBar: "Changes not applied yet",
+  changesBar: "Not sent to the agent yet",
   theme: "Theme",
   help: "Canvas controls",
   /** The help line a shared file leaves out, since it has no annotations. */
@@ -64,10 +64,12 @@ export const labels = {
   trashHeading: "Trash",
   trashHint: "Click an item to put it back",
   putBack: (name: string) => `Put back ${name}`,
-  annotate: "Request change",
-  annotateHint: "Request change (A)",
+  // The tool is a conversation with the agent, at the place the words are about:
+  // a request for a change, or a question. "Ask" covers both, and names who answers.
+  annotate: "Ask agent",
+  annotateHint: "Ask agent (A)",
   annotateModeOn:
-    "Request-change mode. Click an element, drag across an area, or click an item's name or a section's title for all of it. Double-click a text to rewrite it. Press Escape to finish.",
+    "Ask-agent mode. Click an element, drag across an area, or click an item's name or a section's title for all of it, then ask for a change or ask a question. Double-click a text to rewrite it. Press Escape to finish.",
   /** The note a text edited in place becomes. Empty `after`: the person deleted the words. */
   textChange: (before: string, after: string) =>
     after ? `Change the text from “${before}” to “${after}”` : `Remove the text “${before}”`,
@@ -82,12 +84,15 @@ export const labels = {
   /** An area drawn over a preview, in px from the item's top-left, and what is entirely inside it. */
   areaRef: (w: number, h: number, x: number, y: number, names: string[], more: number) =>
     `area ${w}×${h} at ${x},${y}${names.length ? `: ${names.join(", ")}${more ? ` and ${more} more` : ""}` : ""}`,
-  annotateModeOff: "Request-change mode off",
-  annotationPlaceholder: "Note for the agent",
-  annotationField: (ref: string) => `Annotation on ${ref}`,
-  annotationPin: (n: number, text: string) => `Annotation ${n}: ${text}`,
-  sentPin: (text: string) => `Sent annotation: ${text}`,
-  queuedPin: (text: string) => `Queued annotation: ${text}`,
+  annotateModeOff: "Ask-agent mode off",
+  annotationPlaceholder: "Ask for a change, or ask why",
+  // The tool is "Ask agent", and the canvas has its own sticky notes, so nothing the person
+  // reads calls these an annotation or a note: a name says what it is for, and where one
+  // thing must be named it is the pin, which is what they see.
+  annotationField: (ref: string) => `Ask agent about ${ref}`,
+  annotationPin: (n: number, text: string) => `For the agent, ${n}: ${text}`,
+  sentPin: (text: string) => `Sent to the agent: ${text}`,
+  queuedPin: (text: string) => `Queued for the agent: ${text}`,
   sentNote: "Sent. Clears when this item changes; edit it to send again.",
   sentNoteVersion: "Sent. Clears when its new version appears; edit it to send again.",
   sentNoteSection: "Sent. Clears when the agent adds or removes an item; edit it to send again.",
@@ -95,16 +100,38 @@ export const labels = {
   newVersion: "Apply to a new version",
   /** The note a planned card's Build button sends for its item. The skill tells the agent what it means. */
   buildPlanned: "Build this planned direction",
-  saveAnnotation: "Save",
-  deleteAnnotation: "Delete annotation",
+  // In a note: one button, and one word on it. It sends everything that waits, so it
+  // says how many when that is more than this note. Enter keeps the note and closes it.
+  sendShort: (n: number) => (n > 1 ? `Send ${n}` : "Send"),
+  copyShort: (n: number) => (n > 1 ? `Copy ${n}` : "Copy"),
+  sendHint: "⌘/Ctrl + Enter. Enter keeps it for later",
+  replyPlaceholder: "Reply to the agent",
+  threadLabel: "Conversation with the agent",
+  threadYou: "You",
+  // In the message the agent reads.
+  threadEarlier: "Earlier on this note:",
+  threadPerson: "Person",
+  threadAgentYou: "Agent (you)",
+  threadNow: "Now",
+  deleteAnnotation: "Delete",
   // The toolbar button says what it does for the person: the canvas is source files, so nothing shows up until the agent applies it.
-  copyAnnotations: (n: number) => `Copy ${n} change${n === 1 ? "" : "s"}`,
-  copiedAnnotations: (n: number) => `Copied ${n} change${n === 1 ? "" : "s"}`,
+  // No noun after the number: what waits can be a request, a question, a note, a section, or a move.
+  copyAnnotations: (n: number) => `Copy ${n} for agent`,
+  copiedAnnotations: (n: number) => `Copied ${n} for the agent`,
   /** Shown in place of the copy button while an agent listens to the canvas. */
-  sendAnnotations: (n: number) => `Apply ${n} change${n === 1 ? "" : "s"}`,
-  sentToAgent: (n: number) => `Sent ${n} change${n === 1 ? "" : "s"} to the agent`,
-  queuedForAgent: (n: number) => `Queued ${n} change${n === 1 ? "" : "s"}. The agent gets ${n === 1 ? "it" : "them"} when it's free.`,
-  agentGoneCopied: (n: number) => `The agent stopped listening. Copied ${n} change${n === 1 ? "" : "s"} instead.`,
+  sendAnnotations: (n: number) => `Send ${n} to agent`,
+  sentToAgent: (n: number) => `Sent ${n} to the agent`,
+  queuedForAgent: (n: number) => `Queued ${n}. The agent gets ${n === 1 ? "it" : "them"} when it's free.`,
+  agentGoneCopied: (n: number) => `The agent stopped listening. Copied ${n} instead.`,
+  /** The name on a reply, whichever agent it is. */
+  agentName: "Agent",
+  /** Beside a pin whose note the agent answered: the first words of the answer. */
+  replyPreview: (text: string) => `Agent: ${text}`,
+  repliedPin: (text: string, reply: string) => `The agent replied to: ${text}. ${reply}`,
+  agentReplied: (n: number) => (n === 1 ? "The agent replied" : `The agent replied on ${n} pins`),
+  /** A reply to a note that is gone from the canvas, so it is not lost. */
+  agentReplyLoose: (text: string) => `Agent: ${text}`,
+  showReply: "Show",
   /** On each item, section, and change the agent is handling, in place of its "Sent" tag. */
   agentWorking: "Agent working",
   /** On an item the agent added, until the person has seen it; the view no longer moves to it. */
@@ -126,18 +153,19 @@ export const labels = {
   ] as const,
   shareFailed: (reason: string) => `Couldn't make the file: ${reason}`,
   agentFinished: "The agent finished",
-  agentGoneQueued: (n: number) => `The agent stopped listening, so ${n} change${n === 1 ? " wasn't" : "s weren't"} sent`,
-  /** Shown when annotate mode ends with changes still waiting, so they are not forgotten. */
-  unapplied: (n: number) => `${n} change${n === 1 ? " isn't" : "s aren't"} applied yet`,
-  applyNow: "Apply now",
+  agentGoneQueued: (n: number) => `The agent stopped listening, so ${n} ${n === 1 ? "wasn't" : "weren't"} sent`,
+  /** Shown when annotate mode ends with something still waiting, so it is not forgotten. */
+  unapplied: (n: number) => `${n} ${n === 1 ? "isn't" : "aren't"} sent yet`,
+  applyNow: "Send now",
   copyNow: "Copy now",
-  // Everything not applied yet, so the name matches "Apply changes".
-  discardChanges: "Discard changes",
+  // Everything not sent yet.
+  discardChanges: "Discard all",
   discardShort: "Discard",
-  discardedChanges: (n: number) => `Discarded ${n} change${n === 1 ? "" : "s"}`,
-  clearedSent: (n: number) => `Cleared ${n} sent annotation${n === 1 ? "" : "s"} on updated items`,
-  clearedVersioned: (n: number) => `Cleared ${n} sent annotation${n === 1 ? "" : "s"}: new version added`,
+  discardedChanges: (n: number) => `Discarded ${n}`,
+  clearedSent: (n: number) => `Cleared ${n} sent pin${n === 1 ? "" : "s"} on updated items`,
+  clearedVersioned: (n: number) => `Cleared ${n} sent pin${n === 1 ? "" : "s"}: new version added`,
   undo: "Undo",
+  // In the message the agent reads, where the skill and older canvases know this word.
   annotationsHeading: (n: number) => `Annotations from the design canvas (${n}):`,
   /** The message's last line when some items should get a new version, e.g. "Card (1, 2); Menu (3)". */
   newVersionLine: (items: string) => `Keep the original and add a new version: ${items}`,

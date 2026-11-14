@@ -1,17 +1,19 @@
 import {
   type ComponentType,
+  createContext,
   type CSSProperties,
   memo,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
-import { downloadSharedFile, sendToAgent, useAgentStatus } from "./agent";
+import { downloadSharedFile, sendToAgent, useAgentReplies, useAgentStatus } from "./agent";
 import {
   type BoardEdge,
   type BoardHandlers,
@@ -71,12 +73,16 @@ import {
   saveAnnotations,
   sectionKey,
   sectionOf,
+  type ThreadMessage,
+  threadOf,
+  withFollowUp,
 } from "./annotations";
 import {
   CHROME,
   clearPending,
   describeArea,
   describeElement,
+  findDescribed,
   editText,
   isEditable,
   nestedCanScroll,
@@ -146,6 +152,9 @@ const SECTION_TITLE_ROOM = 32;
 // set-aside sections, drawn around one dropped item where it stands, have ids that
 // start with this one (SKILL.md, "Decision notes"); items in either kind are out of the running.
 const SET_ASIDE_ID = "set-aside";
+// How long until a pin's element is looked for again, and how many times in a row.
+const ANCHOR_RETRY_MS = 400;
+const ANCHOR_RETRIES = 6;
 const isSetAside = (section: { id: string }) => section.id === SET_ASIDE_ID || section.id.startsWith(`${SET_ASIDE_ID}-`);
 /** Inside the set-aside frame: room around the items, and between them. */
 const ASIDE_PAD = 24;
@@ -374,6 +383,12 @@ const SentIcon = () => (
     <path d="M3.5 8.5 6.5 11.5 12.5 4.5" />
   </svg>
 );
+/** On a pin whose note the agent answered. */
+const ReplyIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 3.5h10v7H8.5L5.5 13v-2.5H3z" />
+  </svg>
+);
 const QueuedIcon = () => (
   <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="8" cy="8" r="5.5" />
@@ -464,12 +479,45 @@ type AnnotationHandlers = {
   onCancel: () => void;
   onDelete: (id: string) => void;
   onVersion: (id: string, version: boolean) => void;
+  /** The person answers the agent's reply: the same note, with new words to send. */
+  onFollowUp: (id: string, text: string) => void;
+  /** Sends, queues, or copies everything that waits, this note included. */
+  onSend: () => void;
 };
+/** What sending does right now, for a note's own button: the short word on it, and the bar's full words as its name. */
+const SendContext = createContext<{ label: string; name: string; agentOn: boolean }>({ label: "", name: "", agentOn: false });
 
-/** The open annotation: the reference it points at, the note, delete and save. */
+/**
+ * The open note: the reference it points at, what was said on it so far, the
+ * field for what the person says now, and the ways on.
+ *
+ * A note is a short conversation with the agent, drawn as a comment thread: the
+ * first words at the edge, every later turn set in under them with a name, all
+ * plain text. While the agent's reply is the last turn, the field is for an
+ * answer to it; adding or sending that answer makes it the note's new words, on
+ * the same pin, and the turns before it stay above.
+ */
 function AnnotationCard({ annotation, handlers, done }: { annotation: Annotation; handlers: AnnotationHandlers; done: () => void }) {
   const fieldRef = useRef<HTMLTextAreaElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
+  const send = useContext(SendContext);
+  // The note grows with its conversation instead of scrolling inside itself: a
+  // second scrollbar in a small card is harder to use than a tall card. When it
+  // then covers what the person wants to see, they drag it aside by its top edge.
+  // The card has no title: the pin, or the outline of an area, already shows what
+  // the note is on, and its name is still the card's name for a screen reader.
+  // The move lasts while the note is open. The pin is counter-scaled against the
+  // zoom, so a pixel of pointer travel is a pixel here.
+  const [shift, setShift] = useState({ x: 0, y: 0 });
+  const grab = useRef<{ pointer: number; x: number; y: number; from: { x: number; y: number } } | null>(null);
+  const answered = annotation.reply !== undefined;
+  // An answer to the agent is typed here and becomes the note's words only when it is added or sent.
+  const [answer, setAnswer] = useState("");
+  const value = answered ? answer : annotation.text;
+  const turns: ThreadMessage[] = [
+    ...(annotation.thread ?? []),
+    ...(answered ? [{ who: "me" as const, text: annotation.text }, { who: "agent" as const, text: annotation.reply! }] : []),
+  ];
   // The field grows with the note, up to about ten lines (its max-block-size), then
   // scrolls, so a long note, such as a rewritten text, reads whole. It runs before
   // the card picks a side below, so that sees the card at its real height.
@@ -481,7 +529,7 @@ function AnnotationCard({ annotation, handlers, done }: { annotation: Annotation
     field.style.blockSize = "auto";
     field.style.blockSize = `${field.scrollHeight + field.offsetHeight - field.clientHeight}px`;
     field.style.overflowY = "";
-  }, [annotation.text]);
+  }, [value]);
   // The note opens on the side of the pin that has room, like a menu, so focusing
   // it never pans the canvas under the person. Then the caret goes to the end.
   useLayoutEffect(() => {
@@ -497,8 +545,23 @@ function AnnotationCard({ annotation, handlers, done }: { annotation: Annotation
     field.focus({ preventScroll: true });
     field.setSelectionRange(field.value.length, field.value.length);
   }, []);
-  const save = () => {
+  /** Makes what is typed the note's words. False when there is nothing to send. */
+  const commit = () => {
+    if (!answered) return !!annotation.text.trim();
+    if (!answer.trim()) return false;
+    handlers.onFollowUp(annotation.id, answer);
+    setAnswer("");
+    return true;
+  };
+  // Keeps the note on the canvas and closes it, so the person can go on to the next one.
+  const keep = () => {
+    commit();
     handlers.onSave();
+    done();
+  };
+  const sendAll = () => {
+    if (!commit()) return;
+    handlers.onSend();
     done();
   };
   const onSection = sectionOf(annotation) !== null;
@@ -508,6 +571,7 @@ function AnnotationCard({ annotation, handlers, done }: { annotation: Annotation
       className="canvas-annotation-card"
       role="dialog"
       aria-label={labels.annotationField(annotation.ref)}
+      style={shift.x || shift.y ? { translate: `${shift.x}px ${shift.y}px` } : undefined}
       onKeyDown={(event) => {
         // Escape from the note or the checkbox undoes this card's changes.
         if (event.key !== "Escape") return;
@@ -517,8 +581,38 @@ function AnnotationCard({ annotation, handlers, done }: { annotation: Annotation
         done();
       }}
     >
-      <span className="canvas-annotation-ref">{annotation.ref}</span>
-      {annotation.sent && (
+      <span
+        className="canvas-annotation-handle"
+        aria-hidden="true"
+        onPointerDown={(event) => {
+          if (event.button !== 0) return;
+          event.preventDefault();
+          event.currentTarget.setPointerCapture(event.pointerId);
+          grab.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY, from: shift };
+        }}
+        onPointerMove={(event) => {
+          const held = grab.current;
+          if (!held || held.pointer !== event.pointerId) return;
+          setShift({ x: held.from.x + event.clientX - held.x, y: held.from.y + event.clientY - held.y });
+        }}
+        onPointerUp={(event) => {
+          if (grab.current?.pointer === event.pointerId) grab.current = null;
+        }}
+        onPointerCancel={() => {
+          grab.current = null;
+        }}
+      />
+      {turns.length > 0 && (
+        <div className="canvas-thread" role="log" aria-label={labels.threadLabel}>
+          {turns.map((turn, index) => (
+            <div key={index} className="canvas-thread-turn" data-who={turn.who}>
+              <span className="canvas-thread-who">{turn.who === "me" ? labels.threadYou : labels.agentName}</span>
+              <span className="canvas-thread-text">{turn.text}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {annotation.sent && !answered && (
         <span className="canvas-annotation-sent">
           {onSection ? labels.sentNoteSection : annotation.version ? labels.sentNoteVersion : labels.sentNote}
         </span>
@@ -526,22 +620,24 @@ function AnnotationCard({ annotation, handlers, done }: { annotation: Annotation
       {annotation.queued && <span className="canvas-annotation-sent">{labels.queuedNote}</span>}
       <textarea
         ref={fieldRef}
-        rows={3}
-        value={annotation.text}
-        placeholder={labels.annotationPlaceholder}
+        rows={turns.length ? 2 : 3}
+        value={value}
+        placeholder={turns.length ? labels.replyPlaceholder : labels.annotationPlaceholder}
         aria-label={labels.annotationField(annotation.ref)}
-        onChange={(event) => handlers.onText(annotation.id, event.currentTarget.value)}
+        onChange={(event) => (answered ? setAnswer(event.currentTarget.value) : handlers.onText(annotation.id, event.currentTarget.value))}
         onKeyDown={(event) => {
-          // Enter saves, Shift+Enter breaks the line; Enter that confirms an IME composition does neither.
-          if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-            event.preventDefault();
-            event.stopPropagation();
-            save();
-          }
+          // Enter that confirms an IME composition (Japanese, Chinese) does nothing here.
+          if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+          event.preventDefault();
+          event.stopPropagation();
+          // Enter keeps the note and closes it; with ⌘ or Ctrl it sends. Shift+Enter breaks the line.
+          if (event.metaKey || event.ctrlKey) sendAll();
+          else keep();
         }}
       />
-      {/* Checked: the agent keeps this item and adds a new version beside it. A section has no one original to keep. */}
-      {!onSection && (
+      {/* Checked: the agent keeps this item and adds a new version beside it. A section has no one original to keep.
+          While the agent's reply is the last turn there are no new words yet for the choice to apply to. */}
+      {!onSection && !answered && (
         <label className="canvas-annotation-version">
           <input
             type="checkbox"
@@ -564,8 +660,17 @@ function AnnotationCard({ annotation, handlers, done }: { annotation: Annotation
         >
           <TrashIcon />
         </button>
-        <button type="button" className="canvas-button canvas-button-primary" disabled={!annotation.text.trim()} onClick={save}>
-          {labels.saveAnnotation}
+        {/* Named in full for a screen reader ("Send 2 to agent"); the word on it is the start of that name. */}
+        <button
+          type="button"
+          className="canvas-button canvas-button-primary"
+          disabled={!value.trim()}
+          aria-label={send.name}
+          title={labels.sendHint}
+          onClick={sendAll}
+        >
+          {send.agentOn ? <SendIcon /> : <CopyIcon />}
+          {send.label}
         </button>
       </span>
     </div>
@@ -590,6 +695,21 @@ function AnnotationPin({
 }) {
   const bubbleRef = useRef<HTMLButtonElement>(null);
   const text = annotation.text || labels.annotationPlaceholder;
+  const reply = annotation.reply;
+  // An answer the person has not opened yet says its first words beside the pin, so they
+  // see that it came and often all of it, without a card opening over the design by itself.
+  const unread = reply !== undefined && !annotation.seen;
+  // Unread, the pin itself grows to hold those words: one shape, the pin's head and the line it says.
+  // It opens to the right, or to the left when the canvas's edge is too near, like the note (FLIP_MARGIN).
+  const speaking = unread && !open;
+  useLayoutEffect(() => {
+    const bubble = bubbleRef.current;
+    if (!bubble) return;
+    bubble.removeAttribute("data-flip-x");
+    if (!speaking) return;
+    const view = bubble.closest(".canvas-viewport")?.getBoundingClientRect();
+    if (view && bubble.getBoundingClientRect().right > view.right - FLIP_MARGIN) bubble.setAttribute("data-flip-x", "");
+  }, [speaking, reply]);
   return (
     <>
       {/* An area or a whole item keeps its outline, so the note shows what it covers. */}
@@ -609,23 +729,28 @@ function AnnotationPin({
       data-area={(annotation.w && annotation.h) || sectionOf(annotation) !== null ? true : undefined}
       // A new, empty pin sits where the click was, so a double-click's second press passes through to edit the text.
       data-empty={!annotation.text.trim() || undefined}
+      data-reply={reply === undefined ? undefined : unread ? "unread" : "read"}
     >
       <button
         ref={bubbleRef}
         type="button"
         className="canvas-pin-bubble"
         data-sent={number === undefined || undefined}
+        data-says={speaking || undefined}
         aria-label={
-          number !== undefined
-            ? labels.annotationPin(number, text)
-            : annotation.queued
-              ? labels.queuedPin(text)
-              : labels.sentPin(text)
+          reply !== undefined
+            ? labels.repliedPin(text, reply)
+            : number !== undefined
+              ? labels.annotationPin(number, text)
+              : annotation.queued
+                ? labels.queuedPin(text)
+                : labels.sentPin(text)
         }
         aria-expanded={open}
         onClick={() => (open ? handlers.onSave() : handlers.onOpen(annotation.id))}
       >
-        {number ?? (annotation.queued ? <QueuedIcon /> : <SentIcon />)}
+        <span className="canvas-pin-head">{reply !== undefined ? <ReplyIcon /> : (number ?? (annotation.queued ? <QueuedIcon /> : <SentIcon />))}</span>
+        {speaking && <span className="canvas-pin-says">{labels.replyPreview(reply.split(/\r?\n/)[0]!)}</span>}
       </button>
       {open && <AnnotationCard annotation={annotation} handlers={handlers} done={() => bubbleRef.current?.focus({ preventScroll: true })} />}
     </div>
@@ -1501,7 +1626,10 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       closeAnnotation();
       const annotation = annotationsRef.current.find((a) => a.id === id);
       if (!annotation) return;
-      setOpen({ id, original: annotation, versions: versionsBefore(annotation.itemId) });
+      // Opening a note reads its answer. The read note is also what Escape goes back to, so closing does not make it unread again.
+      const opened = annotation.reply !== undefined && !annotation.seen ? { ...annotation, seen: true } : annotation;
+      if (opened !== annotation) setAnnotations((prev) => prev.map((a) => (a.id === id ? opened : a)));
+      setOpen({ id, original: opened, versions: versionsBefore(annotation.itemId) });
       if (sectionOf(annotation) === null) setFrontId(annotation.itemId);
     },
     [closeAnnotation, setOpen, versionsBefore],
@@ -1601,7 +1729,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
         setAnnotations((prev) =>
           prev.map((a) =>
             a.id === id
-              ? { ...placeOf(a), text: limitText(text), version: a.version }
+              ? { ...placeOf(a), text: limitText(text), version: a.version, ...threadOf(a) }
               : a,
           ),
         ),
@@ -1612,12 +1740,18 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
           const itemId = prev.find((a) => a.id === id)?.itemId;
           return prev.map((a) =>
             a.id === id || (a.itemId === itemId && !a.sent && !a.queued)
-              ? { ...placeOf(a), text: a.text, version }
+              ? { ...placeOf(a), text: a.text, version, ...threadOf(a) }
               : a,
           );
         }),
       onSave: closeAnnotation,
       onCancel: cancelAnnotation,
+      onFollowUp: (id, text) => {
+        // The ref too: Send may follow in the same press, and it reads the ref.
+        annotationsRef.current = annotationsRef.current.map((a) => (a.id === id ? withFollowUp(a, text) : a));
+        setAnnotations(annotationsRef.current);
+      },
+      onSend: () => void sendRef.current(),
       onDelete: (id) => {
         if (openRef.current?.id === id) setOpen(null);
         setAnnotations((prev) => prev.filter((a) => a.id !== id));
@@ -2320,7 +2454,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       }
       // "?" when the item is not rendered yet (a loading frame); the first check sets it.
       setAnnotations((prev) =>
-        prev.map((a) => (sentIds.has(a.id) ? { ...a, queued: undefined, sent: sentPrint(a) ?? "?" } : a)),
+        prev.map((a) => (sentIds.has(a.id) ? { ...a, queued: undefined, sent: sentPrint(a) ?? "?", sentAt: Date.now() } : a)),
       );
       if (!markList.length) return;
       const targets = sentTargets(markList, counts);
@@ -2431,7 +2565,8 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     const gone: Annotation[] = [];
     const reread = new Map<string, string>();
     for (const a of annotationsRef.current) {
-      if (!a.sent) continue;
+      // A note the agent answered stays until the person deletes it: the answer is what it is there for.
+      if (!a.sent || a.reply !== undefined) continue;
       const section = sectionOf(a);
       if (section !== null) {
         if (sections.some((s) => s.id === section) && a.sent !== sentPrint(a)) gone.push(a);
@@ -3103,6 +3238,132 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     },
     [closeAnnotation, notify, putBack, saveTrashed, setTrash],
   );
+
+  // A pin is placed at a point in its item, but it is about an element. When the
+  // item is resized the layout moves, and the element with it, while the point
+  // stays: the pin ends up on something else. So each pin is kept on its element,
+  // at the same place within it. The element is found from the pin's reference
+  // (dom.ts findDescribed), once, while the layout still matches the point, and
+  // followed from then on. A whole-item note keeps covering the whole item. A
+  // drawn area, and a pin whose element can no longer be found (its words
+  // changed), stay where they are, as before.
+  const anchors = useRef(new Map<string, { element: Element; fx: number; fy: number }>());
+  // A pin whose element is not there yet (its frame is still loading) or is gone. Each look
+  // reads the whole item, so it is tried again a few times, and after that only now and then.
+  const misses = useRef(new Map<string, { at: number; count: number }>());
+  const anchoredItems = useRef<CanvasItem[] | null>(null);
+  const [settle, setSettle] = useState(0);
+  useLayoutEffect(() => {
+    const world = worldRef.current;
+    if (!world || shared) return;
+    const live = new Set(annotations.map((a) => a.id));
+    for (const id of anchors.current.keys()) if (!live.has(id)) anchors.current.delete(id);
+    for (const id of misses.current.keys()) if (!live.has(id)) misses.current.delete(id);
+    const now = performance.now();
+    // A framed item lays out again a moment after its new size is saved, in its own
+    // document, and nothing here hears of it: so every change of the items is followed by one more look.
+    let again = anchoredItems.current !== items;
+    anchoredItems.current = items;
+    let moved = false;
+    const next = annotations.map((a) => {
+      if (sectionOf(a) !== null) return a;
+      const item = items.find((entry) => entry.id === a.itemId);
+      const preview = world.querySelector<HTMLElement>(`[data-canvas-preview="${CSS.escape(a.itemId)}"]`);
+      if (!item || !preview) return a;
+      if (a.w && a.h) {
+        if (a.ref !== item.name) return a;
+        const [w, h] = [preview.offsetWidth, preview.offsetHeight];
+        if (Math.abs(a.w - w) < 1 && Math.abs(a.h - h) < 1) return a;
+        moved = true;
+        return { ...a, w, h };
+      }
+      const prefix = `${item.name} › `;
+      if (!a.ref.startsWith(prefix)) return a;
+      // Where the item's content is, and how client pixels turn into the item's own units.
+      // A frame's own pixels already are those units (see the "annotate" message).
+      const frame = preview.querySelector<HTMLIFrameElement>("iframe[data-canvas-frame]");
+      let root: Element | null = preview;
+      let origin = { x: 0, y: 0 };
+      let scale = 1;
+      if (frame) {
+        try {
+          root = frame.contentDocument?.querySelector(".canvas-frame-root") ?? null;
+        } catch {
+          root = null;
+        }
+      } else {
+        const box = preview.getBoundingClientRect();
+        origin = { x: box.left, y: box.top };
+        scale = box.width / Math.max(1, preview.offsetWidth);
+      }
+      const boxOf = (element: Element) => {
+        const r = element.getBoundingClientRect();
+        return { x: (r.left - origin.x) / scale, y: (r.top - origin.y) / scale, w: r.width / scale, h: r.height / scale };
+      };
+      let anchor = anchors.current.get(a.id);
+      if (anchor && !root?.contains(anchor.element)) anchor = undefined;
+      if (!anchor) {
+        const miss = misses.current.get(a.id);
+        const fresh = !!miss && now - miss.at < ANCHOR_RETRY_MS - 50;
+        const element = root && !fresh ? findDescribed(root, a.ref.slice(prefix.length)) : null;
+        if (!element) {
+          const count = fresh ? miss.count : (miss?.count ?? 0) + 1;
+          if (!fresh) misses.current.set(a.id, { at: now, count });
+          if (count < ANCHOR_RETRIES) again = true;
+          return a;
+        }
+        misses.current.delete(a.id);
+        const box = boxOf(element);
+        // Where in its element the pin sits. One found outside it (the layout moved before anyone looked) goes to its middle.
+        const inside = a.x >= box.x - 2 && a.x <= box.x + box.w + 2 && a.y >= box.y - 2 && a.y <= box.y + box.h + 2;
+        anchor = { element, fx: inside && box.w ? (a.x - box.x) / box.w : 0.5, fy: inside && box.h ? (a.y - box.y) / box.h : 0.5 };
+        anchors.current.set(a.id, anchor);
+      }
+      const box = boxOf(anchor.element);
+      const x = Math.round(box.x + anchor.fx * box.w);
+      const y = Math.round(box.y + anchor.fy * box.h);
+      if (Math.abs(x - a.x) <= 1 && Math.abs(y - a.y) <= 1) return a;
+      moved = true;
+      return { ...a, x, y };
+    });
+    const timer = again ? window.setTimeout(() => setSettle((n) => n + 1), ANCHOR_RETRY_MS) : 0;
+    if (moved) {
+      annotationsRef.current = next;
+      setAnnotations(next);
+    }
+    return () => window.clearTimeout(timer);
+  }, [annotations, items, settle]);
+
+  // The agent's answer to a note (scripts/reply.sh) lands on that note. Questions
+  // are asked on the canvas, at the thing they are about, so that is where the
+  // answer belongs; the same goes for "I did not do this, because…", which in the
+  // chat is far from the pin it explains. One notice says answers came, with a way
+  // to them, since a pin can be anywhere on the canvas.
+  const revealRef = useRef(reveal);
+  revealRef.current = reveal;
+  const heard = useRef<{ ids: string[]; timer: number }>({ ids: [], timer: 0 });
+  useAgentReplies((reply, live) => {
+    const note = annotationsRef.current.find((a) => a.id === reply.id);
+    if (!note) {
+      // The note is gone (deleted, or cleared when its item changed before the answer came): the words are still said, once.
+      if (live) notify(labels.agentReplyLoose(reply.text), undefined, true);
+      return;
+    }
+    // Heard already, or an answer to an earlier wording of a note that was edited and sent again.
+    if (note.reply === reply.text || !note.sent || (note.sentAt !== undefined && reply.at && reply.at < note.sentAt)) return;
+    annotationsRef.current = annotationsRef.current.map((a) => (a.id === reply.id ? { ...a, reply: reply.text, seen: undefined } : a));
+    setAnnotations(annotationsRef.current);
+    // Answers that come together are one notice.
+    heard.current.ids.push(reply.id);
+    window.clearTimeout(heard.current.timer);
+    heard.current.timer = window.setTimeout(() => {
+      const ids = [...new Set(heard.current.ids)];
+      heard.current.ids = [];
+      const first = annotationsRef.current.find((a) => ids.includes(a.id) && sectionOf(a) === null);
+      const item = first && itemsRef.current.find((entry) => entry.id === first.itemId);
+      notify(labels.agentReplied(ids.length), item ? { label: labels.showReply, run: () => revealRef.current([item]) } : undefined, true);
+    }, 150);
+  });
 
   // A planned card's own buttons (Planned.tsx). Drop is the ordinary trash, Undo
   // included. Build is a note on the whole card, changed in place (the card
@@ -4505,7 +4766,17 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
   // A shared file only shows notes and sections; while a Note or Section tool is armed the canvas takes every press.
   const boardInteractive = !shared && !boardTool;
 
+  // At least one: the note being written counts as soon as it is sent from, even before the bar has counted it.
+  const sendWords = useMemo(() => {
+    const n = Math.max(1, unsentCount);
+    return {
+      label: agentOn ? labels.sendShort(n) : labels.copyShort(n),
+      name: agentOn ? labels.sendAnnotations(n) : labels.copyAnnotations(n),
+      agentOn,
+    };
+  }, [agentOn, unsentCount]);
   return (
+    <SendContext.Provider value={sendWords}>
     <div className="canvas-root">
       <div
         ref={viewportRef}
@@ -4879,5 +5150,6 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       </span>
       <div ref={liveRef} className="canvas-live" aria-live="polite" />
     </div>
+    </SendContext.Provider>
   );
 }

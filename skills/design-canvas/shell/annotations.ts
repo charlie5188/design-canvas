@@ -16,8 +16,14 @@
 // of a change to it. The original never changes then, so it is sent with the
 // number of items that name it as `from`, and leaves once that number grows.
 
+import { MAX_REPLY } from "./channel.ts";
 import { renderedHtml } from "./dom";
 import { labels } from "./labels";
+
+/** One earlier turn on a note. */
+export type ThreadMessage = { who: "me" | "agent"; text: string };
+/** A long exchange belongs in the chat; a note keeps the last turns. */
+const MAX_THREAD = 20;
 
 export type Annotation = {
   id: string;
@@ -53,6 +59,24 @@ export type Annotation = {
    * agent listens again. Never together with `sent`.
    */
   queued?: boolean;
+  /** When it was sent or copied (ms). An answer older than this was for an earlier wording. */
+  sentAt?: number;
+  /**
+   * What the agent answered on this note (scripts/reply.sh): the answer to a
+   * question, or why a change was not made as asked. Plain text. A note with a
+   * reply stays until the person deletes it, also when its item changes.
+   * Editing the note makes it a new request, and the reply goes.
+   */
+  reply?: string;
+  /** The person has opened the note since the reply came. */
+  seen?: boolean;
+  /**
+   * The turns before the current `text`, oldest first: a note is a short
+   * conversation, as a comment and the replies under it. When the person
+   * answers the agent's reply, their old words and that reply move here, and
+   * `text` becomes what they say now, a note to send like any other.
+   */
+  thread?: ThreadMessage[];
 };
 
 const VERSION = 1;
@@ -90,12 +114,33 @@ const valid = (value: unknown, ids: ReadonlySet<string>): Annotation | undefined
   const queued = c.queued === true && !("sent" in sent) ? { queued: true } : {};
   const area =
     finite(c.w) && finite(c.h) && c.w > 0 && c.h > 0 && c.w <= COORD_LIMIT && c.h <= COORD_LIMIT ? { w: c.w, h: c.h } : {};
-  return { id: c.id, itemId: c.itemId, x: c.x, y: c.y, ...area, ref: c.ref, text: c.text, ...version, ...sent, ...queued };
+  const sentAt = "sent" in sent && finite(c.sentAt) ? { sentAt: c.sentAt } : {};
+  const reply = typeof c.reply === "string" && c.reply.trim() && c.reply.length <= MAX_REPLY ? { reply: c.reply, ...(c.seen === true ? { seen: true } : {}) } : {};
+  const turns = (Array.isArray(c.thread) ? c.thread : [])
+    .filter((m): m is ThreadMessage => !!m && (m.who === "me" || m.who === "agent") && typeof m.text === "string" && !!m.text.trim() && m.text.length <= MAX_TEXT)
+    .slice(-MAX_THREAD)
+    .map((m) => ({ who: m.who, text: m.text }));
+  const thread = turns.length ? { thread: turns } : {};
+  return { id: c.id, itemId: c.itemId, x: c.x, y: c.y, ...area, ref: c.ref, text: c.text, ...version, ...sent, ...sentAt, ...queued, ...reply, ...thread };
 };
 
 /** Where an annotation points and what it names, without its note or state: for copies that change the rest. */
 export const placeOf = ({ id, itemId, x, y, w, h, ref }: Annotation) =>
   w && h ? { id, itemId, x, y, w, h, ref } : { id, itemId, x, y, ref };
+
+/** The turns already had on a note, kept when its current words change. */
+export const threadOf = ({ thread }: Annotation) => (thread?.length ? { thread } : {});
+
+/**
+ * The note after the person answers the agent's reply: what was said so far
+ * becomes the thread, and `text` is a new note to send, on the same pin.
+ */
+export const withFollowUp = (a: Annotation, text: string): Annotation => ({
+  ...placeOf(a),
+  text: limitText(text),
+  ...(a.version ? { version: true } : {}),
+  thread: [...(a.thread ?? []), { who: "me" as const, text: a.text }, ...(a.reply ? [{ who: "agent" as const, text: a.reply }] : [])].slice(-MAX_THREAD),
+});
 
 /** Saved annotations for items that still exist; anything invalid is dropped. */
 export function loadAnnotations(storageKey: string, ids: ReadonlySet<string>): Annotation[] {
@@ -157,7 +202,8 @@ export function fingerprintItem(preview: Element | null): string | undefined {
 
 /**
  * One message for the conversation: a heading, then each reference with its
- * note indented under it, numbered like the unsent pins. When some items
+ * note indented under it, numbered like the unsent pins, and the note's id on a
+ * last line, which is what the agent names to answer on that pin. When some items
  * should get a new version, a last line names them with their numbers; the
  * rest change in place.
  */
@@ -168,10 +214,14 @@ export function formatAnnotations(
   sectionRef: (id: string) => string | undefined = () => undefined,
 ) {
   const entries = annotations.map((annotation, index) => {
-    const body = annotation.text.trim().split(/\r?\n/).join("\n   ");
+    const lines = (text: string, indent: string) => text.trim().split(/\r?\n/).join(`\n${indent}`);
+    const body = lines(annotation.text, "   ");
     const section = sectionOf(annotation);
     const ref = (section !== null && sectionRef(section)) || annotation.ref;
-    return `${index + 1}. ${ref}\n   ${body}`;
+    // A note that continues a conversation carries it, so it reads whole in another session or after a compaction.
+    const earlier = (annotation.thread ?? []).map((m) => `   - ${m.who === "me" ? labels.threadPerson : labels.threadAgentYou}: ${lines(m.text, "     ")}`);
+    const said = earlier.length ? `   ${labels.threadEarlier}\n${earlier.join("\n")}\n   ${labels.threadNow}: ${body}` : `   ${body}`;
+    return `${index + 1}. ${ref}\n${said}\n   (note ${annotation.id})`;
   });
   const versioned = new Map<string, number[]>();
   annotations.forEach((annotation, index) => {

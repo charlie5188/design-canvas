@@ -126,6 +126,28 @@ export function describeElement(element: Element, root: Element) {
 }
 
 /**
+ * The element a reference from describeElement names now: the other way round.
+ * A pin is placed at a point, and a point does not follow its element when the
+ * item is resized and the layout moves; the reference does. Null when nothing
+ * matches, for example after the words changed.
+ */
+export function findDescribed(root: Element, described: string): Element | null {
+  const numbered = /^(.*) \((\d+)\/(\d+)\)$/.exec(described);
+  const text = numbered ? numbered[1]! : described;
+  // describeElement numbers look-alikes among elements of one tag, so matches are grouped the same way.
+  const byTag = new Map<string, Element[]>();
+  for (const element of root.querySelectorAll("*")) {
+    if (describeOne(element) !== text) continue;
+    byTag.set(element.tagName, [...(byTag.get(element.tagName) ?? []), element]);
+  }
+  const groups = [...byTag.values()];
+  if (numbered) return groups.find((group) => group.length === Number(numbered[3]))?.[Number(numbered[2]) - 1] ?? null;
+  // A wrapper can read the same as the text inside it; the one a click would have picked is the one meant.
+  const singles = groups.filter((group) => group.length === 1).map((group) => group[0]!);
+  return singles.find((element) => pickElement(element, root) === element) ?? singles[0] ?? null;
+}
+
+/**
  * What an area drawn over a preview holds, for its reference: the controls,
  * headings, and texts entirely inside `area` (client coordinates), outermost
  * first, at most `limit` of them, and how many more there are.
