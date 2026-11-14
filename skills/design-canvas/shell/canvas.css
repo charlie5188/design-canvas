@@ -555,6 +555,22 @@ html[data-canvas-alt] .canvas-frame-root * {
   background: color-mix(in srgb, var(--canvas-focus-color) 10%, transparent);
   pointer-events: none;
 }
+/* Alignment guides while an item is dragged. Placed in canvas units by the
+   canvas; the thickness counter-scales so a guide is 1px on screen at any zoom. */
+.canvas-guide {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  z-index: 2;
+  background: var(--canvas-focus-color);
+  pointer-events: none;
+}
+.canvas-guide[data-guide="vertical"] {
+  inline-size: calc(1px * var(--canvas-unzoom, 1));
+}
+.canvas-guide[data-guide="horizontal"] {
+  block-size: calc(1px * var(--canvas-unzoom, 1));
+}
 .canvas-area {
   position: absolute;
   box-sizing: border-box;

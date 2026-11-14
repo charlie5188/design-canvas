@@ -102,6 +102,7 @@ import {
   zoomAt,
 } from "./layout";
 import { type ThemeStore, useThemeId } from "./theme";
+import { type Box, type Guide, SNAP_DISTANCE, type Snap, snapBox } from "./snap";
 import type { CanvasItem, CanvasNote, CanvasSection } from "./types";
 import { EDIT_PATH, VERSION_PATH } from "./channel.ts";
 import type { DirectAdd, DirectEdit, DirectRemove } from "./registry-edit.ts";
@@ -1605,6 +1606,24 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
   const sectionRefRef = useRef<(id: string) => string | undefined>(() => undefined);
   /** Outlines the sections a dragged box would be in; null clears them (see where it is set). */
   const dropTargetRef = useRef<(box: { x: number; y: number; w: number; h: number } | null) => void>(() => {});
+  // The two alignment guides shown while an item is dragged. They are always in
+  // the page and only shown, hidden, and placed here: adding or removing a node on
+  // every pointer move would restyle the whole page (see `render`).
+  const guideVRef = useRef<HTMLDivElement>(null);
+  const guideHRef = useRef<HTMLDivElement>(null);
+  const guidesRef = useRef((snap: Snap | null) => {
+    const place = (element: HTMLDivElement | null, guide: Guide | undefined, vertical: boolean) => {
+      if (!element) return;
+      if (element.hidden !== !guide) element.hidden = !guide;
+      if (!guide) return;
+      const length = `${guide.to - guide.from}px`;
+      element.style.transform = vertical ? `translate(${guide.at}px, ${guide.from}px)` : `translate(${guide.from}px, ${guide.at}px)`;
+      if (vertical) element.style.height = length;
+      else element.style.width = length;
+    };
+    place(guideVRef.current, snap?.vertical, true);
+    place(guideHRef.current, snap?.horizontal, false);
+  });
   const boardContext = useMemo<BoardContext>(
     () => ({
       entryOf: (kind, id) => {
@@ -3281,6 +3300,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     if (!current) return;
     if (current.kind === "move") {
       dropTargetRef.current(null);
+      guidesRef.current(null);
       const element = elements.current.get(current.id);
       const transform = element?.style.transform.match(/translate\((-?[\d.]+)px, (-?[\d.]+)px\)/);
       if (transform) {
@@ -4137,6 +4157,24 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       const startY = event.clientY;
       const origin = positionsRef.current[item.id] ?? { x: item.x, y: item.y };
       const element = elements.current.get(item.id);
+      // Alignment snapping (see snap.ts). The other previews are measured once,
+      // when the drag starts: nothing else moves during it. `mine` is this item's
+      // preview relative to the item's own position, which is what the drag sets.
+      let others: Box[] = [];
+      let mine: Box | null = null;
+      const measure = () => {
+        const world = worldRef.current;
+        if (!world) return;
+        const z = camera.current.z;
+        const base = world.getBoundingClientRect();
+        const boxOf = (id: string): Box | null => {
+          const r = elements.current.get(id)?.querySelector("[data-canvas-preview]")?.getBoundingClientRect();
+          return r ? { x: (r.left - base.left) / z, y: (r.top - base.top) / z, w: r.width / z, h: r.height / z } : null;
+        };
+        const own = boxOf(item.id);
+        mine = own && { ...own, x: own.x - origin.x, y: own.y - origin.y };
+        others = [...elements.current.keys()].flatMap((id) => (id === item.id ? [] : (boxOf(id) ?? [])));
+      };
       const onMove = (move: PointerEvent) => {
         if (move.pointerId !== pointerId || !element) return;
         let current = gesture.current;
@@ -4145,11 +4183,23 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
           current = { kind: "move", pointerId, id: item.id, startX, startY, origin, moved: 0 };
           gesture.current = current;
           viewportRef.current?.setAttribute("data-gesture", "move");
+          measure();
         }
         if (current.kind !== "move" || current.pointerId !== pointerId) return;
         const z = camera.current.z;
         current.moved = Math.abs(move.clientX - startX) + Math.abs(move.clientY - startY);
-        const next = sanitizePosition({ x: origin.x + (move.clientX - startX) / z, y: origin.y + (move.clientY - startY) / z });
+        let dx = (move.clientX - startX) / z;
+        let dy = (move.clientY - startY) / z;
+        // Shift keeps the drag on the axis it has travelled furthest along, as in
+        // design tools; the locked axis then does not snap either.
+        const free = { x: !move.shiftKey || Math.abs(dx) >= Math.abs(dy), y: !move.shiftKey || Math.abs(dy) > Math.abs(dx) };
+        if (!free.x) dx = 0;
+        if (!free.y) dy = 0;
+        const snap = mine
+          ? snapBox({ ...mine, x: origin.x + dx + mine.x, y: origin.y + dy + mine.y }, others, SNAP_DISTANCE / z, free)
+          : null;
+        const next = sanitizePosition({ x: origin.x + dx + (snap?.dx ?? 0), y: origin.y + dy + (snap?.dy ?? 0) });
+        guidesRef.current(snap);
         element.style.transform = `translate(${next.x}px, ${next.y}px)`;
         dropTargetRef.current({ ...next, w: element.offsetWidth, h: element.offsetHeight });
       };
@@ -4300,6 +4350,8 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
               </div>
             );
           })}
+          <div ref={guideVRef} className="canvas-guide" data-guide="vertical" hidden aria-hidden="true" />
+          <div ref={guideHRef} className="canvas-guide" data-guide="horizontal" hidden aria-hidden="true" />
         </div>
       </div>
       <div ref={pickRef} className="canvas-pick" hidden aria-hidden="true" />

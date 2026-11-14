@@ -1089,6 +1089,51 @@ test('dragging an item or a note outlines the section it will land in', async ({
   }
 })
 
+test('a dragged item snaps to another preview\'s edge and shows a guide', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    const two = original.replace(
+      /\];\s*$/,
+      '  { id: "other", name: "Other", component: Example, x: 500, y: 400, width: 360, height: 180 },\n];\n',
+    )
+    writeFileSync(REGISTRY, two)
+    await expect
+      .poll(async () => (await (await page.request.get('/registry.tsx')).text()).includes('id: "other"'), { timeout: 15_000 })
+      .toBe(true)
+    await page.goto('/')
+    const other = page.locator('.canvas-item[data-canvas-item="other"]')
+    await expect(other).toBeVisible()
+    await page.waitForTimeout(600)
+    const preview = (id: string) => page.locator(`[data-canvas-preview="${id}"]`).boundingBox().then((box) => box!)
+    const target = await preview('example')
+    const from = await preview('other')
+    const name = (await other.locator('.canvas-name').boundingBox())!
+    const px = name.x + name.width / 2
+    const py = name.y + name.height / 2
+    const guide = page.locator('.canvas-guide[data-guide="vertical"]')
+    await page.mouse.move(px, py)
+    await page.mouse.down()
+    // Dropped 4 px short of the other preview's left edge, it catches on it.
+    await page.mouse.move(px + (target.x - from.x) + 4, py, { steps: 8 })
+    expect(Math.abs((await preview('other')).x - target.x)).toBeLessThan(0.75)
+    await expect(guide).toBeVisible()
+    // Well clear of any edge or centre, it follows the pointer and the guide goes.
+    await page.mouse.move(px + (target.x - from.x) + 60, py, { steps: 8 })
+    expect((await preview('other')).x - target.x).toBeGreaterThan(40)
+    await expect(guide).toBeHidden()
+    await page.mouse.move(px + (target.x - from.x) - 3, py, { steps: 8 })
+    await expect(guide).toBeVisible()
+    await page.mouse.up()
+    await expect(guide).toBeHidden()
+    // The aligned position is what is saved.
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toMatch(/id: "other"[^}]*x: 0,/)
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
 test('a click on a section title in annotate mode is a note on the whole section', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   const original = readFileSync(REGISTRY, 'utf8')
