@@ -15,6 +15,7 @@ Instead of asking the agent to build a canvas from scratch for every project, th
 - **Talk about what you see.** Click an item's name to copy it. Hold ⌥/Alt and click any element to copy a reference such as `Pricing card · compact › button “Upgrade”`, then paste it into the conversation.
 - **Request many changes, send once.** Press A or the Request change button, then click an element, drag across an area, or click an item's name for the whole item, and write a note on each. Click a section's title to write one note about everything in it, such as "make one flow from these screens"; the message lists its items in the order you laid them out. Double-click a text to rewrite it where it sits; the new words stay on screen, underlined, so you can judge several rewrites together, and the edit becomes a note that says the old and new words. Send them all to the agent as one numbered message, straight from the canvas; each item and section in the message shows an "Agent working" tag, with a beam running around its border, until the agent finishes, and each pin clears itself once the agent has changed its item. Agents that can't listen in the background, such as ones without background commands, get the same message by copy and paste.
 - **Explain it to whoever opens the file.** Add a sticker note anywhere on the canvas, or draw a folder-style section around the versions you set aside and give it a title. Move them, resize them, and edit their text like objects on any canvas. Each change waits as a dashed "Not applied yet" ghost, goes to the agent with your other annotations when you press Apply, and becomes part of the shared file once the agent has written it in. Moving an item works the same way, since the shared file uses the positions in your code.
+- **See the plan before it is built.** When directions take real work to build, the agent first puts a card for each one on the canvas: a rough sketch of the layout, what it bets on, what it gives up, and what it borrows from. Press Drop on the ones you don't want, rewrite a card's text if the idea is off, and press Build this on the ones worth seeing. Each card becomes the live version in the same place.
 - **New versions beside the original.** Each note asks for a new version by default, so the agent keeps the original and adds the change next to it, and you compare both. Uncheck it to change the item in place.
 - **A trash you can undo.** Move a version you don't want to the trash. The trash shows small live previews, and one click puts an item back where it was. Its code stays until you ask the agent to remove it.
 - **Real viewports.** Mark an item `viewport: true` and it renders in a frame of its own width, so breakpoints and media queries behave as on a real phone or desktop.
@@ -74,6 +75,7 @@ Click Share (the share icon) at the top right of the canvas, or ask the agent to
 - **Send it.** Share it like any file, in Slack, email, or Drive.
 - **Put it in Figma.** Drag the file onto a Figma canvas. It becomes a code layer: press play to use it, or play it full screen.
 - **Put it in Notion.** Drag the file into a Notion page. It becomes an embedded web page that people can use right in the page.
+- **Get comments on a link (Claude).** If your agent is Claude, ask it to "publish the canvas as a link for comments". It publishes the same file as a private Claude Artifact. Share the link from the Artifact's Share menu, and reviewers comment on the page itself. Ask the agent to read the comments, or send a comment to Claude from its thread: the agent makes the change and updates the same link.
 
 The file is a snapshot, so share again after changes. It holds every item's data, so keep items on made-up data. Annotations and sending to the agent are not in the file.
 
@@ -120,6 +122,7 @@ React アプリの実際のコンポーネントを、パン・ズームでき�
 - **見ているものをそのまま会話に。** アイテム名をクリックすると名前をコピーできます。⌥/Alt を押しながら要素をクリックすると、`Pricing card · compact › button “Upgrade”` のような参照をコピーでき、そのまま会話に貼り付けられます。
 - **まとめて注釈して、一度で送信。** A キーか Request change ボタンで注釈モードにし、要素をクリックするか、範囲をドラッグで囲むか、アイテム名をクリックしてアイテム全体を選び、それぞれにメモを書きます。セクションのタイトルをクリックすると、中のアイテムすべてについて 1 つのメモを書けます（例：「この画面をつないで 1 つのフローにして」）。メッセージには、中のアイテムが並べた順に入ります。テキストをダブルクリックすると、その場で文言を書き換えられます。新しい文言は下線付きで画面に残るので、複数の書き換えをまとめて確かめられます。書き換えは、元の文言と新しい文言を示すメモになります。すべてを番号付きの 1 つのメッセージとして、キャンバスから直接エージェントに送れます。エージェントが作業を終えるまで、メッセージに含まれるアイテムとセクションには「Agent working」のタグが付き、枠に沿って光のビームが回ります。エージェントがそのアイテムを変更すると、ピンは自動で消えます。バックグラウンドで待機できないエージェント（バックグラウンドコマンドがないものなど）には、同じメッセージをコピーして貼り付けます。
 - **開いた人に説明を添える。** 付箋のノートをキャンバスのどこにでも置いたり、見送った案をフォルダ型のセクションで囲んでタイトルを付けたりできます。移動、サイズ変更、文字の編集もできます。エージェントが反映するまでは「Not applied yet」の破線のゴーストとして残り、Apply を押すと他の注釈と一緒に送られます。エージェントが書き込むと、共有ファイルの一部になります。アイテムを動かした場合も同じです。共有ファイルはコード内の位置を使うためです。
+- **作る前に計画を確認。** 作るのに手間がかかる方向性は、エージェントがまず 1 案ずつカードにしてキャンバスに置きます。カードには、レイアウトのラフなスケッチと、その案が何に賭けるか、何をあきらめるか、どの製品を参考にしたかが書かれています。いらない案は Drop を押し、内容が違うと思ったらカードの文言を書き換え、見てみたい案は Build this を押します。各カードは、同じ場所で実際に動く案に置き換わります。
 - **新しい案は元の案の隣に。** 注釈は初期設定で新しい案を求めます。エージェントは元の案を残したまま変更を隣に追加するので、2 つを見比べられます。チェックを外すと、そのアイテム自体を変更します。
 - **元に戻せるゴミ箱。** いらない案はゴミ箱に移せます。ゴミ箱では小さなライブプレビューが表示され、クリックすると元の位置に戻ります。コードは、エージェントに削除を頼むまで残ります。
 - **本物のビューポート。** アイテムに `viewport: true` を指定すると、そのアイテムの幅を持つフレーム内で表示されます。ブレークポイントやメディアクエリが、実際のスマートフォンやデスクトップと同じように動きます。
@@ -179,6 +182,7 @@ npx skills add charlie5188/design-canvas --skill '*'
 - **送る。** Slack、メール、Drive など、普通のファイルと同じように共有できます。
 - **Figma に置く。** ファイルを Figma のキャンバスにドラッグすると、コードレイヤーになります。再生ボタンを押すと操作でき、フルスクリーンでも再生できます。
 - **Notion に置く。** ファイルを Notion のページにドラッグすると、埋め込みのウェブページになり、ページの中でそのまま操作できます。
+- **リンクでコメントをもらう（Claude）。** エージェントが Claude の場合は、「キャンバスをコメント用のリンクとして公開して」と頼みます。同じファイルが非公開の Claude Artifact として公開されます。Artifact の共有メニューからリンクを共有すると、レビューする人がページ上に直接コメントできます。コメントを読むようエージェントに頼むか、コメントのスレッドから Claude に送ると、エージェントが変更を加えて同じリンクを更新します。
 
 ファイルはその時点のスナップショットなので、変更したらもう一度共有してください。すべてのアイテムのデータが含まれるので、アイテムには架空のデータを使ってください。注釈とエージェントへの送信は含まれません。
 

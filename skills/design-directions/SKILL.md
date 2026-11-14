@@ -68,6 +68,8 @@ Before you build, check each pair of directions. Do this silently; do not print 
 
 When the directions need new components, several screens, or more than three items, first list them in the Report format below, with your sources. Ask the person to go ahead. Skip this for variations, small requests, or when the person said to just build.
 
+When a design canvas is open for this work, do not list the directions in the chat. Put each one on the canvas as a planned card (see "Planned directions" in the `design-canvas` skill), and give only your sources in the chat. The person builds or drops each one from its card.
+
 ## 7. Converge
 
 - When the person chooses one ("go with B", "this one"), stop making directions and refine that one.

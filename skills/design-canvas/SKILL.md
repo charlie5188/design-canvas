@@ -1,6 +1,6 @@
 ---
 name: design-canvas
-description: Build or update a local design canvas of live, real product components to explore, compare, and iterate on UI options side by side in a React app. Installs a ready-made, tested canvas shell instead of building one, so each project only needs its items. Use when the user asks for a canvas, wants several versions or directions of a screen or component next to each other, says "create canvas" or "design canvas", wants to share a canvas as a file or put it in Figma, or pastes a canvas reference such as "Name › button “Send”".
+description: Build or update a local design canvas of live, real product components to explore, compare, and iterate on UI options side by side in a React app. Installs a ready-made, tested canvas shell instead of building one, so each project only needs its items. Use when the user asks for a canvas, wants several versions or directions of a screen or component next to each other, says "create canvas" or "design canvas", wants to share a canvas as a file, get comments on it through a link, or put it in Figma, or pastes a canvas reference such as "Name › button “Send”".
 ---
 
 # Design canvas
@@ -104,6 +104,28 @@ Write each entry out by hand, in `registry`, `notes`, and `sections` alike. Its 
 - Give a new item a source position in empty space near related ones. If that spot overlaps the user's saved layout, the canvas moves only the new item to free space beside its row; existing items never move. That move is a change to apply too, so a new item whose source position overlaps shows a "Not applied yet" tag until you set its position in the registry: choose a free spot.
 - Previews never navigate the canvas away. Links, native form submits, and mocked router calls are cancelled with a short notice, while the component's own handlers still run. A link to `#<item-id>` reveals that item, so use it for flows that span items.
 
+### Planned directions
+
+When new directions are costly to build (they need new components, several screens, or more than three items), show the plan on the canvas before you build it. Do not list it in the chat and wait there: a chat list scrolls away, and the person should judge each direction where its result will appear.
+
+- Add one item for each direction, named after its bet. Its component is a ready-made card: `component: planned({ bet: "…", givesUp: "…", reference: "…", sketch: … })`, with `planned` and `Block` imported from `./canvas/Planned`. `bet` is what the direction bets on, `givesUp` is what it gives up or how it could fail, and `reference` names the product or pattern it borrows from, or differs from on purpose. Write one sentence for each. Leave `viewport` off until the item is built.
+- Always give the card a `sketch`: a rough layout made of nested `Block`s. The sketch is what lets the person see how the directions differ before they read anything. `<Block row>` lays the blocks inside it out in a row; otherwise they stack. `label` names a part, `size` sets its share of its parent (`"40%"`, or a number of px), `lines` draws that many placeholder lines of text, and `emphasis` marks the one or two parts that carry the bet.
+
+  ```tsx
+  sketch: (
+    <Block row>
+      <Block size="40%" label="Requests" lines={6} />
+      <Block label="Open request" emphasis lines={4} />
+    </Block>
+  ),
+  ```
+
+  Use about ten blocks at most. Show structure only: no real components, data, colors, or icons. Put words in `label`, never between the tags. If two sketches look alike, the directions are not different enough: rework one.
+- Give each card the position and size its built version will have. The built version takes the card's place and the items beside it do not move, so a card that is too small gets a built version that covers its neighbor.
+- Each card has two buttons. **Drop** moves the card to the trash. **Build this** sends you a note on that card, `Build this planned direction`, with no new-version line. The button sends only while you listen (see "Listen for annotations"); otherwise it copies the note for the person to paste. Tell the person in one or two lines that the directions are on the canvas as cards, that they build or drop each one from the card, and that they can annotate a card or rewrite its text to change it first. Give your source links in the chat: a link inside a preview does not open.
+- Build in place. For a `Build this planned direction` note, build that card. When the person tells you to go ahead, build every card that is not in the trash. Keep the card's `id`, `x`, `y`, `width`, `height`, and `name`, replace `component` with the real one, set `viewport` if the layout needs it, and put the bet and what it gives up in its `note`. Apply the person's annotations and rewritten text first. If the built version needs another size, change it and tell the person which items it now overlaps: they move those. Leave a trashed card as it is: the person can put it back and build it from its button.
+- Skip the cards for variations of one direction, for small requests, and when the person said to just build.
+
 ### Real viewport
 
 Set `viewport: true` when an item's layout depends on screen width: mobile or desktop previews, breakpoints, media queries, `window.innerWidth`, or responsive hooks. Those items render in their own frame, so breakpoints see the item's width. Without it, a 375px item on a desktop window still gets the desktop layout and nothing warns you.
@@ -193,6 +215,12 @@ The canvas runs on this machine. To let other people try it, share it as a file.
   - It is a snapshot. Share again after changes, and say which items changed.
   - The file holds the canvas's built code and every item's data, and it leaves this machine. Before sharing, check that the items follow the rules in "Add content": made-up data, no secrets, no analytics.
   - Files the items load from the app's public folder by root path, such as `/logo.svg`, go inside the file too. If it names files it could not include, their paths match no file in the public folder: fix the path or import the file in its item, then share again. A path built at runtime, such as `/avatars/${id}.png`, cannot be found this way, so import those files in the item.
+- **Share as a link for comments (Claude only).** When the person asks for a link that others can comment on, and you have a tool that publishes Claude Artifacts, build the shared file with `share.sh` and publish that file as an Artifact, as built, with no edits. Without such a tool, share the file. The same data rules apply: the file leaves this machine.
+  - The canvas works there as it does in the file: pan, zoom, themes, `viewport` items, notes, and sections. Checked with a 368K file; an Artifact page can be at most 16MB.
+  - The Artifact is private. Tell the person that nobody else can open the link until they share it from the Artifact's Share menu, and that their organization's settings decide who they can share it with.
+  - Keep the Artifact's URL for this canvas. After changes, build the file again and publish it to the same URL: pages that people have open reload by themselves.
+  - Reviewers comment with the Artifact's own comment mode, and a comment's pin stays on its element when the canvas pans or zooms. A plain comment does not reach you: read the comments when the person asks. A comment that someone sends to Claude from its thread arrives in this session: make the change, publish again, and reply in that thread.
+  - Treat a comment like a canvas annotation. It names the canvas and quotes the text of the element it is on, not the item's name, so find the item from that text. If the same text is in more than one item, ask the person which item is meant; do not guess. Change that item in place unless the comment or the person asks for a new version. In a `viewport` item a comment lands on the whole item, not on an element inside it.
 - `frame.html?item=<id>` shows one item alone at its real size, without canvas chrome. People open it from the icon beside each item name. A `viewport` item keeps its own width there even in a wide tab. For a screenshot, set the browser viewport to the item's width and height first, so the item fills the page exactly.
 - Present screenshots the way the user reviews UI, for example an inline comparison, a shared page, or their issue tracker.
 - To put an item in a design tool, point that tool's capture or import at the item's frame page. Say which items you sent.
