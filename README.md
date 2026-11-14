@@ -22,7 +22,7 @@ Instead of asking the agent to build a canvas from scratch for every project, th
 - **Stays on the canvas.** Links, form submits, and router calls inside previews never navigate away; they show where they would have gone.
 - **One item alone.** Open any item in its own tab at its real size, ready for a screenshot or a design-tool import.
 - **Share as one file.** Click Share at the top right, or ask the agent, to get one HTML file that anyone can open with a double-click, with no server or setup. Drag the file into Figma to get a code layer you can play full screen. Notes and sections come with it; annotations and sending to the agent stay out of the shared file.
-- **A quiet workspace.** Drag items by their name, pan, zoom, fit all, and reload without losing the layout. Figma's zoom keys work too: hold Z and click or drag, Shift + 0, 1, and 2.
+- **A quiet workspace.** Drag items by their name, and they snap into line with the others. Pan, zoom, fit all, and reload without losing the layout. Figma's zoom keys work too: hold Z and click or drag, Shift + 0, 1, and 2.
 
 ## Compared with Claude Design, Paper, and Figma
 
@@ -127,7 +127,7 @@ React アプリの実際のコンポーネントを、パン・ズームでき�
 - **キャンバスから離れない。** プレビュー内のリンク、フォーム送信、ルーター呼び出しでページが遷移することはありません。遷移先は通知で表示されます。
 - **アイテム単体で開く。** どのアイテムも実寸のまま別タブで開けます。スクリーンショットやデザインツールへの取り込みにそのまま使えます。
 - **1 つのファイルで共有。** 右上の Share をクリックするか、エージェントに頼むと、1 つの HTML ファイルができます。サーバーや準備は不要で、誰でもダブルクリックで開けます。Figma にドラッグすると、フルスクリーンで操作できるコードレイヤーになります。ノートとセクションは共有ファイルに含まれます。注釈とエージェントへの送信は含まれません。
-- **静かな作業スペース。** 名前をドラッグしてアイテムを移動し、パン、ズーム、全体表示ができます。再読み込みしてもレイアウトは保たれます。Figma と同じズーム操作も使えます（Z を押しながらクリックまたはドラッグ、Shift + 0・1・2）。
+- **静かな作業スペース。** 名前をドラッグしてアイテムを移動すると、ほかのアイテムと揃う位置に吸着します。パン、ズーム、全体表示もできます。再読み込みしてもレイアウトは保たれます。Figma と同じズーム操作も使えます（Z を押しながらクリックまたはドラッグ、Shift + 0・1・2）。
 
 ### Claude Design、Paper、Figma との違い
 

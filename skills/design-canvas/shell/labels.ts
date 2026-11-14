@@ -22,7 +22,7 @@ export const labels = {
   editHelp: EDIT_HELP,
   helpLines: [
     "Drag empty space to pan",
-    "Drag an item's name or grip to move it",
+    "Drag an item's name or grip to move it. It snaps to other items; hold Shift to keep it straight",
     "⌘/Ctrl + scroll or pinch to zoom. Or hold Z and click to zoom in, add ⌥/Alt to zoom out, or drag to zoom to an area",
     "Hold Space or the middle button and drag to pan anywhere",
     "Hold ⌥/Alt and click an element to copy a reference to it",
