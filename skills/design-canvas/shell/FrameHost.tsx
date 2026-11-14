@@ -1,6 +1,20 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { frameParams, frameSource, fromThisCanvas, NAVIGATE_EVENT, postToCanvas, readCanvasMessage } from "./bridge";
-import { describeArea, describeElement, isEditable, nestedCanScroll, pickElement, previewLink, wheelPixels } from "./dom";
+import {
+  clearPending,
+  describeArea,
+  describeElement,
+  editText,
+  isEditable,
+  nestedCanScroll,
+  pendingOf,
+  pickElement,
+  previewLink,
+  showPending,
+  type TextEdit,
+  textTarget,
+  wheelPixels,
+} from "./dom";
 import { labels } from "./labels";
 import { loadTheme } from "./layout";
 import type { ThemeStore } from "./theme";
@@ -119,6 +133,10 @@ export function FrameHost({
     let drawing: { pointerId: number; x: number; y: number; moved: boolean } | null = null;
     // Set for the click that ends a drag, so it does not also annotate one element.
     let clickAfterDraw = false;
+    // A double-click on a text edits its words in place, as on the canvas page;
+    // the canvas makes the annotation.
+    let textEdit: TextEdit | null = null;
+    const inTextEdit = (target: EventTarget | null) => !!textEdit && target instanceof Node && textEdit.element.contains(target);
     const areaOf = (current: NonNullable<typeof drawing>, clientX: number, clientY: number) => {
       const rect = root.getBoundingClientRect();
       const clampX = (x: number) => Math.min(rect.right, Math.max(rect.left, x));
@@ -154,6 +172,7 @@ export function FrameHost({
       pointer.x = event.clientX;
       pointer.y = event.clientY;
       document.documentElement.toggleAttribute("data-canvas-alt", event.altKey);
+      if (inTextEdit(event.target)) return hidePick();
       if (drawing && event.pointerId === drawing.pointerId) {
         if (!drawing.moved && Math.hypot(event.clientX - drawing.x, event.clientY - drawing.y) <= 3) return;
         if (!drawing.moved) {
@@ -184,6 +203,12 @@ export function FrameHost({
       else hidePick();
     };
     const blockPick = (event: MouseEvent) => {
+      // Presses in the text being edited place the caret or select; any other press ends the edit.
+      if (inTextEdit(event.target)) {
+        event.stopPropagation();
+        return;
+      }
+      textEdit?.finish(true);
       if ((!event.altKey && !annotating) || !(event.target instanceof Element) || !root.contains(event.target)) return;
       event.preventDefault();
       event.stopPropagation();
@@ -194,6 +219,13 @@ export function FrameHost({
       }
     };
     const onPickClick = (event: MouseEvent) => {
+      // Inside the text being edited a click follows no link and presses no button;
+      // a double-click's second click leaves the double-click to edit the text.
+      if (inTextEdit(event.target) || (annotating && !event.altKey && event.detail > 1)) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       if (clickAfterDraw) {
         event.preventDefault();
         event.stopPropagation();
@@ -208,10 +240,54 @@ export function FrameHost({
       if (event.altKey) postToCanvas({ type: "pick", label });
       else postToCanvas({ type: "annotate", label, x: event.clientX, y: event.clientY });
     };
+    const onPickDoubleClick = (event: MouseEvent) => {
+      // Inside the text being edited, a double-click selects a word and stays there.
+      if (inTextEdit(event.target)) {
+        event.stopPropagation();
+        return;
+      }
+      if (!annotating || event.altKey || !(event.target instanceof Element) || !root.contains(event.target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const element = textTarget(event.target, root);
+      const named = pickElement(event.target, root);
+      if (!element || !named) return;
+      hidePick();
+      // Named before the edit, by the words as they were. Frame pixels are item pixels.
+      const label = describeElement(named, root);
+      const { clientX: x, clientY: y } = event;
+      postToCanvas({ type: "text-edit", on: true });
+      // The canvas page has the keyboard (the first click's note took it), and a
+      // press here never moves it: the edit needs it in this frame.
+      window.focus();
+      // New words already on show: the edit starts from them, and changes their annotation.
+      const pending = pendingOf(element);
+      if (pending) clearPending(pending.id);
+      // Made here, since these words show before the canvas has the annotation.
+      const id = pending?.id ?? `f${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+      textEdit = editText(
+        element,
+        (before, after) => {
+          textEdit = null;
+          if (after === null || (after === before && !pending)) {
+            // Cancelled, or nothing changed: the text shows what it showed before.
+            if (pending) showPending(pending.id, element, pending.words);
+            postToCanvas({ type: "text-edit", on: false });
+            return;
+          }
+          if (after !== before) showPending(id, element, after);
+          postToCanvas({ type: "annotate-text", id, label, x, y, before, after, ...(pending ? { was: pending.words } : {}) });
+        },
+        pending?.words,
+      );
+    };
     const onCanvasMessage = (event: MessageEvent) => {
       if (!fromThisCanvas(event) || event.source !== window.parent) return;
       const message = readCanvasMessage(event.data);
+      if (message?.type === "text-edit-end") textEdit?.finish(true);
+      if (message?.type === "text-revert") clearPending(message.id);
       if (message?.type !== "annotate-mode") return;
+      if (!message.on) textEdit?.finish(false);
       annotating = message.on;
       document.documentElement.toggleAttribute("data-canvas-annotating", annotating);
       if (annotating && pointer.x >= 0) showPick(document.elementFromPoint(pointer.x, pointer.y));
@@ -248,6 +324,7 @@ export function FrameHost({
     window.addEventListener("pointerdown", blockPick, { capture: true });
     window.addEventListener("mousedown", blockPick, { capture: true });
     window.addEventListener("click", onPickClick, { capture: true });
+    window.addEventListener("dblclick", onPickDoubleClick, { capture: true });
     window.addEventListener("pointerup", onDrawEnd, { capture: true });
     window.addEventListener("pointercancel", onDrawEnd, { capture: true });
     // Leaving the frame ends its hover: no outline stays behind on the element last under the pointer.
@@ -266,6 +343,7 @@ export function FrameHost({
       window.removeEventListener("pointerdown", blockPick, { capture: true });
       window.removeEventListener("mousedown", blockPick, { capture: true });
       window.removeEventListener("click", onPickClick, { capture: true });
+      window.removeEventListener("dblclick", onPickDoubleClick, { capture: true });
       window.removeEventListener("pointerup", onDrawEnd, { capture: true });
       window.removeEventListener("pointercancel", onDrawEnd, { capture: true });
       document.documentElement.removeEventListener("pointerleave", hidePick);

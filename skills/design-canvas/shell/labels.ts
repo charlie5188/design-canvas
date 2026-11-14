@@ -1,6 +1,6 @@
 // Canvas chrome copy. Edit here to change the language of the controls.
 const ANNOTATE_HELP =
-  "Press A to request a change: click an element, drag across an area, or click an item's name for the whole item, and say what to change; then apply or copy them all at once";
+  "Press A to request a change: click an element, drag across an area, or click an item's name or a section's title for all of it, and say what to change. Double-click a text to rewrite it in place. Then apply or copy them all at once";
 
 const EDIT_HELP =
   "Drag the border of an item, a note, or a section to resize it. Click a note, or empty space in a section, to select it, then press Delete to remove it. Double-click a caption, a note, or a section's title to edit it";
@@ -58,7 +58,18 @@ export const labels = {
   annotate: "Request change",
   annotateHint: "Request change (A)",
   annotateModeOn:
-    "Request-change mode. Click an element, drag across an area, or click an item's name for the whole item. Press Escape to finish.",
+    "Request-change mode. Click an element, drag across an area, or click an item's name or a section's title for all of it. Double-click a text to rewrite it. Press Escape to finish.",
+  /** The note a text edited in place becomes. Empty `after`: the person deleted the words. */
+  textChange: (before: string, after: string) =>
+    after ? `Change the text from “${before}” to “${after}”` : `Remove the text “${before}”`,
+  /** A note on a whole section, as its card names it. */
+  sectionRef: (title: string) => `Section “${title}”`,
+  /** A section note's reference when sent: the items in it now, in reading order, and its notes. */
+  sectionContents: (title: string, items: string[], notes: string[]) =>
+    `Section “${title}”, ${items.length ? `with these items in reading order: ${items.join(", ")}` : "with no items"}${
+      notes.length ? `; notes in it: ${notes.map((note) => `“${note}”`).join(", ")}` : ""
+    }`,
+  sectionItem: (name: string, id: string) => `${name} (id ${id})`,
   /** An area drawn over a preview, in px from the item's top-left, and what is entirely inside it. */
   areaRef: (w: number, h: number, x: number, y: number, names: string[], more: number) =>
     `area ${w}×${h} at ${x},${y}${names.length ? `: ${names.join(", ")}${more ? ` and ${more} more` : ""}` : ""}`,
@@ -70,6 +81,7 @@ export const labels = {
   queuedPin: (text: string) => `Queued annotation: ${text}`,
   sentNote: "Sent. Clears when this item changes; edit it to send again.",
   sentNoteVersion: "Sent. Clears when its new version appears; edit it to send again.",
+  sentNoteSection: "Sent. Clears when the agent adds or removes an item; edit it to send again.",
   queuedNote: "Queued. The agent gets it when it's free; edit it to take it back.",
   newVersion: "Apply to a new version",
   saveAnnotation: "Save",
@@ -82,8 +94,12 @@ export const labels = {
   sentToAgent: (n: number) => `Sent ${n} change${n === 1 ? "" : "s"} to the agent`,
   queuedForAgent: (n: number) => `Queued ${n} change${n === 1 ? "" : "s"}. The agent gets ${n === 1 ? "it" : "them"} when it's free.`,
   agentGoneCopied: (n: number) => `The agent stopped listening. Copied ${n} change${n === 1 ? "" : "s"} instead.`,
-  /** In the toolbar while the agent handles the notes it was sent. */
+  /** On each item, section, and change the agent is handling, in place of its "Sent" tag. */
   agentWorking: "Agent working",
+  /** On an item the agent added, until the person has seen it; the view no longer moves to it. */
+  freshNew: "New",
+  /** On an item the agent changed after a note, until the person has seen it. */
+  freshUpdated: "Updated",
   share: "Share as an HTML file",
   sharing: "Preparing the file…",
   shared: (file: string) => `Downloaded ${file}`,
@@ -107,7 +123,6 @@ export const labels = {
   // Everything not applied yet, so the name matches "Apply changes".
   discardChanges: "Discard changes",
   discardShort: "Discard",
-  waitingForAgent: (n: number) => `${n} sent · waiting for the agent`,
   discardedChanges: (n: number) => `Discarded ${n} change${n === 1 ? "" : "s"}`,
   clearedSent: (n: number) => `Cleared ${n} sent annotation${n === 1 ? "" : "s"} on updated items`,
   clearedVersioned: (n: number) => `Cleared ${n} sent annotation${n === 1 ? "" : "s"}: new version added`,

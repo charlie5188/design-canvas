@@ -18,6 +18,7 @@ function collectErrors(page: Page) {
 }
 
 const REGISTRY = 'design-canvas/smoke/registry.tsx'
+const EXAMPLE = 'design-canvas/smoke/items/Example.tsx'
 
 // The dev server writes moves and new notes into registry.tsx. Tests about the
 // agent path need the write refused, which is what makes a change fall back to
@@ -874,6 +875,304 @@ test('a drag annotates an area, and the name annotates the whole item', async ({
   expect(errors).toEqual([])
 })
 
+test('a double-click on a text rewrites it in place, and the edit becomes a change', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  const errors = collectErrors(page)
+  await page.goto('/')
+  await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toBeVisible()
+  await page.waitForTimeout(600)
+  await page.getByRole('button', { name: 'Request change', exact: true }).click()
+  const heading = page.locator('.canvas-preview[data-canvas-preview="example"] h2')
+  await heading.dblclick()
+  // The words are edited where they sit, selected, with no note open yet.
+  await expect(heading).toHaveAttribute('data-canvas-editing', '')
+  await expect(page.getByRole('dialog', { name: /^Annotation on/ })).toHaveCount(0)
+  await page.keyboard.type('Canvas is live')
+  await expect(heading).toHaveText('Canvas is live')
+  await page.keyboard.press('Enter')
+  // The new words stay where they sit, marked as not applied yet, and the edit is a note for the agent.
+  await expect(heading).toHaveText('Canvas is live')
+  await expect(heading).toHaveAttribute('data-canvas-pending', /.+/)
+  await expect(heading).not.toHaveAttribute('contenteditable')
+  const note = page.getByRole('dialog', { name: 'Annotation on Example · replace me › heading “Canvas is ready”' })
+  await expect(note.getByRole('textbox')).toHaveValue('Change the text from “Canvas is ready” to “Canvas is live”')
+  await page.keyboard.press('Enter')
+  await expect(note).toHaveCount(0)
+  // Escape cancels an edit, and stays in annotate mode.
+  const text = page.locator('.canvas-preview[data-canvas-preview="example"] p')
+  await text.dblclick()
+  await page.keyboard.type('Gone')
+  await page.keyboard.press('Escape')
+  await expect(text).toHaveText("Add items in registry.tsx that render the app's own components.")
+  await expect(page.getByRole('dialog', { name: /^Annotation on/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Request change', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await page.getByRole('button', { name: 'Copy 1 change' }).click()
+  const copied = await page.evaluate(() => navigator.clipboard.readText())
+  expect(copied).toContain('1. Example · replace me › heading “Canvas is ready”\n   Change the text from “Canvas is ready” to “Canvas is live”')
+  expect(errors).toEqual([])
+})
+
+test('new words stay on show until their note goes, and give way to the agent\'s change', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  const original = readFileSync(EXAMPLE, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    await page.goto('/')
+    await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toBeVisible()
+    await page.waitForTimeout(600)
+    await page.getByRole('button', { name: 'Request change', exact: true }).click()
+    const heading = page.locator('.canvas-preview[data-canvas-preview="example"] h2')
+    const text = page.locator('.canvas-preview[data-canvas-preview="example"] p')
+    // Two texts rewritten one after the other both stay, so they can be judged together.
+    await heading.dblclick()
+    await page.keyboard.type('Canvas is live')
+    await page.keyboard.press('Enter')
+    await page.keyboard.press('Enter')
+    await text.dblclick()
+    await page.keyboard.type('Pick the screens you like.')
+    await page.keyboard.press('Enter')
+    await page.keyboard.press('Enter')
+    await expect(heading).toHaveText('Canvas is live')
+    await expect(text).toHaveText('Pick the screens you like.')
+    // Editing new words again starts from them and changes the same note. Off centre: the pin sits there.
+    await heading.dblclick({ position: { x: 4, y: 6 } })
+    await expect(heading).toHaveAttribute('data-canvas-editing', '')
+    await expect(heading).toHaveText('Canvas is live')
+    await page.keyboard.type('Canvas is great')
+    await page.keyboard.press('Enter')
+    const note = page.getByRole('dialog', { name: /^Annotation on Example · replace me › heading/ })
+    await expect(note.getByRole('textbox')).toHaveValue('Change the text from “Canvas is ready” to “Canvas is great”')
+    await expect(page.locator('.canvas-pin-bubble')).toHaveCount(2)
+    // In place this time, so the agent's change shows on this item.
+    await note.getByRole('checkbox').uncheck()
+    await note.getByRole('textbox').press('Enter')
+    // Deleting a note puts its text's own words back.
+    await page.getByRole('button', { name: /^Annotation 2:/ }).click()
+    await page.getByRole('button', { name: 'Delete annotation' }).click()
+    await expect(text).toHaveText("Add items in registry.tsx that render the app's own components.")
+    await expect(text).not.toHaveAttribute('data-canvas-pending')
+    // Sent, then the agent changes the words in source: the item renders them itself, and the note clears.
+    await page.getByRole('button', { name: 'Copy 1 change' }).click()
+    await expect(page.getByRole('button', { name: /^Sent annotation/ })).toHaveCount(1)
+    writeFileSync(EXAMPLE, original.replace('Canvas is ready', 'Canvas is great'))
+    await expect(page.getByRole('button', { name: /^Sent annotation/ })).toHaveCount(0, { timeout: 15_000 })
+    await expect(heading).toHaveText('Canvas is great')
+    await expect(heading).not.toHaveAttribute('data-canvas-pending')
+    // The item the agent changed says so until the person has seen it.
+    await expect(page.locator('.canvas-item[data-canvas-item="example"] .canvas-ghost-tag[data-state="fresh"]')).toHaveText('Updated')
+    expect(errors).toEqual([])
+  } finally {
+    if (readFileSync(EXAMPLE, 'utf8') !== original) {
+      const updated = page.waitForEvent('console', { predicate: (m) => m.text().includes('hot updated'), timeout: 10_000 }).catch(() => {})
+      writeFileSync(EXAMPLE, original)
+      await updated
+    }
+  }
+})
+
+test('the note field grows with its text, then scrolls', async ({ page }) => {
+  const errors = collectErrors(page)
+  await page.goto('/')
+  await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toBeVisible()
+  await page.waitForTimeout(600)
+  await page.getByRole('button', { name: 'Request change', exact: true }).click()
+  // A rewritten text makes a long note, and it opens showing all of it.
+  await page.locator('.canvas-preview[data-canvas-preview="example"] p').dblclick()
+  await page.keyboard.type('Add the items you want to compare in registry.tsx. Each one renders the components your app already has.')
+  await page.keyboard.press('Enter')
+  const field = page.getByRole('dialog', { name: /^Annotation on/ }).getByRole('textbox')
+  const size = () =>
+    field.evaluate((element) => ({ height: element.offsetHeight, hidden: element.scrollHeight - element.clientHeight }))
+  await expect.poll(size).toMatchObject({ hidden: 0 })
+  expect((await size()).height).toBeGreaterThan(90)
+  // Past about ten lines it stops growing and scrolls.
+  await field.fill(Array.from({ length: 30 }, (_, i) => `Line ${i + 1}`).join('\n'))
+  await expect.poll(async () => (await size()).hidden).toBeGreaterThan(0)
+  expect((await size()).height).toBeLessThan(240)
+  // Short again, it goes back to three lines.
+  await field.fill('Short')
+  await expect.poll(async () => (await size()).height).toBeLessThan(80)
+  expect(errors).toEqual([])
+})
+
+test('a new version lands beside its original where it is now, not where the agent last read it', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    await page.goto('/')
+    const example = page.locator('.canvas-item[data-canvas-item="example"]')
+    await expect(example).toBeVisible()
+    await page.waitForTimeout(600)
+    // The person moves the original while the agent works.
+    const grip = (await example.getByRole('button', { name: 'Move Example · replace me', exact: true }).boundingBox())!
+    await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(grip.x + 200, grip.y + 260, { steps: 8 })
+    await page.mouse.up()
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).not.toMatch(/x: 0,\s*y: 0,/)
+    const at = (id: string) => {
+      const entry = readFileSync(REGISTRY, 'utf8').split('id: "' + id + '"')[1] ?? ''
+      return { x: Number(entry.match(/x: (-?\d+)/)?.[1]), y: Number(entry.match(/y: (-?\d+)/)?.[1]) }
+    }
+    const moved = at('example')
+    const view = (await example.boundingBox())!
+    // The agent adds the new version where it read the original: its old place.
+    writeFileSync(
+      REGISTRY,
+      readFileSync(REGISTRY, 'utf8').replace(
+        /\];\s*$/,
+        '  { id: "next", name: "Next", component: Example, from: "example", x: 0, y: 0, width: 360, height: 180 },\n];\n',
+      ),
+    )
+    const next = page.locator('.canvas-item[data-canvas-item="next"]')
+    await expect(next).toBeVisible({ timeout: 15_000 })
+    // It goes right of the original as it is now, and that place is saved.
+    await expect.poll(() => at('next')).toEqual({ x: moved.x + 360 + 96, y: moved.y })
+    expect(at('example')).toEqual(moved)
+    // The view stays where the person is, and the new item says it is new.
+    expect((await example.boundingBox())!).toEqual(view)
+    const tag = next.locator('.canvas-ghost-tag[data-state="fresh"]')
+    await expect(tag).toHaveText('New')
+    // Once it has been on screen for a moment, it is no longer new.
+    await page.getByRole('button', { name: 'Fit all' }).click()
+    await expect(tag).toHaveCount(0, { timeout: 6_000 })
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
+test('dragging an item or a note outlines the section it will land in', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    const noted = original.replace(
+      'export const notes: CanvasNote[] = [];',
+      'export const notes: CanvasNote[] = [\n  { id: "loose", text: "Loose note", x: 900, y: 0 },\n];',
+    )
+    await withSection(page, noted)
+    const section = page.locator('.canvas-section[data-board-id="group"]')
+    const frame = (await section.locator('.canvas-section-frame').boundingBox())!
+    const item = page.locator('.canvas-item[data-canvas-item="example"]')
+    const start = (await item.boundingBox())!
+    const grip = (await item.getByRole('button', { name: 'Move Example · replace me', exact: true }).boundingBox())!
+    const gx = grip.x + grip.width / 2
+    const gy = grip.y + grip.height / 2
+    const centre = start.x + start.width / 2
+    await page.mouse.move(gx, gy)
+    await page.mouse.down()
+    // Outlined while the item's centre is inside, the rule a section's moves and notes go by.
+    await page.mouse.move(gx + (frame.x + frame.width * 0.85 - centre), gy, { steps: 6 })
+    await expect(section).toHaveAttribute('data-drop', '')
+    // An edge still over the section is not enough.
+    await page.mouse.move(gx + (frame.x + frame.width + 30 - centre), gy, { steps: 6 })
+    expect((await item.boundingBox())!.x).toBeLessThan(frame.x + frame.width)
+    await expect(section).not.toHaveAttribute('data-drop')
+    await page.mouse.move(gx, gy, { steps: 6 })
+    await expect(section).toHaveAttribute('data-drop', '')
+    await page.mouse.up()
+    await expect(section).not.toHaveAttribute('data-drop')
+    // A note dragged in is outlined the same way.
+    const note = page.locator('.canvas-note-card[data-board-id="loose"]')
+    const n = (await note.boundingBox())!
+    await page.mouse.move(n.x + n.width / 2, n.y + n.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(frame.x + frame.width / 2, n.y + n.height / 2, { steps: 8 })
+    await expect(page.locator('.canvas-section[data-drop]')).toHaveCount(1)
+    await page.mouse.up()
+    await expect(page.locator('.canvas-section[data-drop]')).toHaveCount(0)
+    // The move saves into registry.tsx; it must land before the registry is put back.
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).not.toContain('x: 900')
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
+test('a click on a section title in annotate mode is a note on the whole section', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    // A second item a little higher on the same row, and a note, both inside the section.
+    const filled = original
+      .replace(
+        'export const notes: CanvasNote[] = [];',
+        'export const notes: CanvasNote[] = [\n  { id: "pick", text: "Keep this\\nheader", x: 0, y: 250 },\n];',
+      )
+      .replace(/\];\s*$/, '  { id: "second", name: "Second", component: Example, x: 400, y: -20, width: 160, height: 180 },\n];\n')
+    expect(filled).toContain('id: "second"')
+    const sectioned = await withSection(page, filled)
+    await page.getByRole('button', { name: 'Request change', exact: true }).click()
+    const section = page.locator('.canvas-section[data-board-id="group"]')
+    await section.locator('.canvas-section-tab').click()
+    const note = page.getByRole('dialog', { name: 'Annotation on Section “Group”' })
+    await expect(note).toBeVisible()
+    // No new-version choice: a section has no one original to keep. Nor is the section selected.
+    await expect(note.getByRole('checkbox')).toHaveCount(0)
+    await expect(section).not.toHaveAttribute('data-selected')
+    await page.keyboard.type('Make one flow from these')
+    await page.keyboard.press('Enter')
+    await expect(note).toHaveCount(0)
+    await page.getByRole('button', { name: 'Copy 1 change' }).click()
+    // What is inside is read when it is sent: items in reading order (rows, then left to right), then notes.
+    const copied = await page.evaluate(() => navigator.clipboard.readText())
+    expect(copied).toContain(
+      '1. Section “Group”, with these items in reading order: Example · replace me (id example), Second (id second); notes in it: “Keep this header”\n   Make one flow from these',
+    )
+    const pin = page.locator('.canvas-section-pins .canvas-pin-bubble')
+    await expect(pin).toHaveAttribute('aria-label', 'Sent annotation: Make one flow from these')
+    // The agent's usual answer, a new item, clears it.
+    writeFileSync(REGISTRY, sectioned.replace(/\];\s*$/, '  { id: "flow", name: "Flow", component: Example, x: 0, y: 600, width: 360, height: 180 },\n];\n'))
+    await expect(pin).toHaveCount(0, { timeout: 15_000 })
+    await expect(page.locator('.canvas-toast')).toContainText('Cleared 1 sent annotation on updated items')
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
+test('a text in a viewport item is rewritten in place too, and a press outside keeps it', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    const phoned = original.replace(
+      /\];\s*$/,
+      '  { id: "phone", name: "Phone", component: Example, x: 0, y: 240, width: 375, height: 180, viewport: true },\n];\n',
+    )
+    expect(phoned).not.toBe(original)
+    writeFileSync(REGISTRY, phoned)
+    await expect
+      .poll(async () => (await (await page.request.get('/registry.tsx')).text()).includes('id: "phone"'), { timeout: 15_000 })
+      .toBe(true)
+    await page.goto('/')
+    const heading = page.frameLocator('.canvas-item[data-canvas-item="phone"] iframe').locator('h2')
+    await expect(heading).toHaveText('Canvas is ready')
+    await page.waitForTimeout(600)
+    await page.getByRole('button', { name: 'Request change', exact: true }).click()
+    await heading.dblclick()
+    await expect(heading).toHaveAttribute('data-canvas-editing', '')
+    // The first click's empty note gives way to the edit, and the keys reach the frame.
+    await expect(page.getByRole('dialog', { name: /^Annotation on/ })).toHaveCount(0)
+    await page.keyboard.type('Phone is ready')
+    await expect(heading).toHaveText('Phone is ready')
+    // A press on empty canvas, outside the frame, ends the edit and keeps it.
+    const box = (await page.locator('.canvas-viewport').boundingBox())!
+    await page.mouse.click(box.x + box.width - 80, box.y + box.height / 2)
+    await expect(heading).toHaveText('Phone is ready')
+    await expect(heading).toHaveAttribute('data-canvas-pending', /.+/)
+    const note = page.getByRole('dialog', { name: 'Annotation on Phone › heading “Canvas is ready”' })
+    await expect(note.getByRole('textbox')).toHaveValue('Change the text from “Canvas is ready” to “Phone is ready”')
+    // Deleting the note puts the frame's words back.
+    await note.getByRole('button', { name: 'Delete annotation' }).click()
+    await expect(heading).toHaveText('Canvas is ready')
+    await expect(heading).not.toHaveAttribute('data-canvas-pending')
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
 test('annotations go straight to a listening agent', async ({ page, baseURL }) => {
   const errors = collectErrors(page)
   // The agent's side, as SKILL.md runs it: listen.sh prints what the page sends and exits.
@@ -900,11 +1199,20 @@ test('annotations go straight to a listening agent', async ({ page, baseURL }) =
   expect(errors).toEqual([])
 })
 
-test('the toolbar shows the agent working until it listens again', async ({ page, baseURL }) => {
+test('the item the agent works on says so until it listens again', async ({ page, baseURL }) => {
   const errors = collectErrors(page)
   const listen = () => {
-    const child = spawn('bash', [LISTEN, baseURL!])
-    return { child, exited: new Promise<number | null>((resolve) => child.on('exit', resolve)) }
+    // Its own process group, so stopping it also ends the connection listen.sh opened,
+    // and the next test does not find an agent still listening.
+    const child = spawn('bash', [LISTEN, baseURL!], { detached: true })
+    const stop = () => {
+      try {
+        process.kill(-child.pid!)
+      } catch {
+        // Already gone.
+      }
+    }
+    return { child, stop, exited: new Promise<number | null>((resolve) => child.on('exit', resolve)) }
   }
   const first = listen()
   let again: ReturnType<typeof listen> | undefined
@@ -917,15 +1225,23 @@ test('the toolbar shows the agent working until it listens again', async ({ page
     await note.getByRole('button', { name: 'Save' }).click()
     await page.getByRole('button', { name: 'Apply 1 change' }).click()
     expect(await first.exited).toBe(0)
-    const status = page.locator('.canvas-agent-status')
+    // The item the note is on says so, with a light around it; no bar at the top, nothing is left to apply.
+    const item = page.locator('.canvas-item[data-canvas-item="example"]')
+    const status = item.locator('.canvas-ghost-tag[data-state="working"]')
     await expect(status).toHaveText('Agent working')
+    await expect(item).toHaveAttribute('data-working')
+    await expect(item.locator('.canvas-beam')).toHaveCount(1)
+    await expect(page.getByRole('group', { name: 'Changes not applied yet' })).toHaveCount(0)
     // listen.sh again: the agent handled what it printed.
     again = listen()
     await expect(status).toHaveCount(0)
+    await expect(item).not.toHaveAttribute('data-working')
+    // The beam fades out, then goes.
+    await expect(item.locator('.canvas-beam')).toHaveCount(0, { timeout: 5_000 })
     await expect(page.locator('.canvas-toast')).toContainText('The agent finished')
   } finally {
-    first.child.kill()
-    again?.child.kill()
+    first.stop()
+    again?.stop()
   }
   expect(errors).toEqual([])
 })
@@ -946,7 +1262,7 @@ test('a kept listener stays working until the agent says done', async ({ page, r
   await page.getByRole('button', { name: 'Apply 1 change' }).click()
   expect((await firstPoll).status()).toBe(200)
   const secondPoll = kept()
-  const status = page.locator('.canvas-agent-status')
+  const status = page.locator('.canvas-item[data-canvas-item="example"] .canvas-ghost-tag[data-state="working"]')
   await expect.poll(async () => (await (await request.get('/__design-canvas/agent')).json()).state).toBe('listening')
   await expect(status).toHaveText('Agent working')
   // Only the agent may say done, never a web page.

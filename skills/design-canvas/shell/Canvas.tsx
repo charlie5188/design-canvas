@@ -12,7 +12,17 @@ import {
   useState,
 } from "react";
 import { downloadSharedFile, sendToAgent, useAgentStatus } from "./agent";
-import { type BoardEdge, type BoardHandlers, type BoardRef, DiscardButton, MarkView, NoteView, SectionView } from "./Board";
+import {
+  type BoardEdge,
+  type BoardHandlers,
+  type BoardRef,
+  DiscardButton,
+  MarkView,
+  NoteView,
+  SectionView,
+  WorkingBeam,
+  WorkingTag,
+} from "./Board";
 import {
   type BoardContext,
   type BoardKind,
@@ -56,15 +66,24 @@ import {
   newAnnotationId,
   placeOf,
   saveAnnotations,
+  sectionKey,
+  sectionOf,
 } from "./annotations";
 import {
   CHROME,
+  clearPending,
   describeArea,
   describeElement,
+  editText,
   isEditable,
   nestedCanScroll,
+  pendingOf,
   pickElement,
   previewLink,
+  showPending,
+  type TextEdit,
+  textTarget,
+  TYPING,
   wheelPixels,
 } from "./dom";
 import { labels } from "./labels";
@@ -119,6 +138,49 @@ const DOUBLE_TAP_MS = 400;
 const ITEM_HEAD = 48;
 /** Room a section's title takes above its frame, in canvas units. */
 const SECTION_TITLE_ROOM = 32;
+
+/**
+ * An item the agent added or changed that the person has not seen yet. New
+ * items no longer pull the view to them, so they say so where they are until
+ * they have been on screen, at a readable size, for a moment.
+ */
+type Fresh = "new" | "updated";
+const SEEN_MS = 2000;
+/** On screen at least this wide, in px, to count as seen. */
+const SEEN_WIDTH = 120;
+const freshKey = (storageKey: string) => `${storageKey}:fresh`;
+function loadFresh(storageKey: string, ids: ReadonlySet<string>): Record<string, Fresh> {
+  try {
+    const raw = JSON.parse(window.localStorage.getItem(freshKey(storageKey)) ?? "{}") as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.entries(raw).filter((entry): entry is [string, Fresh] => ids.has(entry[0]) && (entry[1] === "new" || entry[1] === "updated")),
+    );
+  } catch {
+    return {};
+  }
+}
+function saveFresh(storageKey: string, fresh: Record<string, Fresh>) {
+  try {
+    if (Object.keys(fresh).length) window.localStorage.setItem(freshKey(storageKey), JSON.stringify(fresh));
+    else window.localStorage.removeItem(freshKey(storageKey));
+  } catch {
+    // Storage may be unavailable; the tags still work for this session.
+  }
+}
+
+/** How much of each note a section note's reference quotes. */
+const MAX_NOTE_QUOTE = 120;
+
+/** Rows top to bottom, each left to right: a box joins a row when it starts above the middle of the row's first box. */
+function readingOrder<T extends { x: number; y: number; h: number }>(boxes: T[]) {
+  const rows: T[][] = [];
+  for (const box of [...boxes].sort((a, b) => a.y - b.y)) {
+    const row = rows[rows.length - 1];
+    if (row && box.y < row[0]!.y + row[0]!.h / 2) row.push(box);
+    else rows.push([box]);
+  }
+  return rows.flatMap((row) => row.sort((a, b) => a.x - b.x));
+}
 /** The smallest section a drag makes; anything smaller reads as a stray click. */
 const SECTION_MIN_W = 80;
 const SECTION_MIN_H = 60;
@@ -132,7 +194,7 @@ type CarriedNote = { id: string; ghost: boolean; x: number; y: number };
 type SavedChange = { edits: DirectEdit[]; removes: DirectRemove[]; adds: DirectAdd[]; positions: Record<string, { x: number; y: number }> };
 const HISTORY_LIMIT = 30;
 /** A text field, where Delete, Backspace, and ⌘/Ctrl + Z belong to the text. Buttons and the canvas itself are not. */
-const typingIn = (element: Element) => element.closest("input, textarea, select, [contenteditable=''], [contenteditable='true']") !== null;
+const typingIn = (element: Element) => element.closest(TYPING) !== null;
 /** The marks that are a change of their own: a note folded into its section's change is counted with that section. */
 const standalone = (list: BoardMark[], all: BoardMark[]) => {
   const folded = foldedNotes(all);
@@ -386,6 +448,18 @@ type AnnotationHandlers = {
 function AnnotationCard({ annotation, handlers, done }: { annotation: Annotation; handlers: AnnotationHandlers; done: () => void }) {
   const fieldRef = useRef<HTMLTextAreaElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
+  // The field grows with the note, up to about ten lines (its max-block-size), then
+  // scrolls, so a long note, such as a rewritten text, reads whole. It runs before
+  // the card picks a side below, so that sees the card at its real height.
+  useLayoutEffect(() => {
+    const field = fieldRef.current;
+    if (!field) return;
+    // Measured without a scrollbar, which would narrow the lines and add one.
+    field.style.overflowY = "hidden";
+    field.style.blockSize = "auto";
+    field.style.blockSize = `${field.scrollHeight + field.offsetHeight - field.clientHeight}px`;
+    field.style.overflowY = "";
+  }, [annotation.text]);
   // The note opens on the side of the pin that has room, like a menu, so focusing
   // it never pans the canvas under the person. Then the caret goes to the end.
   useLayoutEffect(() => {
@@ -405,6 +479,7 @@ function AnnotationCard({ annotation, handlers, done }: { annotation: Annotation
     handlers.onSave();
     done();
   };
+  const onSection = sectionOf(annotation) !== null;
   return (
     <div
       ref={cardRef}
@@ -422,7 +497,9 @@ function AnnotationCard({ annotation, handlers, done }: { annotation: Annotation
     >
       <span className="canvas-annotation-ref">{annotation.ref}</span>
       {annotation.sent && (
-        <span className="canvas-annotation-sent">{annotation.version ? labels.sentNoteVersion : labels.sentNote}</span>
+        <span className="canvas-annotation-sent">
+          {onSection ? labels.sentNoteSection : annotation.version ? labels.sentNoteVersion : labels.sentNote}
+        </span>
       )}
       {annotation.queued && <span className="canvas-annotation-sent">{labels.queuedNote}</span>}
       <textarea
@@ -441,15 +518,17 @@ function AnnotationCard({ annotation, handlers, done }: { annotation: Annotation
           }
         }}
       />
-      {/* Checked: the agent keeps this item and adds a new version beside it. */}
-      <label className="canvas-annotation-version">
-        <input
-          type="checkbox"
-          checked={!!annotation.version}
-          onChange={(event) => handlers.onVersion(annotation.id, event.currentTarget.checked)}
-        />
-        {labels.newVersion}
-      </label>
+      {/* Checked: the agent keeps this item and adds a new version beside it. A section has no one original to keep. */}
+      {!onSection && (
+        <label className="canvas-annotation-version">
+          <input
+            type="checkbox"
+            checked={!!annotation.version}
+            onChange={(event) => handlers.onVersion(annotation.id, event.currentTarget.checked)}
+          />
+          {labels.newVersion}
+        </label>
+      )}
       <span className="canvas-annotation-actions">
         <button
           type="button"
@@ -505,7 +584,9 @@ function AnnotationPin({
       className="canvas-pin"
       style={{ left: annotation.x, top: annotation.y }}
       data-open={open || undefined}
-      data-area={annotation.w && annotation.h ? true : undefined}
+      data-area={(annotation.w && annotation.h) || sectionOf(annotation) !== null ? true : undefined}
+      // A new, empty pin sits where the click was, so a double-click's second press passes through to edit the text.
+      data-empty={!annotation.text.trim() || undefined}
     >
       <button
         ref={bubbleRef}
@@ -619,6 +700,9 @@ function CanvasItemView({
   caption,
   editable,
   onCaption,
+  working,
+  agentWorking,
+  fresh,
 }: {
   item: CanvasItem;
   position: Position;
@@ -644,7 +728,20 @@ function CanvasItemView({
   /** False in a shared file, where nothing can be saved. */
   editable: boolean;
   onCaption: (item: CanvasItem, text: string) => void;
+  /** The agent is working on notes sent about this item: a tag and a light around it. */
+  working: boolean;
+  /** The agent is handling a message: a sent move is part of it. */
+  agentWorking: boolean;
+  /** Added or changed by the agent, and not seen yet. */
+  fresh?: Fresh;
 }) {
+  // One tag at a time: what the agent is doing, then a change still waiting, then what is new.
+  const tag =
+    working || (agentWorking && move === "sent")
+      ? "working"
+      : move && move !== "new" && move !== "saving"
+        ? move
+        : (fresh ?? move);
   const ref = useCallback((element: HTMLDivElement | null) => register(item.id, element), [item.id, register]);
   return (
     <div
@@ -652,11 +749,22 @@ function CanvasItemView({
       className="canvas-item"
       data-canvas-item={item.id}
       data-front={front || undefined}
+      data-working={working || undefined}
       style={{ transform: `translate(${position.x}px, ${position.y}px)`, inlineSize: item.width }}
       onPointerDownCapture={() => onFront(item.id)}
       onFocus={() => onFront(item.id)}
     >
-      {move && (
+      {tag === "working" ? (
+        <WorkingTag />
+      ) : tag === "new" && fresh ? (
+        <span className="canvas-ghost-tag canvas-item-tag" data-state="fresh">
+          {labels.freshNew}
+        </span>
+      ) : tag === "updated" ? (
+        <span className="canvas-ghost-tag canvas-item-tag" data-state="fresh">
+          {labels.freshUpdated}
+        </span>
+      ) : move && (
         <span className="canvas-ghost-tag canvas-item-tag" data-state={move}>
           {move === "sent" ? labels.boardSent : move === "queued" ? labels.boardQueued : move === "failed" ? labels.boardNotApplied : labels.boardSaving}
           {move !== "new" && move !== "saving" && <DiscardButton onClick={() => onUndoMove(item)} />}
@@ -721,6 +829,7 @@ function CanvasItemView({
         >
           {item.viewport ? <ItemFrame item={item} /> : <Preview component={item.component} />}
         </div>
+        <WorkingBeam on={working} />
         {onResize &&
           RESIZE_EDGES.map((edge) => (
             // Invisible: only the cursor changes over them, like an OS window's border.
@@ -1007,6 +1116,8 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
   const trashKept = useRef(new Set(saved.trash.kept));
   const shown = useMemo(() => items.filter((item) => !trash.includes(item.id)), [items, trash]);
   const shownIds = useMemo(() => new Set(shown.map((item) => item.id)), [shown]);
+  // What an annotation can be on: a shown item, or a section (sectionKey).
+  const targetIds = useMemo(() => new Set([...shownIds, ...sections.map((s) => sectionKey(s.id))]), [shownIds, sections]);
   const trashedItems = useMemo(
     () => trash.flatMap((id) => items.find((item) => item.id === id) ?? []),
     [items, trash],
@@ -1208,18 +1319,22 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
   // differently after a code update. The open annotation's text is live state,
   // so switching elements never loses typing.
   // A shared file has no annotation tools, so it neither shows nor stores any.
-  const [annotations, setAnnotations] = useState<Annotation[]>(() => (shared ? [] : loadAnnotations(storageKey, ids)));
+  const [annotations, setAnnotations] = useState<Annotation[]>(() =>
+    shared ? [] : loadAnnotations(storageKey, new Set([...ids, ...sections.map((s) => sectionKey(s.id))])),
+  );
   const annotationsRef = useRef(annotations);
   annotationsRef.current = annotations;
   const [openAnnotation, setOpenAnnotation] = useState<OpenAnnotation | null>(null);
   const openRef = useRef(openAnnotation);
   const [annotating, setAnnotating] = useState(false);
   const annotatingRef = useRef(false);
+  /** A text being edited in place in a preview on this page (a double-click in annotate mode). */
+  const textEditRef = useRef<TextEdit | null>(null);
   useEffect(() => {
     if (!shared) saveAnnotations(storageKey, annotations);
   }, [annotations, storageKey]);
   // Annotations on trashed items wait, unseen and unsent, until it is put back.
-  const visibleAnnotations = useMemo(() => annotations.filter((a) => shownIds.has(a.itemId)), [annotations, shownIds]);
+  const visibleAnnotations = useMemo(() => annotations.filter((a) => targetIds.has(a.itemId)), [annotations, targetIds]);
   // Pins number the next message: unsent annotations in order. Sent ones show a
   // check, queued ones a clock.
   const pending = visibleAnnotations.filter((a) => !a.sent && !a.queued);
@@ -1232,6 +1347,50 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
   const agentRef = useRef(agent);
   agentRef.current = agent;
   const agentOn = agent === "listening" || agent === "working";
+  // The annotations in the message the agent is handling. Their items and
+  // sections pulse until the change arrives or the agent finishes, so a person
+  // doing something else meanwhile knows those are about to change. Nothing is
+  // locked: the agent edits source, and the canvas only saves positions and sizes.
+  const [inFlight, setInFlight] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => {
+    if (!agentHandling) setInFlight(new Set());
+  }, [agentHandling]);
+  const working = useMemo(() => {
+    if (!agentHandling) return new Set<string>();
+    // After a reload mid-work the message is not known: every sent note counts.
+    const mine = annotations.filter((a) => a.sent && (inFlight.size ? inFlight.has(a.id) : true));
+    return new Set(mine.map((a) => a.itemId));
+  }, [agentHandling, annotations, inFlight]);
+
+  const [fresh, setFresh] = useState<Record<string, Fresh>>(() => (shared ? {} : loadFresh(storageKey, ids)));
+  useEffect(() => {
+    if (!shared) saveFresh(storageKey, fresh);
+  }, [fresh, storageKey]);
+  // Seen: on screen, at a readable size, for SEEN_MS while the page is in front.
+  // Checked once a second, which also follows pans and zooms without listening to them.
+  useEffect(() => {
+    if (!Object.keys(fresh).length) return;
+    const since = new Map<string, number>();
+    const check = () => {
+      const view = viewportRef.current?.getBoundingClientRect();
+      if (!view || document.visibilityState !== "visible") return since.clear();
+      const now = performance.now();
+      const seen: string[] = [];
+      for (const id of Object.keys(fresh)) {
+        const box = elements.current.get(id)?.getBoundingClientRect();
+        const visibleW = box ? Math.min(box.right, view.right) - Math.max(box.left, view.left) : 0;
+        const visibleH = box ? Math.min(box.bottom, view.bottom) - Math.max(box.top, view.top) : 0;
+        const onScreen = !!box && box.width >= SEEN_WIDTH && visibleW >= box.width / 2 && visibleH >= box.height / 2;
+        if (!onScreen) since.delete(id);
+        else if (!since.has(id)) since.set(id, now);
+        else if (now - since.get(id)! >= SEEN_MS) seen.push(id);
+      }
+      if (seen.length) setFresh((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => !seen.includes(id))));
+    };
+    check();
+    const timer = window.setInterval(check, 500);
+    return () => window.clearInterval(timer);
+  }, [fresh]);
 
   /** What an item renders now, tagged with the theme so a theme switch never reads as an update. */
   const printOf = useCallback(
@@ -1247,10 +1406,14 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     (itemId: string) => `v|${items.filter((item) => item.from === itemId).length}`,
     [items],
   );
-  /** What a sent annotation waits on: its item's content, or its item's count of versions. */
+  /**
+   * What a sent annotation waits on: its item's content, or its item's count of
+   * versions. A section's waits on the number of items: its usual answer is a new
+   * item made from the ones inside, and the person's own moves never touch that.
+   */
   const sentPrint = useCallback(
-    (a: Annotation) => (a.version ? versionsOf(a.itemId) : printOf(a.itemId)),
-    [printOf, versionsOf],
+    (a: Annotation) => (sectionOf(a) !== null ? `s|${items.length}` : a.version ? versionsOf(a.itemId) : printOf(a.itemId)),
+    [items.length, printOf, versionsOf],
   );
   /** Each annotation on the item and its "new version" choice, for Escape. */
   const versionsBefore = useCallback(
@@ -1293,33 +1456,97 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       const annotation = annotationsRef.current.find((a) => a.id === id);
       if (!annotation) return;
       setOpen({ id, original: annotation, versions: versionsBefore(annotation.itemId) });
-      setFrontId(annotation.itemId);
+      if (sectionOf(annotation) === null) setFrontId(annotation.itemId);
     },
     [closeAnnotation, setOpen, versionsBefore],
   );
   const startAnnotation = useCallback(
-    (itemId: string, x: number, y: number, ref: string, area?: { w: number; h: number }) => {
+    (itemId: string, x: number, y: number, ref: string, area?: { w: number; h: number }, text = "", id = newAnnotationId()) => {
       closeAnnotation();
       // The item's choice so far, or a new version by default: exploring keeps what was there.
       const unsent = annotationsRef.current.filter((a) => a.itemId === itemId && !a.sent && !a.queued && a.text.trim());
       const version = unsent.length ? !!unsent[unsent.length - 1]!.version : true;
+      const onSection = sectionOf({ itemId }) !== null;
       const annotation: Annotation = {
-        id: newAnnotationId(),
+        id,
         itemId,
         x: Math.round(x),
         y: Math.round(y),
         ...(area ? { w: Math.round(area.w), h: Math.round(area.h) } : {}),
         ref,
-        text: "",
-        version,
+        text: limitText(text),
+        ...(onSection ? {} : { version }),
       };
       const versions = versionsBefore(itemId);
       setAnnotations((prev) => [...prev, annotation]);
-      setOpen({ id: annotation.id, original: annotation, versions });
-      setFrontId(itemId);
+      // A note written for the person (a text edit) is still new: Escape removes it.
+      setOpen({ id: annotation.id, original: { ...annotation, text: "" }, versions });
+      if (!onSection) setFrontId(itemId);
     },
     [closeAnnotation, setOpen, versionsBefore],
   );
+  /**
+   * A text edited in place became annotation `id`, or changed it; its new words
+   * are already on show (dom.ts showPending). `was`: the words it showed before,
+   * for an edit of new words. `after` equal to `before` takes the annotation back.
+   */
+  const textEdited = useCallback(
+    (itemId: string, id: string, x: number, y: number, ref: string, before: string, after: string, was?: string) => {
+      const existing = annotationsRef.current.find((a) => a.id === id);
+      if (after === before) {
+        if (!existing) return;
+        if (openRef.current?.id === id) setOpen(null);
+        setAnnotations((prev) => prev.filter((a) => a.id !== id));
+        return;
+      }
+      const line = labels.textChange(before, after);
+      if (!existing) {
+        startAnnotation(itemId, x, y, ref, undefined, line, id);
+        return;
+      }
+      // The sentence it wrote changes and what the person added stays. Changed, it is a new request again.
+      const old = was === undefined ? "" : labels.textChange(before, was);
+      const text = old && existing.text.includes(old) ? existing.text.replace(old, line) : `${line}\n${existing.text}`;
+      const updated: Annotation = { ...placeOf(existing), text: limitText(text), ...(existing.version !== undefined ? { version: existing.version } : {}) };
+      closeAnnotation();
+      setAnnotations((prev) => prev.map((a) => (a.id === id ? updated : a)));
+      // Escape then only closes it: the words on show are the new ones.
+      setOpen({ id, original: updated, versions: versionsBefore(existing.itemId) });
+    },
+    [closeAnnotation, setOpen, startAnnotation, versionsBefore],
+  );
+  // A section's pin sits just right of its title tab, which stays one size on
+  // screen. The tab's size is measured here; CSS turns it into canvas units at
+  // the current zoom, so the pin follows the camera without a render.
+  useLayoutEffect(() => {
+    const world = worldRef.current;
+    if (!world) return;
+    for (const layer of world.querySelectorAll<HTMLElement>(".canvas-section-pins[data-section]")) {
+      const id = layer.dataset.section ?? "";
+      const mark = marksRef.current.find((m) => m.kind === "section" && m.target === id);
+      const tab = world.querySelector<HTMLElement>(
+        mark ? `[data-board-ghost="${CSS.escape(mark.id)}"] .canvas-section-tab` : `[data-board-id="${CSS.escape(id)}"] .canvas-section-tab`,
+      );
+      if (!tab) continue;
+      layer.style.setProperty("--section-tab-w", `${tab.offsetWidth}px`);
+      layer.style.setProperty("--section-tab-h", `${tab.offsetHeight}px`);
+    }
+  });
+  // New words on show belong to their annotation. When it goes (deleted,
+  // discarded, emptied, or cleared once applied), the text shows its own again.
+  const shownBefore = useRef(annotations);
+  useEffect(() => {
+    const now = new Set(annotations.map((a) => a.id));
+    for (const gone of shownBefore.current) {
+      if (now.has(gone.id)) continue;
+      clearPending(gone.id);
+      const frame = worldRef.current?.querySelector<HTMLIFrameElement>(
+        `[data-canvas-preview="${CSS.escape(gone.itemId)}"] iframe[data-canvas-frame]`,
+      );
+      if (frame?.contentWindow) postToFrame(frame.contentWindow, { type: "text-revert", id: gone.id });
+    }
+    shownBefore.current = annotations;
+  }, [annotations]);
   const annotationHandlers = useMemo<AnnotationHandlers>(
     () => ({
       onOpen: openExisting,
@@ -1374,6 +1601,10 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
   // Which items sit inside a new section is read from the layout when sending,
   // so the function is filled in once item boxes are measurable.
   const insideRef = useRef<BoardContext["inside"]>(() => []);
+  /** A section note's reference as it is now (see describeSection). */
+  const sectionRefRef = useRef<(id: string) => string | undefined>(() => undefined);
+  /** Outlines the sections a dragged box would be in; null clears them (see where it is set). */
+  const dropTargetRef = useRef<(box: { x: number; y: number; w: number; h: number } | null) => void>(() => {});
   const boardContext = useMemo<BoardContext>(
     () => ({
       entryOf: (kind, id) => {
@@ -1886,7 +2117,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
         closeMark();
         setBoardTool(null);
         const waiting =
-          annotationsRef.current.filter((a) => shownIds.has(a.itemId) && !a.sent && !a.queued && a.text.trim()).length +
+          annotationsRef.current.filter((a) => targetIds.has(a.itemId) && !a.sent && !a.queued && a.text.trim()).length +
           standalone(marksRef.current.filter(isUnsent), marksRef.current).length +
           unsentMovesRef.current.length;
         if (waiting) {
@@ -1897,7 +2128,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       }
       announce(on ? labels.annotateModeOn : labels.annotateModeOff);
     },
-    [announce, closeAnnotation, closeMark, notify, setBoardTool, shownIds],
+    [announce, closeAnnotation, closeMark, notify, setBoardTool, targetIds],
   );
   /**
    * The toolbar's tools: Select (the default, nothing armed), Annotate, and the
@@ -1921,14 +2152,10 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     [setAnnotateMode, setBoardTool],
   );
   const unsentCount = unsentAnnotations + standalone(unsentMarks, marks).length + unsentMoves.length;
-  // What the bar of waiting changes shows: anything to discard, and what has gone out but is not applied yet.
+  // Anything Discard would drop, sent or not.
   const hasChanges =
     !shared &&
     (visibleAnnotations.some((a) => a.text.trim()) || marks.some((m) => m.text.trim() && !m.direct) || movedItems.length > 0);
-  const waitingCount =
-    visibleAnnotations.filter((a) => a.sent || a.queued).length +
-    standalone(marks.filter((m) => (m.sent !== undefined || m.queued) && !m.direct), marks).length +
-    movedItems.filter((m) => moveStateOf(m) === "sent" || moveStateOf(m) === "queued").length;
   // A press anywhere but on a note or section lets go of the selection. A press on
   // empty canvas decides when it ends: a click selects the section under it or
   // nothing, and a pan keeps the selection (tapSurface). Camera gestures (Space,
@@ -1960,7 +2187,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
   // moved items, which go back to the registry's positions. Annotations on
   // trashed items wait for them. Undo brings all of it back.
   const discardChanges = useCallback(() => {
-    const before = annotationsRef.current.filter((a) => shownIds.has(a.itemId) && a.text.trim());
+    const before = annotationsRef.current.filter((a) => targetIds.has(a.itemId) && a.text.trim());
     const beforeMarks = marksRef.current.filter((m) => m.text.trim());
     const beforePositions = positionsRef.current;
     const beforeMoves = moveStatesRef.current;
@@ -1972,7 +2199,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     const count = before.length + beforeMarks.length + movedItemsRef.current.length;
     setOpen(null);
     setMarkOpen(null);
-    setAnnotations((prev) => prev.filter((a) => !shownIds.has(a.itemId)));
+    setAnnotations((prev) => prev.filter((a) => !targetIds.has(a.itemId)));
     setMarks([]);
     if (moved.length) {
       const next = { ...beforePositions };
@@ -1996,12 +2223,18 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
         }
       },
     });
-  }, [notify, queueSave, setMarkOpen, setOpen, shown, shownIds]);
+  }, [notify, queueSave, setMarkOpen, setOpen, shown, targetIds]);
   /** One message: annotations, then notes and sections, then moved items. */
   const message = useCallback(
     (list: Annotation[], markList: BoardMark[] = [], moveList: MovedItem[] = []) =>
       [
-        list.length ? formatAnnotations(list, (itemId) => items.find((item) => item.id === itemId)?.name ?? itemId) : "",
+        list.length
+          ? formatAnnotations(
+              list,
+              (itemId) => items.find((item) => item.id === itemId)?.name ?? itemId,
+              (id) => sectionRefRef.current(id),
+            )
+          : "",
         markList.length ? formatBoard(markList, boardContext) : "",
         moveList.length ? formatMoves(moveList) : "",
       ]
@@ -2049,7 +2282,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
   const sendAnnotations = useCallback(async () => {
     closeAnnotation();
     closeMark();
-    const list = annotationsRef.current.filter((a) => shownIds.has(a.itemId) && !a.sent && !a.queued && a.text.trim());
+    const list = annotationsRef.current.filter((a) => targetIds.has(a.itemId) && !a.sent && !a.queued && a.text.trim());
     const markList = marksRef.current.filter(isUnsent);
     const moveList = unsentMovesRef.current;
     const total = list.length + standalone(markList, marksRef.current).length + moveList.length;
@@ -2060,6 +2293,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       const result = await sendToAgent(message(list, markList, moveList));
       if (result.delivered) {
         markSent(list, markList, moveList);
+        setInFlight(new Set(list.map((a) => a.id)));
         notify(labels.sentToAgent(total));
         return;
       }
@@ -2075,7 +2309,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       return;
     }
     await copyAnnotations(list, offered ? labels.agentGoneCopied : labels.copiedAnnotations, markList, moveList);
-  }, [closeAnnotation, closeMark, copyAnnotations, markSent, message, notify, shownIds]);
+  }, [closeAnnotation, closeMark, copyAnnotations, markSent, message, notify, targetIds]);
   sendRef.current = sendAnnotations;
 
   // Queued annotations go out as one message once the agent listens again, and
@@ -2096,7 +2330,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       notify(labels.agentGoneQueued(queued.length + queuedMarks.length + queuedMoves.length));
       return;
     }
-    const queued = annotationsRef.current.filter((a) => a.queued && shownIds.has(a.itemId));
+    const queued = annotationsRef.current.filter((a) => a.queued && targetIds.has(a.itemId));
     const queuedMarks = marksRef.current.filter((m) => m.queued);
     const queuedMoves = movedItemsRef.current.filter((m) => {
       const sent = moveStatesRef.current[m.id];
@@ -2108,9 +2342,10 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       flushing.current = false;
       if (!result.delivered) return;
       markSent(queued, queuedMarks, queuedMoves);
+      setInFlight(new Set(queued.map((a) => a.id)));
       notify(labels.sentToAgent(queued.length + queuedMarks.length + queuedMoves.length));
     });
-  }, [agent, markSent, message, notify, shownIds]);
+  }, [agent, markSent, message, notify, targetIds]);
 
   /**
    * Removes sent annotations whose item now renders differently, or, for "new
@@ -2126,7 +2361,13 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     const gone: Annotation[] = [];
     const reread = new Map<string, string>();
     for (const a of annotationsRef.current) {
-      if (!a.sent || !ids.has(a.itemId)) continue;
+      if (!a.sent) continue;
+      const section = sectionOf(a);
+      if (section !== null) {
+        if (sections.some((s) => s.id === section) && a.sent !== sentPrint(a)) gone.push(a);
+        continue;
+      }
+      if (!ids.has(a.itemId)) continue;
       if (a.version) {
         // Only a new item made from this one counts; the original stays as it was.
         const versions = versionsOf(a.itemId);
@@ -2147,6 +2388,11 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       prev.filter((a) => !goneIds.has(a.id)).map((a) => (reread.has(a.id) ? { ...a, sent: reread.get(a.id) } : a)),
     );
     if (!gone.length) return;
+    // An item the agent changed in place says so until it has been seen.
+    const changed = gone.filter((a) => !a.version && sectionOf(a) === null).map((a) => a.itemId);
+    if (changed.length) {
+      setFresh((prev) => ({ ...prev, ...Object.fromEntries(changed.filter((id) => !prev[id]).map((id) => [id, "updated" as const])) }));
+    }
     const text = gone.every((a) => a.version) ? labels.clearedVersioned(gone.length) : labels.clearedSent(gone.length);
     notify(text, {
       label: labels.undo,
@@ -2157,7 +2403,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
           ...gone.filter((a) => !current.some((c) => c.id === a.id)).map((a) => ({ ...a, sent: sentPrint(a) ?? "?" })),
         ]),
     });
-  }, [ids, notify, printOf, sentPrint, setOpen, versionsOf]);
+  }, [ids, notify, printOf, sections, sentPrint, setOpen, versionsOf]);
   const checkSentRef = useRef(checkSent);
   checkSentRef.current = checkSent;
 
@@ -2249,6 +2495,45 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       if (isInside(m.x, m.y, m.w ?? NOTE_WIDTH, h)) found.push({ id: m.id, ghost: true, x: m.x, y: m.y });
     }
     return found;
+  };
+  // While an item or a note is dragged, the sections it will be in once dropped
+  // are outlined: the ones holding its centre, the rule a section's moves and
+  // notes go by, so the person never has to guess whether touching the edge is
+  // enough. Set on the elements directly, since it changes on every pointer move.
+  dropTargetRef.current = (box) => {
+    const world = worldRef.current;
+    if (!world) return;
+    const cx = box ? box.x + box.w / 2 : 0;
+    const cy = box ? box.y + box.h / 2 : 0;
+    for (const element of world.querySelectorAll<HTMLElement>(".canvas-section")) {
+      const ghost = element.dataset.boardGhost;
+      const mark = ghost ? marksRef.current.find((m) => m.id === ghost) : undefined;
+      const section = ghost ? undefined : sections.find((s) => s.id === element.dataset.boardId);
+      const b = mark
+        ? { x: mark.x, y: mark.y, w: mark.w ?? 0, h: mark.h ?? 0 }
+        : section && { x: section.x, y: section.y, w: section.width, h: section.height };
+      element.toggleAttribute("data-drop", !!box && !!b && cx >= b.x && cx <= b.x + b.w && cy >= b.y && cy <= b.y + b.h);
+    }
+  };
+  // A note on a section names what is in it when it is sent, so moving a screen
+  // in or out after writing the note still counts: the items in reading order
+  // (the order a flow is laid out in), then the notes the person wrote there.
+  sectionRefRef.current = (id) => {
+    const section = sections.find((s) => s.id === id);
+    if (!section) return undefined;
+    // While it moves, its mark has where it is now.
+    const mark = marksRef.current.find((m) => m.kind === "section" && m.target === id);
+    const bounds = { x: mark?.x ?? section.x, y: mark?.y ?? section.y, w: mark?.w ?? section.width, h: mark?.h ?? section.height };
+    const inside = readingOrder(
+      itemsInside(bounds).map((entry) => ({ ...entry, h: elements.current.get(entry.id)?.offsetHeight ?? 0 })),
+    ).map((entry) => labels.sectionItem(entry.name, entry.id));
+    const written = notesInside(bounds)
+      .sort((a, b) => a.y - b.y || a.x - b.x)
+      .map((c) => (c.ghost ? marksRef.current.find((m) => m.id === c.id)?.text : notes.find((n) => n.id === c.id)?.text) ?? "")
+      .map((text) => text.replace(/\s+/g, " ").trim())
+      .filter(Boolean)
+      .map((text) => (text.length > MAX_NOTE_QUOTE ? `${text.slice(0, MAX_NOTE_QUOTE - 1)}…` : text));
+    return labels.sectionContents(mark?.text || section.title, inside, written);
   };
   /** Moves carried notes by the same step as their section, which they then belong to. Each registry note gets its mark on first move. */
   const carryNotes = (carried: CarriedNote[], dx: number, dy: number, section: string) => {
@@ -2352,11 +2637,31 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       event.stopPropagation();
       // Stops text selection while dragging.
       event.preventDefault();
-      select(ref);
+      // In annotate mode a click on a section's title is a note on the whole
+      // section, as an item's name is for the item; a drag still moves it. A new
+      // section, not in the registry yet, is itself a change waiting to apply.
+      const annotated =
+        annotatingRef.current && ref.kind === "section"
+          ? ref.ghost
+            ? marksRef.current.find((m) => m.id === ref.id)?.target
+            : ref.id
+          : undefined;
+      if (!annotated) select(ref);
       let id = ref.ghost ? ref.id : "";
       // A section carries the items inside it, so the frame never leaves its contents behind.
       const carried = ref.kind === "section" && origin.w && origin.h ? itemsInside({ x: origin.x, y: origin.y, w: origin.w, h: origin.h }) : [];
       const carriedNotes = ref.kind === "section" && origin.w && origin.h ? notesInside({ x: origin.x, y: origin.y, w: origin.w, h: origin.h }) : [];
+      // A dragged note outlines the section it will be in, as an item does.
+      const noteSize =
+        ref.kind === "note"
+          ? {
+              w: origin.w ?? NOTE_WIDTH,
+              h:
+                worldRef.current?.querySelector<HTMLElement>(
+                  ref.ghost ? `[data-board-ghost="${CSS.escape(ref.id)}"]` : `[data-board-id="${CSS.escape(ref.id)}"]`,
+                )?.offsetHeight ?? 80,
+            }
+          : null;
       dragBoard(
         event,
         () => {
@@ -2371,12 +2676,19 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
           updateMark(id, { x, y });
           shiftItems(carried, x - origin.x, y - origin.y);
           carryNotes(carriedNotes, x - origin.x, y - origin.y, id);
+          if (noteSize) dropTargetRef.current({ x, y, ...noteSize });
         },
         () => {
+          if (noteSize) dropTargetRef.current(null);
           if (carried.length) queueSave();
           pruneUnchanged();
         },
         () => {
+          const section = annotated && sections.find((s) => s.id === annotated);
+          if (section) {
+            startAnnotation(sectionKey(section.id), 0, 0, labels.sectionRef(section.title));
+            return;
+          }
           const key = `${ref.kind}:${ref.id}`;
           const now = performance.now();
           if (lastTap.current?.key === key && now - lastTap.current.time < DOUBLE_TAP_MS) {
@@ -2639,13 +2951,13 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       requestAnimationFrame(() =>
         requestAnimationFrame(() => {
           placeFree(added, { besideOrigin: true });
-          // A new version comes into view with its original, ready to compare.
-          const origins = shown.filter((item) => added.some((other) => other.from === item.id));
-          reveal([...origins, ...added]);
+          // The view stays where the person is (they may be busy elsewhere while
+          // the agent works); each new item says it is new until it has been seen.
+          setFresh((prev) => ({ ...prev, ...Object.fromEntries(added.map((item) => [item.id, "new" as const])) }));
         }),
       ),
     );
-  }, [items, placeFree, reveal, shown]);
+  }, [items, placeFree, shown]);
 
   /**
    * Writes `trashed` into the registry for an item the person moved into or out of
@@ -2920,6 +3232,8 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     if (!viewport || !world) return;
     viewport.toggleAttribute("data-annotating", annotating);
     if (!annotating && pickRef.current) pickRef.current.hidden = true;
+    // Leaving annotate mode drops a text edit in progress (frames drop theirs on the message below).
+    if (!annotating) textEditRef.current?.finish(false);
     const tell = (frameElement: HTMLIFrameElement) => {
       if (frameElement.contentWindow) postToFrame(frameElement.contentWindow, { type: "annotate-mode", on: annotating });
     };
@@ -2966,6 +3280,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     viewport?.removeAttribute("data-gesture");
     if (!current) return;
     if (current.kind === "move") {
+      dropTargetRef.current(null);
       const element = elements.current.get(current.id);
       const transform = element?.style.transform.match(/translate\((-?[\d.]+)px, (-?[\d.]+)px\)/);
       if (transform) {
@@ -3316,6 +3631,28 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       const preview = element?.querySelector<HTMLElement>("[data-canvas-preview]");
       return item && preview && world.contains(element) ? { item, preview } : null;
     };
+    /** The section whose title is under the pointer, when a click there would annotate it. */
+    const headSection = (target: EventTarget | null) => {
+      const element = target instanceof Element ? target.closest(".canvas-section-tab")?.closest<HTMLElement>(".canvas-section") : null;
+      if (!element) return null;
+      const ghost = element.dataset.boardGhost;
+      return !ghost || marksRef.current.some((m) => m.id === ghost && m.target) ? element : null;
+    };
+
+    // In annotate mode a double-click on a text edits its words in place (dom.ts
+    // editText), and the edit becomes an annotation with its card open. An item
+    // frame edits its own texts and sends the edit here (frameEdit is that frame).
+    let frameEdit: Window | null = null;
+    const inTextEdit = (target: EventTarget | null) =>
+      !!textEditRef.current && target instanceof Node && textEditRef.current.element.contains(target);
+    /** A press anywhere else ends a text edit and keeps it, like a click away from a field. */
+    const endTextEdit = (event: Event) => {
+      if (frameEdit) {
+        postToFrame(frameEdit, { type: "text-edit-end" });
+        frameEdit = null;
+      }
+      if (textEditRef.current && !inTextEdit(event.target)) textEditRef.current.finish(true);
+    };
 
     // In annotate mode a drag across a preview marks an area; a press that does
     // not travel past the drag threshold stays a click on one element.
@@ -3380,16 +3717,24 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
         hidePick();
         return;
       }
+      if (inTextEdit(event.target)) return hidePick();
       if (moveDraw(event)) return;
       if ((event.altKey || annotatingRef.current) && !gesture.current) {
         const head = annotatingRef.current && !event.altKey ? headItem(event.target) : null;
+        const section = annotatingRef.current && !event.altKey && !head ? headSection(event.target) : null;
         if (head) placeBox(pickRef.current, head.preview.getBoundingClientRect());
+        else if (section) placeBox(pickRef.current, section.getBoundingClientRect());
         else showPick(event.target);
       } else hidePick();
     };
     // In annotate mode previews stop reacting to presses, except the ones that
     // pan (Space held, middle button).
     const blockPick = (event: MouseEvent) => {
+      // Presses in the text being edited place the caret or select, and reach nothing else.
+      if (inTextEdit(event.target)) {
+        event.stopPropagation();
+        return;
+      }
       // A press with Z held zooms (onPointerDown), so it must reach the canvas.
       if (zoomArmed.current) return;
       const annotatePress = annotatingRef.current && event.button === 0 && !spaceArmed.current;
@@ -3403,6 +3748,18 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       }
     };
     const onPickClick = (event: MouseEvent) => {
+      // Inside the text being edited a click follows no link and presses no button.
+      if (inTextEdit(event.target)) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      // A double-click's second click: the double-click edits the text instead (onPickDoubleClick).
+      if (annotatingRef.current && !event.altKey && event.detail > 1 && pickTarget(event.target)) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       if ((!event.altKey && !annotatingRef.current) || clickSuppressed.current) return;
       const head = annotatingRef.current && !event.altKey ? headItem(event.target) : null;
       if (head) {
@@ -3428,6 +3785,47 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       const rect = pick.preview.getBoundingClientRect();
       const scale = rect.width / Math.max(1, pick.preview.offsetWidth);
       startAnnotation(pick.item.id, (event.clientX - rect.left) / scale, (event.clientY - rect.top) / scale, ref);
+    };
+    const onPickDoubleClick = (event: MouseEvent) => {
+      // Inside the text being edited, a double-click selects a word and stays there.
+      if (inTextEdit(event.target)) {
+        event.stopPropagation();
+        return;
+      }
+      if (!annotatingRef.current || event.altKey || !(event.target instanceof Element)) return;
+      const pick = pickTarget(event.target);
+      if (!pick) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const element = textTarget(event.target, pick.preview);
+      if (!element) return;
+      // The first click opened an empty note here; the edit replaces it.
+      closeAnnotation();
+      hidePick();
+      const rect = pick.preview.getBoundingClientRect();
+      const scale = rect.width / Math.max(1, pick.preview.offsetWidth);
+      const x = (event.clientX - rect.left) / scale;
+      const y = (event.clientY - rect.top) / scale;
+      // Named before the edit, by the words as they were.
+      const ref = `${pick.item.name} › ${describeElement(pick.element, pick.preview)}`;
+      // New words already on show: the edit starts from them, and changes their annotation.
+      const pending = pendingOf(element);
+      if (pending) clearPending(pending.id);
+      const id = pending?.id ?? newAnnotationId();
+      textEditRef.current = editText(
+        element,
+        (before, after) => {
+          textEditRef.current = null;
+          if (after === null || (after === before && !pending) || !annotatingRef.current) {
+            // Cancelled, or nothing changed: the text shows what it showed before.
+            if (pending) showPending(pending.id, element, pending.words);
+            return;
+          }
+          if (after !== before) showPending(id, element, after);
+          textEdited(pick.item.id, id, x, y, ref, before, after, pending?.words);
+        },
+        pending?.words,
+      );
     };
 
     const onKeyDown = (event: KeyboardEvent) => {
@@ -3599,6 +3997,16 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
           const { x, y, w, h } = message;
           startAnnotation(item.id, x, y, `${item.name} › ${message.label}`, { w, h });
         }
+      } else if (message.type === "text-edit") {
+        // A double-click in the frame: its first click's empty note goes.
+        if (message.on) closeAnnotation();
+        frameEdit = message.on ? frameElement.contentWindow : null;
+      } else if (message.type === "annotate-text") {
+        frameEdit = null;
+        if (annotatingRef.current) {
+          const ref = `${item.name} › ${message.label}`;
+          textEdited(item.id, message.id, message.x, message.y, ref, message.before, message.after, message.was);
+        } else if (frameElement.contentWindow) postToFrame(frameElement.contentWindow, { type: "text-revert", id: message.id });
       } else if (message.type === "escape") {
         if (annotatingRef.current) setAnnotateMode(false);
       } else if (message.type === "link") {
@@ -3647,9 +4055,11 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     viewport.addEventListener("focusin", onFocusIn);
     // Picks run before React and preview handlers, so Alt-click never activates a control.
     window.addEventListener("pointermove", onPickMove, { capture: true });
+    window.addEventListener("pointerdown", endTextEdit, { capture: true });
     window.addEventListener("pointerdown", blockPick, { capture: true });
     window.addEventListener("mousedown", blockPick, { capture: true });
     window.addEventListener("click", onPickClick, { capture: true });
+    window.addEventListener("dblclick", onPickDoubleClick, { capture: true });
     window.addEventListener("pointerup", endDraw, { capture: true });
     window.addEventListener("pointercancel", endDraw, { capture: true });
     window.addEventListener("click", onLinkClick, { capture: true });
@@ -3672,9 +4082,11 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       viewport.removeEventListener("scroll", onScroll);
       viewport.removeEventListener("focusin", onFocusIn);
       window.removeEventListener("pointermove", onPickMove, { capture: true });
+      window.removeEventListener("pointerdown", endTextEdit, { capture: true });
       window.removeEventListener("pointerdown", blockPick, { capture: true });
       window.removeEventListener("mousedown", blockPick, { capture: true });
       window.removeEventListener("click", onPickClick, { capture: true });
+      window.removeEventListener("dblclick", onPickDoubleClick, { capture: true });
       window.removeEventListener("pointerup", endDraw, { capture: true });
       window.removeEventListener("pointercancel", endDraw, { capture: true });
       window.removeEventListener("click", onLinkClick, { capture: true });
@@ -3704,9 +4116,11 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     setCamera,
     setAnnotateMode,
     chooseTool,
+    closeAnnotation,
     select,
     startAnnotation,
     suppressNextClick,
+    textEdited,
     zoomStep,
   ]);
 
@@ -3737,6 +4151,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
         current.moved = Math.abs(move.clientX - startX) + Math.abs(move.clientY - startY);
         const next = sanitizePosition({ x: origin.x + (move.clientX - startX) / z, y: origin.y + (move.clientY - startY) / z });
         element.style.transform = `translate(${next.x}px, ${next.y}px)`;
+        dropTargetRef.current({ ...next, w: element.offsetWidth, h: element.offsetHeight });
       };
       const onEnd = (end: PointerEvent) => {
         if (end.pointerId !== pointerId) return;
@@ -3801,6 +4216,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
               hidden={removed.has(`section:${section.id}`) || marks.some((m) => m.kind === "section" && m.target === section.id)}
               interactive={boardInteractive}
               selected={selected === `e:section:${section.id}`}
+              working={working.has(sectionKey(section.id))}
               handlers={boardHandlers}
             />
           ))}
@@ -3832,6 +4248,9 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
               caption={captions[item.id] ?? item.note}
               editable={!shared}
               onCaption={saveCaption}
+              working={working.has(item.id)}
+              agentWorking={agentHandling}
+              fresh={fresh[item.id]}
             />
           ))}
           {notes.map((note) => (
@@ -3852,12 +4271,35 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
               folded={foldedMarks.has(mark.id)}
               interactive={boardInteractive}
               selected={selected === `g:${mark.kind}:${mark.id}`}
+              agentWorking={agentHandling}
               handlers={boardHandlers}
               onText={markHandlers.onText}
               onClose={markHandlers.onClose}
               onDelete={markHandlers.onDelete}
             />
           ))}
+          {/* Notes on whole sections, above items and notes so the open one is never covered, at the section's top-left corner (its ghost's while it moves). */}
+          {visibleAnnotations.map((annotation) => {
+            const id = sectionOf(annotation);
+            const section = id !== null && !removed.has(`section:${id}`) ? sections.find((s) => s.id === id) : undefined;
+            if (!section) return null;
+            const mark = marks.find((m) => m.kind === "section" && m.target === section.id);
+            return (
+              <div
+                key={annotation.id}
+                className="canvas-section-pins"
+                data-section={section.id}
+                style={{ transform: `translate(${mark?.x ?? section.x}px, ${mark?.y ?? section.y}px)` }}
+              >
+                <AnnotationPin
+                  annotation={annotation}
+                  number={annotation.sent || annotation.queued ? undefined : pending.indexOf(annotation) + 1}
+                  open={openAnnotation?.id === annotation.id}
+                  handlers={annotationHandlers}
+                />
+              </div>
+            );
+          })}
         </div>
       </div>
       <div ref={pickRef} className="canvas-pick" hidden aria-hidden="true" />
@@ -4084,16 +4526,10 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
           </span>
         </span>
       </div>
-      {/* Only while something is waiting: the one place to apply or drop every change, so it is hard to miss. */}
-      {!shared && (hasChanges || agentHandling) && (
+      {/* Only while something is still to apply: the one place to apply or drop every change, so it is hard to miss.
+          What the agent is working on says so with a tag on each object instead. */}
+      {!shared && unsentCount > 0 && (
         <div className="canvas-toolbar" data-place="pending" role="group" aria-label={labels.changesBar}>
-          {agentHandling && (
-            <span className="canvas-agent-status">
-              <span className="canvas-agent-dot" aria-hidden="true" />
-              {labels.agentWorking}
-            </span>
-          )}
-          {unsentCount === 0 && waitingCount > 0 && <span className="canvas-pending-note">{labels.waitingForAgent(waitingCount)}</span>}
           {hasChanges && (
             <button
               type="button"
@@ -4106,12 +4542,10 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
               {labels.discardShort}
             </button>
           )}
-          {unsentCount > 0 && (
-            <button type="button" className="canvas-button canvas-button-primary" onClick={() => void sendAnnotations()}>
-              {agentOn ? <SendIcon /> : <CopyIcon />}
-              {agentOn ? labels.sendAnnotations(unsentCount) : labels.copyAnnotations(unsentCount)}
-            </button>
-          )}
+          <button type="button" className="canvas-button canvas-button-primary" onClick={() => void sendAnnotations()}>
+            {agentOn ? <SendIcon /> : <CopyIcon />}
+            {agentOn ? labels.sendAnnotations(unsentCount) : labels.copyAnnotations(unsentCount)}
+          </button>
         </div>
       )}
       {sharedFile && <SharePanel file={sharedFile.name} missing={sharedFile.missing} onClose={closeSharePanel} />}

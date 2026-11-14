@@ -381,22 +381,6 @@ body,
   font-variant-numeric: tabular-nums;
   font-size: 13px;
 }
-/* The agent has the person's notes. Quiet, so it never competes with Send. */
-.canvas-agent-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-block-size: 30px;
-  padding: 0 10px;
-  color: var(--canvas-subtle-color);
-  white-space: nowrap;
-}
-.canvas-pending-note {
-  padding: 0 10px;
-  color: var(--canvas-subtle-color);
-  font-size: 13px;
-  white-space: nowrap;
-}
 .canvas-agent-dot {
   inline-size: 6px;
   block-size: 6px;
@@ -475,24 +459,55 @@ body,
   .canvas-toolbar .canvas-zoom {
     min-inline-size: 36px;
   }
-  /* Only the dot stays; its label still reaches screen readers. */
-  .canvas-toolbar .canvas-agent-status {
-    padding: 0 8px;
-    font-size: 0;
-    gap: 0;
-  }
 }
 /* Annotations. In annotate mode previews take a crosshair and stop reacting;
    pins and the open annotation use the chrome tokens and font. */
 .canvas-viewport[data-annotating]:where(:not([data-zoom])) .canvas-preview,
 .canvas-viewport[data-annotating]:where(:not([data-zoom])) .canvas-preview *,
 .canvas-viewport[data-annotating]:where(:not([data-zoom])) .canvas-item-title,
-.canvas-viewport[data-annotating]:where(:not([data-zoom])) .canvas-item-title *:not(.canvas-item-action, .canvas-item-action *) {
+.canvas-viewport[data-annotating]:where(:not([data-zoom])) .canvas-item-title *:not(.canvas-item-action, .canvas-item-action *),
+.canvas-viewport[data-annotating]:where(:not([data-zoom])) .canvas-section-tab,
+.canvas-viewport[data-annotating]:where(:not([data-zoom])) .canvas-section-tab * {
   cursor: crosshair !important;
+}
+/* In annotate mode a click on a section's title annotates it; it edits nothing. */
+.canvas-viewport[data-annotating] .canvas-section-tab[data-tip]::after {
+  display: none;
 }
 html[data-canvas-annotating] .canvas-frame-root,
 html[data-canvas-annotating] .canvas-frame-root * {
   cursor: crosshair !important;
+}
+/* New words for a text, on show where they sit until the agent applies them:
+   underlined with a dash, like the canvas's other changes that wait for it.
+   Also in item frames, which load this file. */
+[data-canvas-pending] {
+  text-decoration: underline dashed var(--canvas-focus-color, #2f6fed) !important;
+  text-decoration-thickness: 1.5px !important;
+  text-underline-offset: 3px !important;
+  text-decoration-skip-ink: none !important;
+}
+/* New words with line breaks: they break as written, and the text's own <br>
+   no longer match them. */
+[data-canvas-lines] {
+  white-space: pre-line !important;
+}
+[data-canvas-lines] br {
+  display: none !important;
+}
+/* A text being rewritten in place (a double-click in annotate mode): a text
+   cursor, and an outline that says the words are being edited, not saved. */
+.canvas-viewport[data-annotating] .canvas-preview [data-canvas-editing],
+.canvas-viewport[data-annotating] .canvas-preview [data-canvas-editing] *,
+html[data-canvas-annotating] .canvas-frame-root [data-canvas-editing],
+html[data-canvas-annotating] .canvas-frame-root [data-canvas-editing] * {
+  cursor: text !important;
+}
+[data-canvas-editing] {
+  outline: 2px solid var(--canvas-focus-color) !important;
+  outline-offset: 2px !important;
+  user-select: text !important;
+  -webkit-user-select: text !important;
 }
 /* Cursors that say what a drag will do. Later and as specific as the crosshair,
    so a pan or move in progress, Space, or Alt wins over it. Frames drop
@@ -563,6 +578,20 @@ html[data-canvas-alt] .canvas-frame-root * {
   inset: 0;
   pointer-events: none;
 }
+/* Notes on whole sections: a layer above items and notes, at the section's
+   top-left corner. The pin sits just right of the title tab (its size measured
+   in screen px, turned into canvas units here), so it never covers an item. */
+.canvas-section-pins {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+.canvas-section-pins > .canvas-pin {
+  left: calc(var(--section-tab-w, 0px) * var(--canvas-unzoom, 1)) !important;
+  top: calc(var(--section-tab-h, 0px) * -1 * var(--canvas-unzoom, 1)) !important;
+}
 /* Anchored at the point that was clicked; --canvas-unzoom (set with the
    camera) keeps pins and the open annotation one size on screen. */
 .canvas-pin {
@@ -576,6 +605,11 @@ html[data-canvas-alt] .canvas-frame-root * {
 }
 .canvas-pin[data-open] {
   z-index: 1;
+}
+/* A new, empty pin sits on the point just clicked; the second press of a
+   double-click goes through it, to the text it edits. */
+.canvas-pin[data-open][data-empty] .canvas-pin-bubble {
+  pointer-events: none;
 }
 .canvas-pin-bubble {
   position: absolute;
@@ -661,6 +695,8 @@ html[data-canvas-alt] .canvas-frame-root * {
   box-sizing: border-box;
   inline-size: 100%;
   min-block-size: 64px;
+  /* About ten lines; the card's script grows the field up to this, then it scrolls. */
+  max-block-size: calc(1.4em * 10 + 18px);
   padding: 8px 10px;
   border: 1px solid var(--canvas-border-color);
   border-radius: 6px;
@@ -1295,6 +1331,121 @@ html[data-canvas-alt] .canvas-frame-root * {
 /* The tab moves a section, so it wins over the top edge it sits on. */
 .canvas-section-tab {
   z-index: 3;
+}
+/* While the agent works on notes it was sent, a beam rides the border of each
+   item and section they are on: a short comet of colour going round on a 2 px
+   line, over a soft glow of the same colours, one size on screen at any zoom.
+   It lays over the box, so nothing inside it remounts, fades in and out, and
+   holds still under reduced motion. The tag in the "Saving…" tag's spot only
+   says what is happening, as a caption: the beam is what draws the eye. */
+@property --canvas-beam-turn {
+  syntax: "<angle>";
+  inherits: true;
+  initial-value: 0deg;
+}
+@keyframes canvas-beam-turn {
+  to {
+    --canvas-beam-turn: 360deg;
+  }
+}
+@keyframes canvas-beam-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes canvas-beam-out {
+  to {
+    opacity: 0;
+  }
+}
+.canvas-beam {
+  /* Clear for most of the turn, then a tail of cool colours into a warm, bright head. */
+  --canvas-beam-colors: transparent 0deg 210deg, #4f8cff 262deg, #9b6bff 296deg, #ff5fa8 324deg, #ffb03a 344deg,
+    #fff1c2 352deg, transparent 356deg;
+  position: absolute;
+  inset: 0;
+  border-radius: var(--canvas-radius-size);
+  pointer-events: none;
+  animation:
+    canvas-beam-turn 2.4s linear infinite,
+    canvas-beam-in 0.4s ease-out both;
+}
+.canvas-beam[data-leaving] {
+  animation:
+    canvas-beam-turn 2.4s linear infinite,
+    canvas-beam-out 0.5s ease-in both;
+}
+/* The tab sits on a section's top-left corner, so that corner stays square. */
+.canvas-section .canvas-beam {
+  border-radius: 0 12px 12px 12px;
+}
+.canvas-beam-line,
+.canvas-beam-glow::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: conic-gradient(from var(--canvas-beam-turn), var(--canvas-beam-colors));
+  /* Only the ring along the border: the padding box minus the content box. */
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+.canvas-beam-line {
+  padding: calc(2px * var(--canvas-unzoom, 1));
+}
+/* Blurred after the ring is cut out (the blur is on the parent), so it spreads
+   both ways over the border instead of being cut off by the mask. */
+.canvas-beam-glow {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  filter: blur(calc(7px * var(--canvas-unzoom, 1)));
+  opacity: 0.75;
+}
+.canvas-beam-glow::before {
+  padding: calc(5px * var(--canvas-unzoom, 1));
+}
+@media (prefers-reduced-motion: reduce) {
+  .canvas-beam,
+  .canvas-beam[data-leaving] {
+    animation: none;
+  }
+  .canvas-beam-line,
+  .canvas-beam-glow::before {
+    background: linear-gradient(120deg, #4f8cff, #9b6bff, #ff5fa8, #ffb03a);
+  }
+  .canvas-beam-glow {
+    opacity: 0.35;
+  }
+}
+.canvas-ghost-tag[data-state="working"],
+.canvas-ghost-tag[data-state="fresh"] {
+  /* Readable at any zoom, like a section's title. */
+  transform: scale(var(--canvas-unzoom, 1));
+  transform-origin: right bottom;
+}
+.canvas-ghost-tag[data-state="working"] {
+  padding: 2px 0;
+  background: none;
+  color: var(--canvas-subtle-color);
+  font-weight: 500;
+}
+/* Added or changed by the agent and not seen yet: green, like done. */
+.canvas-ghost-tag[data-state="fresh"] {
+  padding: 2px 9px;
+  background: #1a7f37;
+}
+/* The section a dragged item or note will be in once dropped (its centre is
+   inside): outlined like a selection, one width on screen at any zoom. */
+.canvas-section[data-drop] .canvas-section-frame {
+  outline: calc(2px * var(--canvas-unzoom, 1)) solid var(--canvas-focus-color);
+  outline-offset: 0;
+  background: color-mix(in srgb, var(--canvas-focus-color) 6%, var(--section-fill));
+}
+.canvas-section[data-drop] .canvas-section-tab {
+  border-color: var(--canvas-focus-color);
 }
 .canvas-section:has(.canvas-section-tab:hover):not([data-selected]) .canvas-section-frame {
   border-color: color-mix(in srgb, var(--canvas-focus-color) 70%, var(--canvas-bg-color));
