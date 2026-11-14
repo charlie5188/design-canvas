@@ -184,6 +184,26 @@ Apply every entry, and say which you could not:
 
 A ghost leaves on its own once the registry shows it: a new one when the registry holds one more note or section than when it was sent, a change when the entry matches the ghost's text, position, and size. A ghost that stays means the entry is missing or differs.
 
+### Decision notes
+
+A canvas is also the record of why one version was chosen. The people who open the shared file were not in this conversation, so write a note on the canvas yourself when a decision is made. Do not wait to be asked.
+
+- Write a note when the person:
+  - picks a version, or says which one they will go with;
+  - sets a version aside, drops it, or moves it to the trash, and says why;
+  - states a constraint that changes the directions, such as "legal must approve every send".
+- Write what the person said and decided, in their words and their language, in one or two sentences. Start with the decision: `Picked A: the hierarchy is clearer.` `Dropped C: legal does not allow automatic approval.` Do not add your own opinion, a guess about what they prefer, or a reason they did not give. When they pick a version and give no reason, write only the decision.
+- A version the person drops **and gives a reason for** stays on the canvas. It is evidence of what was considered, and its note must sit beside the thing it explains. Do not trash it; set it aside:
+  - Draw a section around the item and its note, where the item is now, titled "Set aside" in the person's language. You cannot move an existing item, because its position is kept in the person's browser. The person can drag the section, and it carries the item and the note.
+  - Give the section the item's `x - 20` and `y - 20`, the item's `width + 40`, and the item's `height + 260`. That holds the item with its name and caption, and the note below it. Make it taller for a long note.
+  - When a "Set aside" section is already beside the item, make that section larger to take in the item and its note. Do not add a second one next to it.
+  - If the person already moved the version to the trash and then gives the reason, put it back (remove `trashed`), set it aside in the same way, and say so.
+- A version dropped with no reason goes to the trash, with no note and no section. If the person asks to set a version aside, or to keep it around, and gives no reason, draw the section and write no note.
+- One decision, one note. When a decision changes, edit its note; do not add a second one. Do not write a note for each turn, for a small edit, or to summarize the conversation.
+- Put the note below the item it is about, in free space, and inside the item's section if it has one. An item's name and caption sit above its preview, so the item ends lower than `y + height`: give the note the item's `x`, and a `y` of at least the item's `y + height + 100`. Add it to `notes` as "Notes and sections" describes.
+- The note goes into the shared file. Leave out the names of real people and customers, and anything else from the conversation that is internal. When it matters who said something, say it in general terms, such as "a customer" or "legal".
+- Tell the person in one line that you added or changed a note. They can edit or delete it on the canvas.
+
 ### Moved items
 
 Where people put items on the canvas is kept in their browser, but the shared file and the next session use the positions in `registry.tsx`. A moved item is written there as soon as the person pauses, and shows a "Saving…" tag until the registry matches. Only a write the dev server refuses, or cannot make, becomes a change for the agent: it shows "Not applied yet", counts in the toolbar's Apply button, and goes out in the same message:
