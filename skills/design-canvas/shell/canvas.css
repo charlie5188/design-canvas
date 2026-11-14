@@ -19,6 +19,10 @@ body,
   --canvas-text-color: var(--canvas-text, #1f2328);
   --canvas-subtle-color: var(--canvas-text-subtle, #5f6b76);
   --canvas-focus-color: var(--canvas-focus, #2f6fed);
+  /* For a filled control with white words on it: the focus color, darkened until
+     the words meet 4.5:1 on the default (5.8:1), which the focus color alone does
+     not (4.4:1). The focus color itself stays for rings, outlines, and icons. */
+  --canvas-fill-color: color-mix(in srgb, var(--canvas-focus-color) 86%, #000);
   --canvas-hover-color: var(--canvas-hover, rgb(0 0 0 / 6%));
   --canvas-radius-size: var(--canvas-radius, 8px);
   color: var(--canvas-text-color);
@@ -640,7 +644,7 @@ html[data-canvas-alt] .canvas-frame-root * {
   border: 2px solid var(--canvas-surface-color);
   /* The sharp corner sits on the point the annotation refers to. */
   border-radius: 14px 14px 14px 3px;
-  background: var(--canvas-focus-color);
+  background: var(--canvas-fill-color);
   color: #fff;
   font-family: inherit;
   font-size: 13px;
@@ -687,11 +691,34 @@ html[data-canvas-alt] .canvas-frame-root * {
   font-size: 13px;
   cursor: default;
 }
-.canvas-annotation-ref {
-  color: var(--canvas-subtle-color);
-  font-size: 12px;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
+/* The card's top edge is its handle, across its whole width, with a short bar
+   to show that it can be held. It lies in the card's top padding, so it adds
+   almost no height. */
+.canvas-annotation-handle {
+  position: relative;
+  flex: none;
+  margin: -12px -12px -8px;
+  block-size: 16px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.canvas-annotation-handle:active {
+  cursor: grabbing;
+}
+.canvas-annotation-handle::before {
+  content: "";
+  position: absolute;
+  inset-block-start: 6px;
+  inset-inline-start: calc(50% - 14px);
+  inline-size: 28px;
+  block-size: 4px;
+  border-radius: 2px;
+  background: var(--canvas-border-color);
+}
+.canvas-annotation-handle:hover::before,
+.canvas-annotation-handle:active::before {
+  background: var(--canvas-subtle-color);
 }
 /* Not enough room right of the pin, or above it: open left, or below. */
 .canvas-annotation-card[data-flip-x] {
@@ -745,12 +772,18 @@ html[data-canvas-alt] .canvas-frame-root * {
 }
 .canvas-button-primary,
 .canvas-button-primary:hover {
-  background: var(--canvas-focus-color);
+  background: var(--canvas-fill-color);
   color: #fff;
 }
-.canvas-button-primary:disabled {
-  opacity: 0.45;
+/* Not ready yet (nothing typed): still readable. Fading the whole button left
+   white words on a pale tint, which nobody could read. */
+.canvas-button-primary:disabled,
+.canvas-button-primary:disabled:hover {
+  background: var(--canvas-hover-color);
+  color: var(--canvas-subtle-color);
+  cursor: default;
 }
+
 .canvas-toast textarea {
   font: inherit;
   font-size: 12px;
@@ -1529,9 +1562,98 @@ html[data-canvas-alt] .canvas-frame-root * {
   margin-block-start: 1px;
   padding: 2px 10px 3px 6px;
   border-radius: 0 0 8px 8px;
-  background: var(--canvas-focus-color);
+  background: var(--canvas-fill-color);
 }
+/* The ring matches its tab. */
 .canvas-item[data-picked] .canvas-preview {
+  border-color: var(--canvas-fill-color);
+  box-shadow: 0 0 0 1px var(--canvas-fill-color);
+}
+
+/* A note the agent answered. Its pin is filled, so an answer reads as "something
+   came back" against the outlined pins of notes that are only sent. Until the
+   person opens it, the pin itself grows to hold the answer's first words: one
+   shape, a filled head and the line it says, not a pin with a label beside it.
+   That is enough to see that it came, and often to read all of it, without a
+   card opening over the design by itself. Read, it is a plain outlined pin again. */
+.canvas-pin-head {
+  display: grid;
+  place-items: center;
+}
+.canvas-pin[data-reply="unread"] .canvas-pin-bubble {
+  border-color: var(--canvas-fill-color);
+  background: var(--canvas-fill-color);
+  color: #fff;
+}
+.canvas-pin[data-reply="read"] .canvas-pin-bubble {
   border-color: var(--canvas-focus-color);
-  box-shadow: 0 0 0 1px var(--canvas-focus-color);
+  background: var(--canvas-surface-color);
+  color: var(--canvas-focus-color);
+}
+.canvas-pin-bubble[data-says] {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 0;
+  max-inline-size: 300px;
+  padding: 0;
+  /* The head keeps the pin's color; the words sit on the surface, in the text color. */
+  background: var(--canvas-surface-color) !important;
+  overflow: hidden;
+  text-align: start;
+}
+.canvas-pin-bubble[data-says] .canvas-pin-head {
+  flex: none;
+  inline-size: 26px;
+  background: var(--canvas-fill-color);
+  color: #fff;
+}
+.canvas-pin-says {
+  align-self: center;
+  min-inline-size: 0;
+  padding: 0 10px 0 8px;
+  color: var(--canvas-text-color);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Too near the canvas's right edge: the words run to the left of the head, which stays on its point. */
+.canvas-pin-bubble[data-says][data-flip-x] {
+  flex-direction: row-reverse;
+  translate: calc(-100% + 28px) 0;
+}
+/* In the open note: what was said so far, as a comment thread. The person's
+   words sit at the edge; the agent's are set in under them by a rule. Each turn
+   has a name. Plain text and two weights of grey, nothing else. The thread has
+   no height limit and no scrollbar of its own: the note grows, and can be
+   dragged aside by its top line. */
+.canvas-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.canvas-thread-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.canvas-thread-turn[data-who="agent"] {
+  margin-inline-start: 2px;
+  padding-inline-start: 10px;
+  border-inline-start: 2px solid var(--canvas-border-color);
+}
+.canvas-thread-who {
+  color: var(--canvas-subtle-color);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.canvas-thread-text {
+  color: var(--canvas-text-color);
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
 }

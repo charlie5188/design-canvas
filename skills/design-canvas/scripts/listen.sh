@@ -14,6 +14,7 @@ url="${url%/}"
   die "usage: listen.sh <canvas-url>, such as http://127.0.0.1:4567/"
 wait_s="${DESIGN_CANVAS_LISTEN_SECONDS:-3600}"
 again="bash \"${BASH_SOURCE[0]}\" $url/"
+reply="bash \"$(dirname "${BASH_SOURCE[0]}")/reply.sh\" $url/ <note id> \"<text>\""
 
 body="$(mktemp)"
 trap 'rm -f "$body"' EXIT
@@ -32,7 +33,7 @@ done
 case "${status%% *}" in
   200)
     cat "$body"
-    printf '\n\n(Sent from the design canvas at %s/ by the person you are working with. Handle every annotation, then listen again in the background: %s)\n' "$url" "$again"
+    printf '\n\n(Sent from the design canvas at %s/ by the person you are working with. Handle every annotation. To answer a question, or to say why you did not make a change as asked, reply on that note: %s. Then listen again in the background: %s)\n' "$url" "$reply" "$again"
     ;;
   204)
     echo "Nothing was sent from the canvas for a while. Listen again in the background to keep the canvas's Send button, unless the person has moved on: $again"

@@ -16,7 +16,11 @@
 //   the agent finished. listen.sh says done by listening again. The Codex
 //   listener listens again right after it queues a message (`keep=1`), so
 //   there the agent says done with a POST to `<AGENT_PATH>/done`.
-// - Only the canvas page itself may send, and browsers may not listen.
+// - The agent answers a note on its pin with a POST to `<AGENT_PATH>/reply`
+//   (scripts/reply.sh): a question gets its answer where it was asked, and a
+//   note the agent could not apply says why, instead of both being lost in the
+//   chat. The last answers are kept here for a page that opens later.
+// - Only the canvas page itself may send, and browsers may not listen or reply.
 //   Otherwise any web page open in the browser could instruct the agent, or
 //   read what was meant for it, through this port.
 //
@@ -28,7 +32,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Plugin } from "vite";
-import { AGENT_EVENT, AGENT_PATH, EDIT_PATH, SHARE_PATH, VERSION_PATH } from "./channel.ts";
+import { AGENT_EVENT, AGENT_PATH, type AgentReply, EDIT_PATH, MAX_REPLY, NOTE_ID, REPLY_EVENT, SHARE_PATH, VERSION_PATH } from "./channel.ts";
 import { addEntry, applyEdits, type DirectAdd, type DirectEdit, type DirectRemove, placeableItems, removeEntry, validAdd, validEdit, validRemove } from "./registry-edit.ts";
 
 export type AgentState = "off" | "listening" | "working";
@@ -175,6 +179,8 @@ export function agentChannel(): Plugin {
       let busyTimer: Timer | undefined;
       let handling = false;
       let handlingTimer: Timer | undefined;
+      // Newest last. A restart of the dev server forgets them; the page keeps the ones it showed.
+      let replies: AgentReply[] = [];
 
       const state = (): AgentState => (listener ? "listening" : Date.now() < busyUntil ? "working" : "off");
       const status = (finished = false): AgentStatus => {
@@ -220,7 +226,27 @@ export function agentChannel(): Plugin {
 
         if (request.method === "GET" && url.pathname === "/") {
           if (!localHost(request)) return send(response, 403, "Not allowed");
-          return sendJson(response, status());
+          return sendJson(response, { ...status(), replies });
+        }
+
+        if (request.method === "POST" && url.pathname === "/reply") {
+          if (!localHost(request) || fromBrowser(request)) return send(response, 403, "Only the agent replies");
+          const id = url.searchParams.get("id") ?? "";
+          if (!NOTE_ID.test(id)) return send(response, 400, "Expected ?id=<note id>, as the message gave it");
+          readBody(request).then(
+            (body) => {
+              // Plain text, not JSON: the agent sends the words as they are, with no quoting to get wrong.
+              const text = body.trim();
+              if (!text) return send(response, 400, "Expected the reply as the request body");
+              if (text.length > MAX_REPLY) return send(response, 413, `A reply is at most ${MAX_REPLY} characters; put a longer answer in the chat`);
+              const reply: AgentReply = { id, text, at: Date.now() };
+              replies = [...replies.filter((entry) => entry.id !== id), reply].slice(-100);
+              server.ws.send(REPLY_EVENT, reply);
+              send(response, 200, "Shown on the note's pin\n");
+            },
+            () => send(response, 413, "Too large"),
+          );
+          return;
         }
 
         if (request.method === "GET" && url.pathname === "/listen") {

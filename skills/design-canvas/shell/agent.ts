@@ -3,7 +3,7 @@
 // downloading the canvas as a shared file.
 
 import { useEffect, useRef, useState } from "react";
-import { AGENT_EVENT, AGENT_PATH, SHARE_PATH } from "./channel.ts";
+import { AGENT_EVENT, AGENT_PATH, type AgentReply, MAX_REPLY, NOTE_ID, REPLY_EVENT, SHARE_PATH } from "./channel.ts";
 import type { AgentState, AgentStatus, SharedFile } from "./agent-channel.ts";
 
 export type { AgentState, AgentStatus };
@@ -70,6 +70,41 @@ export function useAgentStatus(onFinished?: () => void): { state: AgentState | u
     };
   }, []);
   return status;
+}
+
+const readReply = (data: unknown): AgentReply | undefined => {
+  const reply = data as Partial<AgentReply> | null;
+  if (!reply || typeof reply.id !== "string" || !NOTE_ID.test(reply.id)) return undefined;
+  if (typeof reply.text !== "string" || !reply.text.trim() || reply.text.length > MAX_REPLY) return undefined;
+  return { id: reply.id, text: reply.text, at: typeof reply.at === "number" && Number.isFinite(reply.at) ? reply.at : 0 };
+};
+
+/**
+ * The agent's answers to notes: as they arrive (`live`), and the ones the dev
+ * server still holds when the page opens. The agent often answers right after
+ * it edits a file, which is when the page may be reloading, so an answer that
+ * only came once would be lost. `onReply` may hear the same answer twice.
+ */
+export function useAgentReplies(onReply: (reply: AgentReply, live: boolean) => void) {
+  const handler = useRef(onReply);
+  handler.current = onReply;
+  useEffect(() => {
+    const hot = (import.meta as ImportMeta & { hot?: HotChannel }).hot;
+    if (!hot) return;
+    const hear = (data: unknown, live: boolean) => {
+      const reply = readReply(data);
+      if (reply) handler.current(reply, live);
+    };
+    const onPush = (data: unknown) => hear(data, true);
+    hot.on(REPLY_EVENT, onPush);
+    fetch(AGENT_PATH)
+      .then((response) => response.json())
+      .then((data: { replies?: unknown }) => {
+        for (const entry of Array.isArray(data?.replies) ? data.replies : []) hear(entry, false);
+      })
+      .catch(() => {});
+    return () => hot.off?.(REPLY_EVENT, onPush);
+  }, []);
 }
 
 /** Hands a message to the listening agent. Not delivered: nobody listened, and `state` says why. */

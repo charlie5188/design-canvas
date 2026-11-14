@@ -5,7 +5,7 @@ description: Build or update a local design canvas of live, real product compone
 
 # Design canvas
 
-A freeform canvas of live previews: the app's real components, synthetic data, no backend. People pan, zoom, drag items by their name or grip, drag an item's border to resize it like an OS window (the new width and height are saved into `registry.tsx`), click a name to copy it, open an item alone in a new tab, move items to the trash and put them back, pick the version they choose (which sets the versions beside it aside), switch the app's themes, Alt/Option-click any element to copy a reference for the conversation, send you annotations straight from the canvas, add notes and sections that explain the canvas to whoever you share it with, and download the canvas as one HTML file to share. You change content in source files. The canvas shell is already built and tested, so never rebuild it.
+A freeform canvas of live previews: the app's real components, synthetic data, no backend. People pan, zoom, drag items by their name or grip, drag an item's border to resize it like an OS window (the new width and height are saved into `registry.tsx`), click a name to copy it, open an item alone in a new tab, move items to the trash and put them back, pick the version they choose (which sets the versions beside it aside), switch the app's themes, Alt/Option-click any element to copy a reference for the conversation, send you requests and questions straight from the canvas and read your answers beside their pins, add notes and sections that explain the canvas to whoever you share it with, and download the canvas as one HTML file to share. You change content in source files. The canvas shell is already built and tested, so never rebuild it.
 
 Rules adapted from `create-canvas` in ibelick/ui-skills (MIT).
 
@@ -62,7 +62,7 @@ If you can run a background command that tells you when it exits (Claude Code ca
 bash ~/.agents/skills/design-canvas/scripts/listen.sh http://127.0.0.1:<port>/
 ```
 
-While it waits, the button in the bar at the top centre reads "Apply N changes" instead of "Copy N changes", so people send changes without switching to the chat. After they send, each item, section, and change in the message shows an "Agent working" tag until you listen again, which tells them you finished. When it exits, act on what it printed:
+While it waits, the button in the bar at the top centre reads "Send N to agent" instead of "Copy N for agent", so people send without switching to the chat. After they send, each item, section, and change in the message shows an "Agent working" tag until you listen again, which tells them you finished. When it exits, act on what it printed:
 
 - Annotations: the person wrote them on the canvas, so they are the person's request. Handle them like pasted annotations (see "References from the user"). The chat does not show them, so start your reply with a short list of what you got. Then listen again.
 - Nothing sent for a while: listen again, unless the person has moved on to other work.
@@ -136,33 +136,71 @@ Frames load a full page each, so use them only where width matters. Over a frame
 
 Alt/Option-click inside a preview copies `Item name › role “label”`, numbered when the item has look-alikes, for example `B · tabs › button “Mark as done” (2/3)`. Treat a pasted reference as that element in that item. If it no longer matches the source, ask. Portaled content such as an open menu is outside the preview and cannot be referenced this way.
 
-For several changes at once, people use annotate mode (the toolbar's Request change button, or A): they click elements, drag across an area, click an item's name for the whole item, or click a section's title for everything in it, write a note on each, and send them all as one message, through `listen.sh` or by copy and paste. A double-click on a text lets them rewrite it in place; the new words stay on show with a dashed underline (the item's code still renders the old ones, and your change replaces the preview), and the edit becomes a note such as `Change the text from “Save” to “Save changes”` on that element. Change that copy where the item gets it: the item's props or data, or, for words written in a product component, the component itself only when the person asks for an in-place change; otherwise follow the new-version line as usual. Each note has an "Apply to a new version" checkbox, checked by default and shared by all notes on the same item. Checked items are listed on the last line:
+To talk to you about what they see, people use the Ask agent tool (the toolbar's Ask agent button, or A): they click elements, drag across an area, click an item's name for the whole item, or click a section's title for everything in it, write a note on each (a change they want, or a question), and send them all as one message from a note's own Send button or from the bar at the top, through `listen.sh` or by copy and paste. A double-click on a text lets them rewrite it in place; the new words stay on show with a dashed underline (the item's code still renders the old ones, and your change replaces the preview), and the edit becomes a note such as `Change the text from “Save” to “Save changes”` on that element. Change that copy where the item gets it: the item's props or data, or, for words written in a product component, the component itself only when the person asks for an in-place change; otherwise follow the new-version line as usual. Each note has an "Apply to a new version" checkbox, checked by default and shared by all notes on the same item. Checked items are listed on the last line:
 
 ```text
 Annotations from the design canvas (4):
 1. Pricing card · compact › button “Upgrade”
    Make it full width
+   (note cm3x9k0a)
 2. Pricing card · compact › heading “Pro”
    Make it bigger
+   (note cm3x9k0b)
 3. Checkout · phone › area 343×120 at 16,200: heading “Summary”, text “Total”
-   Too much empty space here
+   Why is there so much empty space here?
+   (note cm3x9k0c)
 4. Pricing card · full-width button
    Try a dark version
+   (note cm3x9k0d)
 
 Keep the original and add a new version: Pricing card · compact (1, 2)
 ```
 
+The last line of each entry is its note id. You use it to answer on that note's pin (see "Answer on the pin").
+
 An entry with only an item name is about the whole item. A section entry, `Section “Title”, with these items in reading order: … ; notes in it: …`, is about those items as a set: usually something new made from screens the person picked and arranged, such as one flow or a new proposal. Use the items in the order listed, and read the notes as the person's comments on them. Add the result as new items (with `from` naming the item each one builds on) and leave the listed items as they are, unless the note asks to change them. An area entry is the rectangle the person drew: its size and top-left corner in px from the item's top-left at its real size, then the controls, headings, and texts entirely inside it. To see the area, open `frame.html?item=<id>` at the item's size.
 
-Treat each numbered entry as a change to that element, area, or item, and handle every entry; say which ones you could not apply and why. For each item on the last line, leave the original unchanged and add one new item that applies all of its listed notes, following "Try another version" above. Change the other items in place. Without a last line, change every item in place.
+Handle every entry. An entry that asks for a change is a change to that element, area, or item; an entry that asks a question gets an answer and no change (see "Answer on the pin"). For a change you could not apply, say so on its pin, and why. For each item on the last line, leave the original unchanged and add one new item that applies all of its listed notes, following "Try another version" above. Change the other items in place. Without a last line, change every item in place.
 
 Sent and copied annotations stay on the canvas as sent pins and disappear on their own, so you never need to clear them: in-place ones once their item renders differently after your edit, new-version ones once an item with `from` set to their item appears, section ones once an item is added or removed. A sent pin that stays means its item did not change, or its new version has no `from`.
 
+### Answer on the pin
+
+A note is not always a request. People also ask, at the thing they are looking at: "why is this button secondary?", "what happens with a long name?". Decide from each note's words which it is.
+
+- **A question.** Change nothing for it, and add no new version, also when its item is on the message's last line. Answer on its pin.
+- **A change you could not make, or made in another way.** Reply on its pin: what you did, and why, in one or two sentences. The person reads the reason at the thing it is about, not in the chat.
+- **A change you made as asked.** Do not reply. Its pin clears by itself when the item changes, and that is the answer.
+
+Reply with the note's id, from the last line of its entry:
+
+```sh
+bash ~/.agents/skills/design-canvas/scripts/reply.sh http://127.0.0.1:<port>/ <note id> "<text>"
+```
+
+- Write plain text, in the person's language, in one or two sentences. No Markdown. The first line shows beside the pin, so put the answer first.
+- When the answer needs more room, put it in the chat, and say so in the reply, such as "Three options, in the chat."
+- Reply before you listen again, so the answers are there when the "Agent working" tag goes.
+- The reply stays on the pin until the person deletes the note. A note is a short conversation: the person can answer your reply on the same pin, and that answer comes to you as an entry with the same note id and what was said before:
+
+  ```text
+  1. Approve dialog › button “Mark as done”
+     Earlier on this note:
+     - Person: Why is this button secondary?
+     - Agent (you): Approve is the one primary action in this dialog.
+     Now: Then make it a text link.
+     (note cm3x9k0c)
+  ```
+
+  Handle the `Now` line like any other note: it can be a new question, or a change to make. The lines before it are context.
+- If `reply.sh` says the canvas cannot take replies or is not running, answer in the chat and name the note by its reference.
+- The canvas shows the reply under the name "Agent". Do not sign it.
+
 ### Notes and sections
 
-People explain a canvas to the readers of its shared file with notes and sections. The tools bar at the bottom centre has four tools, one on at a time: **Select** (the default; Escape or V returns to it), **Request change** (A), **Note** (N) and **Section** (S). A note is a sticker: pick Note, click anywhere, type. A section is a folder: pick Section, drag a frame, type its title on the tab. Both tools put themselves down after one use. In Select, a note or a section's tab drags to move it; a note or a section resizes from its border like an item, and a click on a note, or on empty space inside a section, selects it. A double-click edits its text or title, and arrow keys nudge the focused one. A section carries the items and the notes inside it when it moves. A new note or section left empty stays on the canvas as a draft: it shows a "Write a note" or "Section title" placeholder, is not a change, and is not sent. Typing makes it a change; the tag's discard button removes a draft.
+People explain a canvas to the readers of its shared file with notes and sections. The tools bar at the bottom centre has four tools, one on at a time: **Select** (the default; Escape or V returns to it), **Ask agent** (A), **Note** (N) and **Section** (S). A note is a sticker: pick Note, click anywhere, type. A section is a folder: pick Section, drag a frame, type its title on the tab. Both tools put themselves down after one use. In Select, a note or a section's tab drags to move it; a note or a section resizes from its border like an item, and a click on a note, or on empty space inside a section, selects it. A double-click edits its text or title, and arrow keys nudge the focused one. A section carries the items and the notes inside it when it moves. A new note or section left empty stays on the canvas as a draft: it shows a "Write a note" or "Section title" placeholder, is not a change, and is not sent. Typing makes it a change; the tag's discard button removes a draft.
 
-Adding, moving, resizing, or editing a note or section is saved into `registry.tsx` as soon as the person pauses, and a new one gets an id made from its text: nothing shows while it saves unless the save takes more than a few seconds (then a "Saving…" tag), and the agent is not involved. A new note or section left empty is only a draft and is never saved. Only an annotation, or a change the registry refused (for example with no dev server running), is a request, not content: it shows as a dashed "Not applied yet" ghost until you write it into `registry.tsx`, and the bar at the top centre, which shows only while something is still to apply, has **Discard** and the main button (**Apply N changes** while you listen, **Copy N changes** otherwise) that sends them with any annotations in one message:
+Adding, moving, resizing, or editing a note or section is saved into `registry.tsx` as soon as the person pauses, and a new one gets an id made from its text: nothing shows while it saves unless the save takes more than a few seconds (then a "Saving…" tag), and the agent is not involved. A new note or section left empty is only a draft and is never saved. Only an annotation, or a change the registry refused (for example with no dev server running), is a request, not content: it shows as a dashed "Not applied yet" ghost until you write it into `registry.tsx`, and the bar at the top centre, which shows only while something is still to apply, has **Discard** and the main button (**Send N to agent** while you listen, **Copy N for agent** otherwise) that sends them with any annotations in one message:
 
 ```text
 Notes and sections from the design canvas (4):
@@ -221,7 +259,7 @@ A canvas is also the record of why one version was chosen. The people who open t
 
 ### Moved items
 
-Where people put items on the canvas is kept in their browser, but the shared file and the next session use the positions in `registry.tsx`. A moved item is written there as soon as the person pauses, with nothing to show for it unless the save takes more than a few seconds (then a "Saving…" tag). Only a write the dev server refuses, or cannot make, becomes a change for the agent: it shows "Not applied yet", counts in the toolbar's Apply button, and goes out in the same message:
+Where people put items on the canvas is kept in their browser, but the shared file and the next session use the positions in `registry.tsx`. A moved item is written there as soon as the person pauses, with nothing to show for it unless the save takes more than a few seconds (then a "Saving…" tag). Only a write the dev server refuses, or cannot make, becomes a change for the agent: it shows "Not applied yet", counts in the toolbar's Send button, and goes out in the same message:
 
 ```text
 Items moved on the design canvas (2):

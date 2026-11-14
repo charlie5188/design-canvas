@@ -6,6 +6,7 @@ import { mkdtemp, rmdir, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 const exec = promisify(execFile);
@@ -90,7 +91,8 @@ async function main() {
       }
       const annotations = await response.text();
       if (!annotations.trim()) throw new Error("Canvas sent an empty annotation message.");
-      const message = `${annotations}\n\n(Sent from the design canvas at ${url.origin}/ by the person you are working with. Handle every annotation. The Codex listener keeps running; do not start another listener.)`;
+      const reply = `bash "${fileURLToPath(new URL("./reply.sh", import.meta.url))}" ${url.origin}/ <note id> "<text>"`;
+      const message = `${annotations}\n\n(Sent from the design canvas at ${url.origin}/ by the person you are working with. Handle every annotation. To answer a question, or to say why you did not make a change as asked, reply on that note: ${reply}. The Codex listener keeps running; do not start another listener.)`;
       // The canvas has already acknowledged receipt. Keep a private recovery
       // copy until queue succeeds; never retry an ambiguous CLI failure because
       // the message may have been queued just before the process failed.
