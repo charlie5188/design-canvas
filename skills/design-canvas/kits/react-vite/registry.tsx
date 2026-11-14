@@ -3,7 +3,8 @@ import { Example } from "./items/Example";
 
 /**
  * Notes explain the canvas to whoever opens it or its shared file, for example
- * why a version was dropped. The agent writes them here when asked.
+ * why a version was dropped. The agent writes one here when a decision is made
+ * in the conversation, and when asked.
  * `{ id: "why-b", text: "B tested worse: too dense.", x: 0, y: 260 }`
  */
 export const notes: CanvasNote[] = [];
