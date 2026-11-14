@@ -48,6 +48,15 @@ export const labels = {
   move: (name: string) => `Move ${name}`,
   moveHelp: "Use the arrow keys to move. Hold Shift to move faster.",
   missingItem: (id: string) => `No canvas item “${id}”`,
+  pick: (name: string) => `Pick ${name} and set the others aside`,
+  pickHint: "Pick this one",
+  /** On the item that was picked. Shown in the shared file too. */
+  picked: "Picked",
+  pickedToast: (name: string, others: number) =>
+    others ? `Picked ${name}. Set ${others} other${others === 1 ? "" : "s"} aside.` : `Picked ${name}`,
+  pickFailed: "Couldn't save the pick. Is the canvas's dev server running?",
+  /** The title of the section a pick makes for the versions that were not picked. */
+  setAside: "Set aside",
   moveToTrash: (name: string) => `Move ${name} to the trash`,
   moveToTrashHint: "Move to trash",
   movedToTrash: (name: string) => `Moved ${name} to the trash`,

@@ -5,7 +5,7 @@ description: Build or update a local design canvas of live, real product compone
 
 # Design canvas
 
-A freeform canvas of live previews: the app's real components, synthetic data, no backend. People pan, zoom, drag items by their name or grip, drag an item's border to resize it like an OS window (the new width and height are saved into `registry.tsx`), click a name to copy it, open an item alone in a new tab, move items to the trash and put them back, switch the app's themes, Alt/Option-click any element to copy a reference for the conversation, send you annotations straight from the canvas, add notes and sections that explain the canvas to whoever you share it with, and download the canvas as one HTML file to share. You change content in source files. The canvas shell is already built and tested, so never rebuild it.
+A freeform canvas of live previews: the app's real components, synthetic data, no backend. People pan, zoom, drag items by their name or grip, drag an item's border to resize it like an OS window (the new width and height are saved into `registry.tsx`), click a name to copy it, open an item alone in a new tab, move items to the trash and put them back, pick the version they choose (which sets the versions beside it aside), switch the app's themes, Alt/Option-click any element to copy a reference for the conversation, send you annotations straight from the canvas, add notes and sections that explain the canvas to whoever you share it with, and download the canvas as one HTML file to share. You change content in source files. The canvas shell is already built and tested, so never rebuild it.
 
 Rules adapted from `create-canvas` in ibelick/ui-skills (MIT).
 
@@ -83,7 +83,7 @@ Before adding items, make one real app component render. Work through `reference
 
 Edit `registry.tsx` and `items/`. Leave `canvas/` as installed; shell fixes belong in the skill (see "Changing the shell").
 
-Each registry entry has a stable `id`, a unique readable `name` such as `Pricing card · compact`, an optional one-line `note`, `component`, `x`, `y`, `width`, `height`, and optional `viewport` and `from`.
+Each registry entry has a stable `id`, a unique readable `name` such as `Pricing card · compact`, an optional one-line `note`, `component`, `x`, `y`, `width`, `height`, and optional `viewport` and `from`. The canvas itself writes two more, `trashed` and `picked`, when the person trashes or picks an item.
 
 Write each entry out by hand, in `registry`, `notes`, and `sections` alike. Its `id`, `x`, `y`, `width`, and `height` must be plain literals (`id: "pricing-compact"`, `x: 440`), not built by a loop, `map`, template string, variable, or arithmetic. A spread of shared values, such as `...SIZE`, is fine: a saved size or position is written after it, so it takes effect. The canvas saves moves and resizes by finding the entry's literal `id` in `registry.tsx` and replacing those numbers in place; anything computed cannot be found, so the change is not saved and waits for the agent ("no plain id, or a computed value"). When several items are alike, write each one out instead of generating them.
 
@@ -162,7 +162,7 @@ Sent and copied annotations stay on the canvas as sent pins and disappear on the
 
 People explain a canvas to the readers of its shared file with notes and sections. The tools bar at the bottom centre has four tools, one on at a time: **Select** (the default; Escape or V returns to it), **Request change** (A), **Note** (N) and **Section** (S). A note is a sticker: pick Note, click anywhere, type. A section is a folder: pick Section, drag a frame, type its title on the tab. Both tools put themselves down after one use. In Select, a note or a section's tab drags to move it; a note or a section resizes from its border like an item, and a click on a note, or on empty space inside a section, selects it. A double-click edits its text or title, and arrow keys nudge the focused one. A section carries the items and the notes inside it when it moves. A new note or section left empty stays on the canvas as a draft: it shows a "Write a note" or "Section title" placeholder, is not a change, and is not sent. Typing makes it a change; the tag's discard button removes a draft.
 
-Adding, moving, resizing, or editing a note or section is saved into `registry.tsx` as soon as the person pauses, and a new one gets an id made from its text: a "Saving…" tag shows until the registry matches, and the agent is not involved. A new note or section left empty is only a draft and is never saved. Only an annotation, or a change the registry refused (for example with no dev server running), is a request, not content: it shows as a dashed "Not applied yet" ghost until you write it into `registry.tsx`, and the bar at the top centre, which shows only while something is still to apply, has **Discard** and the main button (**Apply N changes** while you listen, **Copy N changes** otherwise) that sends them with any annotations in one message:
+Adding, moving, resizing, or editing a note or section is saved into `registry.tsx` as soon as the person pauses, and a new one gets an id made from its text: nothing shows while it saves unless the save takes more than a few seconds (then a "Saving…" tag), and the agent is not involved. A new note or section left empty is only a draft and is never saved. Only an annotation, or a change the registry refused (for example with no dev server running), is a request, not content: it shows as a dashed "Not applied yet" ghost until you write it into `registry.tsx`, and the bar at the top centre, which shows only while something is still to apply, has **Discard** and the main button (**Apply N changes** while you listen, **Copy N changes** otherwise) that sends them with any annotations in one message:
 
 ```text
 Notes and sections from the design canvas (4):
@@ -184,6 +184,21 @@ Apply every entry, and say which you could not:
 
 A ghost leaves on its own once the registry shows it: a new one when the registry holds one more note or section than when it was sent, a change when the entry matches the ghost's text, position, and size. A ghost that stays means the entry is missing or differs.
 
+### Picked versions
+
+A check beside an item's name picks that version. The canvas does the whole step itself, at once, and the person can undo it:
+
+- It writes `picked: true` on the item's entry. The item shows a ring around its preview and a "Picked" tab on the ring, under the card's bottom-right corner, where every state of an item shows. Both show in the shared file too.
+- It moves the versions the item was compared with into one section with the id `set-aside`, below everything else, and writes their new `x` and `y`. Those versions are the other items in the item's section, or, for an item in no section, the other items in no section.
+- A later pick sets the earlier one aside too, and removes its `picked`.
+
+You do nothing for the move. Read the result from `registry.tsx`:
+
+- `picked: true` is the person's decision. Treat it as a pick in "Decision notes": when they give the reason, write the note below the picked item. Do not ask for a reason.
+- Do not move a picked version into the product until the person asks (see "Move a version into the product").
+- When the person picks a version in the conversation instead, such as "go with B", set `picked: true` on it and remove `picked` from the other items of its group. You cannot move the others (see "Decision notes"), so tell the person in one line that the check on the canvas also sets the rest aside.
+- Items in the `set-aside` section are out of the running. Do not add new versions inside it, and do not build on one of them unless the person asks.
+
 ### Decision notes
 
 A canvas is also the record of why one version was chosen. The people who open the shared file were not in this conversation, so write a note on the canvas yourself when a decision is made. Do not wait to be asked.
@@ -194,7 +209,7 @@ A canvas is also the record of why one version was chosen. The people who open t
   - states a constraint that changes the directions, such as "legal must approve every send".
 - Write what the person said and decided, in their words and their language, in one or two sentences. Start with the decision: `Picked A: the hierarchy is clearer.` `Dropped C: legal does not allow automatic approval.` Do not add your own opinion, a guess about what they prefer, or a reason they did not give. When they pick a version and give no reason, write only the decision.
 - A version the person drops **and gives a reason for** stays on the canvas. It is evidence of what was considered, and its note must sit beside the thing it explains. Do not trash it; set it aside:
-  - Draw a section around the item and its note, where the item is now, titled "Set aside" in the person's language. You cannot move an existing item, because its position is kept in the person's browser. The person can drag the section, and it carries the item and the note.
+  - Draw a section around the item and its note, where the item is now, titled "Set aside" in the person's language. Give it an id that starts with `set-aside-`, such as `set-aside-table-row`: the id `set-aside` alone belongs to the section the canvas makes for a pick. You cannot move an existing item, because its position is kept in the person's browser. The person can drag the section, and it carries the item and the note.
   - Give the section the item's `x - 20` and `y - 20`, the item's `width + 40`, and the item's `height + 260`. That holds the item with its name and caption, and the note below it. Make it taller for a long note.
   - When a "Set aside" section is already beside the item, make that section larger to take in the item and its note. Do not add a second one next to it.
   - If the person already moved the version to the trash and then gives the reason, put it back (remove `trashed`), set it aside in the same way, and say so.
@@ -206,7 +221,7 @@ A canvas is also the record of why one version was chosen. The people who open t
 
 ### Moved items
 
-Where people put items on the canvas is kept in their browser, but the shared file and the next session use the positions in `registry.tsx`. A moved item is written there as soon as the person pauses, and shows a "Saving…" tag until the registry matches. Only a write the dev server refuses, or cannot make, becomes a change for the agent: it shows "Not applied yet", counts in the toolbar's Apply button, and goes out in the same message:
+Where people put items on the canvas is kept in their browser, but the shared file and the next session use the positions in `registry.tsx`. A moved item is written there as soon as the person pauses, with nothing to show for it unless the save takes more than a few seconds (then a "Saving…" tag). Only a write the dev server refuses, or cannot make, becomes a change for the agent: it shows "Not applied yet", counts in the toolbar's Apply button, and goes out in the same message:
 
 ```text
 Items moved on the design canvas (2):
