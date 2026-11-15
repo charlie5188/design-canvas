@@ -165,6 +165,8 @@ const ASIDE_PAD = 24;
 const ASIDE_GAP = 40;
 /** Clear space between the lowest thing on the canvas and a new set-aside frame, its title tab included. */
 const ASIDE_ROOM = 120;
+/** Canvas units kept above a section moved into "Set aside", for its title tab (about 28px on screen at 100%). */
+const SECTION_TAB_ROOM = 40;
 /** A note's height when the registry gives none: enough for a few lines. */
 const NOTE_HEIGHT_GUESS = 120;
 
@@ -1393,6 +1395,8 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
   const shownIds = useMemo(() => new Set(shown.map((item) => item.id)), [shown]);
   // What an annotation can be on: a shown item, or a section (sectionKey).
   const targetIds = useMemo(() => new Set([...shownIds, ...sections.map((s) => sectionKey(s.id))]), [shownIds, sections]);
+  /** The order sections are drawn in: larger first, so one inside another is never hidden behind it. */
+  const sectionsByArea = useMemo(() => [...sections].sort((a, b) => b.width * b.height - a.width * a.height), [sections]);
   const trashedItems = useMemo(
     () => trash.flatMap((id) => items.find((item) => item.id === id) ?? []),
     [items, trash],
@@ -2943,6 +2947,32 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       if (id) updateMark(id, { x: Math.round(c.x + dx), y: Math.round(c.y + dy) }, section);
     }
   };
+  // Sections wholly inside a section move with it, as its items and notes do: a
+  // round of directions keeps a section for each tradeoff inside its own, and a
+  // pick moves such sections into "Set aside", which the person then drags as one.
+  const sectionsInside = (bounds: { x: number; y: number; w: number; h: number }, self: BoardRef): CarriedNote[] => {
+    const isInside = (x: number, y: number, w: number, h: number) => x >= bounds.x && y >= bounds.y && x + w <= bounds.x + bounds.w && y + h <= bounds.y + bounds.h;
+    const found: CarriedNote[] = [];
+    for (const section of sections) {
+      const mark = marksRef.current.find((m) => m.kind === "section" && m.target === section.id);
+      if (mark ? self.ghost && mark.id === self.id : !self.ghost && section.id === self.id) continue;
+      const x = mark?.x ?? section.x;
+      const y = mark?.y ?? section.y;
+      if (isInside(x, y, mark?.w ?? section.width, mark?.h ?? section.height)) found.push({ id: mark ? mark.id : section.id, ghost: !!mark, x, y });
+    }
+    // A new section the person drew is a mark of its own, not in the registry yet.
+    for (const m of marksRef.current) {
+      if (m.kind !== "section" || m.target || (self.ghost && m.id === self.id) || !m.w || !m.h) continue;
+      if (isInside(m.x, m.y, m.w, m.h)) found.push({ id: m.id, ghost: true, x: m.x, y: m.y });
+    }
+    return found;
+  };
+  const carrySections = (carried: CarriedNote[], dx: number, dy: number) => {
+    for (const c of carried) {
+      const id = c.ghost ? c.id : ensureMark("section", c.id);
+      if (id) updateMark(id, { x: Math.round(c.x + dx), y: Math.round(c.y + dy) });
+    }
+  };
 
   // Moving and resizing notes and sections. The first change to a real one
   // makes its mark; from then on the ghost is what moves. Everything runs on the
@@ -3052,6 +3082,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       // A section carries the items inside it, so the frame never leaves its contents behind.
       const carried = ref.kind === "section" && origin.w && origin.h ? itemsInside({ x: origin.x, y: origin.y, w: origin.w, h: origin.h }) : [];
       const carriedNotes = ref.kind === "section" && origin.w && origin.h ? notesInside({ x: origin.x, y: origin.y, w: origin.w, h: origin.h }) : [];
+      const carriedSections = ref.kind === "section" && origin.w && origin.h ? sectionsInside({ x: origin.x, y: origin.y, w: origin.w, h: origin.h }, ref) : [];
       // A dragged note outlines the section it will be in, as an item does.
       const noteSize =
         ref.kind === "note"
@@ -3077,6 +3108,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
           updateMark(id, { x, y });
           shiftItems(carried, x - origin.x, y - origin.y);
           carryNotes(carriedNotes, x - origin.x, y - origin.y, id);
+          carrySections(carriedSections, x - origin.x, y - origin.y);
           if (noteSize) dropTargetRef.current({ x, y, ...noteSize });
         },
         () => {
@@ -3150,9 +3182,11 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       if (!id) return;
       const carried = ref.kind === "section" && origin.w && origin.h ? itemsInside({ x: origin.x, y: origin.y, w: origin.w, h: origin.h }) : [];
       const carriedNotes = ref.kind === "section" && origin.w && origin.h ? notesInside({ x: origin.x, y: origin.y, w: origin.w, h: origin.h }) : [];
+      const carriedSections = ref.kind === "section" && origin.w && origin.h ? sectionsInside({ x: origin.x, y: origin.y, w: origin.w, h: origin.h }, ref) : [];
       updateMark(id, { x: Math.round(origin.x + dx), y: Math.round(origin.y + dy) });
       shiftItems(carried, dx, dy);
       carryNotes(carriedNotes, dx, dy, id);
+      carrySections(carriedSections, dx, dy);
       queueSave();
       if (!ref.ghost) {
         // The real element is replaced by its ghost; keyboard focus follows it.
@@ -3615,6 +3649,8 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
   // "The versions it was compared with" are the items in the same section, or, for
   // an item in no section, the other items in no section: a section is how a person
   // says "these belong together", so another section's items are never touched.
+  // When sections sit inside a section, the outermost one is the comparison, and
+  // the sections inside it, except the picked version's own, move whole.
   // They move into one section with the id `set-aside`, below everything else, in
   // reading order. The camera stays where it is: the view is the person's.
   //
@@ -3652,20 +3688,55 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       const { notes: noteList, sections: all, removed: gone } = boardNow.current;
       const frames = all.filter((s) => !gone.has(`section:${s.id}`));
       const placeOf = (entry: CanvasItem): Position => positionsRef.current[entry.id] ?? { x: entry.x, y: entry.y };
-      const groupOf = (entry: CanvasItem) => {
+      const centreOf = (entry: CanvasItem) => {
         const p = placeOf(entry);
-        const cx = p.x + entry.width / 2;
-        const cy = p.y + (ITEM_HEAD + entry.height) / 2;
-        return frames.find((f) => cx >= f.x && cx <= f.x + f.width && cy >= f.y && cy <= f.y + f.height);
+        return { x: p.x + entry.width / 2, y: p.y + (ITEM_HEAD + entry.height) / 2 };
       };
-      const home = groupOf(item);
-      if (home && isSetAside(home)) return;
+      const holds = (f: CanvasSection, x: number, y: number) => x >= f.x && x <= f.x + f.width && y >= f.y && y <= f.y + f.height;
+      const within = (inner: CanvasSection, outer: CanvasSection) =>
+        inner.id !== outer.id && inner.x >= outer.x && inner.y >= outer.y && inner.x + inner.width <= outer.x + outer.width && inner.y + inner.height <= outer.y + outer.height;
+      // Sections can sit inside a section, as a round of directions with one section
+      // for each tradeoff does. The comparison is the outermost section: the whole
+      // round, not only the tradeoff the picked version is on.
+      const outermost = (x: number, y: number) => frames.filter((f) => holds(f, x, y)).sort((a, b) => b.width * b.height - a.width * a.height)[0];
+      const centre = centreOf(item);
+      if (frames.some((f) => isSetAside(f) && holds(f, centre.x, centre.y))) return;
+      const home = outermost(centre.x, centre.y);
       const visible = itemsRef.current.filter((entry) => !trashRef.current.includes(entry.id));
+      const members = visible.filter((entry) => {
+        if (entry.id === item.id) return false;
+        const p = centreOf(entry);
+        return outermost(p.x, p.y)?.id === home?.id;
+      });
+      // The other sections inside the comparison move whole, with the items, notes,
+      // and sections they hold, so a set-aside version still shows which tradeoff it
+      // answered. The picked version's own section stays with it; the other versions
+      // in it move one by one, as in a section with no sections inside.
+      const inner = home ? frames.filter((f) => !isSetAside(f) && within(f, home)) : [];
+      const units = inner.filter((f) => !inner.some((g) => within(f, g)) && !holds(f, centre.x, centre.y));
+      const carried = new Map<string, CanvasItem[]>(units.map((unit) => [unit.id, []]));
+      const loose: CanvasItem[] = [];
+      for (const entry of members) {
+        const p = centreOf(entry);
+        const unit = units.find((u) => holds(u, p.x, p.y));
+        if (unit) carried.get(unit.id)!.push(entry);
+        else loose.push(entry);
+      }
+      const others = [...loose, ...[...carried.values()].flat()];
+      // Notes with a change still on its way are left where they are: moving them here would race that change.
+      const notesIn = (unit: CanvasSection) =>
+        noteList.filter(
+          (n) =>
+            !gone.has(`note:${n.id}`) &&
+            !marksRef.current.some((m) => m.target === n.id) &&
+            holds(unit, n.x + (n.width ?? NOTE_WIDTH) / 2, n.y + (n.height ?? NOTE_HEIGHT_GUESS) / 2),
+        );
+      type Piece = { kind: "item"; entry: CanvasItem; x: number; y: number; w: number; h: number } | { kind: "unit"; unit: CanvasSection; x: number; y: number; w: number; h: number };
       // Reading order: rows top to bottom, then left to right, so the set-aside row reads as the comparison did.
-      const row = (entry: CanvasItem) => Math.round(placeOf(entry).y / 200);
-      const others = visible
-        .filter((entry) => entry.id !== item.id && groupOf(entry)?.id === home?.id)
-        .sort((a, b) => row(a) - row(b) || placeOf(a).x - placeOf(b).x);
+      const pieces: Piece[] = [
+        ...loose.map((entry): Piece => ({ kind: "item", entry, ...placeOf(entry), w: entry.width, h: ITEM_HEAD + entry.height })),
+        ...units.map((unit): Piece => ({ kind: "unit", unit, x: unit.x, y: unit.y, w: unit.width, h: SECTION_TAB_ROOM + unit.height })),
+      ].sort((a, b) => Math.round(a.y / 200) - Math.round(b.y / 200) || a.x - b.x);
 
       const before: Record<string, Position> = {};
       const placed: Record<string, Position> = {};
@@ -3673,7 +3744,14 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       const inverse: DirectEdit[] = [];
       const adds: DirectAdd[] = [];
       const removes: DirectRemove[] = [];
-      if (others.length) {
+      const moveItem = (entry: CanvasItem, place: Position) => {
+        before[entry.id] = placeOf(entry);
+        placed[entry.id] = place;
+        // A version picked earlier and now passed over loses its mark with the move.
+        edits.push({ kind: "item", id: entry.id, set: { ...place, ...(entry.picked ? { picked: false } : {}) } });
+        inverse.push({ kind: "item", id: entry.id, set: { x: entry.x, y: entry.y, ...(entry.picked ? { picked: true } : {}) } });
+      };
+      if (pieces.length) {
         const frame = frames.find((s) => s.id === SET_ASIDE_ID);
         let x: number;
         let top: number;
@@ -3692,17 +3770,31 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
         }
         const frameX = frame ? frame.x : x - ASIDE_PAD;
         const frameY = frame ? frame.y : top - ASIDE_PAD;
-        for (const entry of others) {
-          before[entry.id] = placeOf(entry);
-          const place = { x: Math.round(x), y: Math.round(top) };
-          placed[entry.id] = place;
-          // A version picked earlier and now passed over loses its mark with the move.
-          edits.push({ kind: "item", id: entry.id, set: { ...place, ...(entry.picked ? { picked: false } : {}) } });
-          inverse.push({ kind: "item", id: entry.id, set: { x: entry.x, y: entry.y, ...(entry.picked ? { picked: true } : {}) } });
-          x += entry.width + ASIDE_GAP;
+        for (const piece of pieces) {
+          if (piece.kind === "item") {
+            moveItem(piece.entry, { x: Math.round(x), y: Math.round(top) });
+          } else {
+            // The section, the sections inside it, and what they hold all shift by the same amount.
+            const { unit } = piece;
+            const dx = Math.round(x - unit.x);
+            const dy = Math.round(top + SECTION_TAB_ROOM - unit.y);
+            for (const f of [unit, ...inner.filter((g) => within(g, unit))]) {
+              edits.push({ kind: "section", id: f.id, set: { x: f.x + dx, y: f.y + dy } });
+              inverse.push({ kind: "section", id: f.id, set: { x: f.x, y: f.y } });
+            }
+            for (const entry of carried.get(unit.id) ?? []) {
+              const p = placeOf(entry);
+              moveItem(entry, { x: Math.round(p.x + dx), y: Math.round(p.y + dy) });
+            }
+            for (const n of notesIn(unit)) {
+              edits.push({ kind: "note", id: n.id, set: { x: n.x + dx, y: n.y + dy } });
+              inverse.push({ kind: "note", id: n.id, set: { x: n.x, y: n.y } });
+            }
+          }
+          x += piece.w + ASIDE_GAP;
         }
         const width = Math.round(x - ASIDE_GAP + ASIDE_PAD - frameX);
-        const height = Math.round(Math.max(...others.map((entry) => ITEM_HEAD + entry.height)) + ASIDE_PAD * 2);
+        const height = Math.round(Math.max(...pieces.map((piece) => piece.h)) + ASIDE_PAD * 2);
         if (frame) {
           edits.push({ kind: "section", id: frame.id, set: { width, height: Math.max(frame.height, height) } });
           inverse.push({ kind: "section", id: frame.id, set: { width: frame.width, height: frame.height } });
@@ -5172,8 +5264,10 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
         aria-describedby="canvas-help"
       >
         <div ref={worldRef} className="canvas-world">
-          {/* Sections first, so items draw above their frame; notes and ghosts last, above everything. */}
-          {sections.map((section) => (
+          {/* Sections first, so items draw above their frame; notes and ghosts last, above everything.
+              Larger sections first, so a section inside another draws above it whatever the
+              registry order: a pick moves sections into "Set aside", which is added last. */}
+          {sectionsByArea.map((section) => (
             <SectionView
               key={section.id}
               section={section}
