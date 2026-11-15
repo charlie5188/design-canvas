@@ -2632,6 +2632,56 @@ export const Done = () => (
   }
 })
 
+test('a link that shows only after a press gets its arrow in its own words', async ({ page }) => {
+  // Found filming the promo: Continue became a link only once a plan was picked, and the
+  // arrow took the words of the plan press ("click "Team"") instead of "click "Continue"".
+  const original = readFileSync(REGISTRY, 'utf8')
+  const example = readFileSync(EXAMPLE, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    writeFileSync(
+      EXAMPLE,
+      `import { useState } from "react";
+export const Example = () => {
+  const [plan, setPlan] = useState(false);
+  return (
+    <div style={{ padding: 16 }}>
+      <h2>Plans</h2>
+      <button type="button" onClick={() => setPlan(true)}>Team</button>
+      {plan ? <a href="/checkout">Continue</a> : <button type="button" disabled>Continue</button>}
+    </div>
+  );
+};
+export const Checkout = () => (
+  <div style={{ padding: 16 }}>
+    <h2>Checkout</h2>
+  </div>
+);
+`,
+    )
+    writeFileSync(
+      REGISTRY,
+      original
+        .replace('import { Example } from "./items/Example";', 'import { Checkout, Example } from "./items/Example";')
+        .replace('component: Example,', 'component: Example,\n    path: "/plans",\n    screens: { "/checkout": Checkout },'),
+    )
+    await expect.poll(async () => (await (await page.request.get('/items/Example.tsx')).text()).includes('setPlan'), { timeout: 15_000 }).toBe(true)
+    await page.goto('/')
+    const item = page.locator('.canvas-item[data-canvas-item="example"]')
+    await expect(item.locator('h2')).toHaveText('Plans')
+    await item.getByRole('button', { name: 'Team' }).click()
+    await item.getByRole('link', { name: 'Continue' }).click()
+    await expect(item.locator('h2')).toHaveText('Checkout')
+    await page.getByRole('button', { name: 'Show the 2 screens of Example · replace me' }).click()
+    const view = page.getByRole('dialog', { name: 'Screens of Example · replace me' })
+    await expect(view.locator('.canvas-flow-arrows text')).toHaveText(['click "Continue"'])
+    expect(errors).toEqual([])
+  } finally {
+    writeFileSync(EXAMPLE, example)
+    await restoreRegistry(page, original)
+  }
+})
+
 test('a flow with a branch lays the branch out in a row under the screen it leaves', async ({ page }) => {
   const original = readFileSync(REGISTRY, 'utf8')
   const example = readFileSync(EXAMPLE, 'utf8')

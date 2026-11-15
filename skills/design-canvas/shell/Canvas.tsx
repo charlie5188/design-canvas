@@ -3933,12 +3933,15 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     if (!world) return;
     const onPress = (event: MouseEvent) => {
       const target = event.target instanceof Element ? event.target : null;
-      const id = target?.closest<HTMLElement>("[data-canvas-item]")?.dataset.canvasItem;
+      if (!target || !world.contains(target)) return;
+      const id = target.closest<HTMLElement>("[data-canvas-item]")?.dataset.canvasItem;
       if (id) lastPress.current = { id, words: controlWords(target), at: performance.now() };
     };
-    // Capture: the press is noted before the control's own handler makes the step.
-    world.addEventListener("click", onPress, true);
-    return () => world.removeEventListener("click", onPress, true);
+    // Capture on window, registered before the link handler below (also window capture):
+    // a link's step is made in that handler, so the press must be noted first. On the
+    // world it ran after it, and a link step took the words of the press before it.
+    window.addEventListener("click", onPress, true);
+    return () => window.removeEventListener("click", onPress, true);
   }, []);
   /** How a note about one screen of an item (its index), or about its whole flow (null), is named. */
   const flowRefOf = useCallback((item: CanvasItem, index: number | null, state?: string) => {
