@@ -1,6 +1,6 @@
 ---
 name: design-directions
-description: Plan several clearly different UI directions for an existing product before building them. It frames the problem, chooses the tradeoffs that matter (new user or expert, AI or person, speed or control, market, target users), places each direction on one of them, and grounds each in how real products, including competitors' help docs, solve the same job. Use when someone asks for options, directions, alternatives, explorations, or "a few ideas" for a screen, flow, or component, or before adding new directions to a design canvas. Not for small changes to one chosen version.
+description: Plan several clearly different UI directions for an existing product before building them. It frames the problem, chooses the tradeoffs that matter (new user or expert, AI or person, speed or control, market, target users), places each direction on one of them, and grounds each in how real products, including competitors' help docs, solve the same job. Use when someone asks for a new round of directions, options, or alternatives for a whole screen or flow, such as "a few directions for the upgrade page" or "other ways to do onboarding". Not for another version of an existing item, a change to one version ("try X", "make it bolder", "simpler"), alternatives for a single component, copy, or visual polish: those are ordinary canvas changes. A round takes several minutes, research included.
 ---
 
 # Design directions
@@ -11,14 +11,18 @@ The person's own instructions come first. When the person, the project, or anoth
 
 ## 1. Know the phase
 
+A round of directions takes several minutes, most of it research and sketching, so run it only when the person asks for one.
+
 | The person is | Do |
 |---|---|
-| Asking for new directions | All the steps below. |
+| Asking for new directions for a whole screen or flow | All the steps below. |
+| Asking something that could mean one better version or a round of directions, such as "how could we improve the upgrade page" | Do not run the round. Make one improved version, with the canvas's usual rules, and offer a round in one line, such as "I can also lay out a round of directions for this page, with research; it takes several minutes." Do not wait for an answer before you make the version. |
+| Asking for another version, a change to one, or alternatives for a single component | Do not use this skill. These are ordinary canvas changes. |
 | Asking for variations of one direction | Skip steps 2, 3, and 5. Keep its spectrum and position. Vary one structural axis at a time. |
 | Choosing between directions | Compare them on the criteria from step 2: what each one is good at, what it gives up, and which one you would pick and why. |
 | Refining the one they chose | Change that one. Make no new directions. |
 
-When the person asks again for "more" or "other ideas", use a spectrum you have not used yet, such as one you listed as not used in step 3. Do not make small changes to the last round.
+When the person asks again for "more" or "other ideas", use a spectrum you have not used yet, such as one you listed as not used in step 3. Do not make small changes to the last round. Reuse the problem, the criteria, and the research from the last round (step 5); do not frame or search again what is already there.
 
 ## 2. Frame the problem
 
@@ -74,6 +78,7 @@ Before you draft, find out how real products handle the same job. For each spect
 - Never put confidential details of the person's product, customers, or data into a search query. Search for the general job, such as "contract approval workflow".
 - Stop when you can say in one line how each product handles the job. This is a short check, not a report.
 - Without web access, say so, and use what you know, marked as from memory.
+- Research once for each screen. Keep what you found, one line for each product with its source link, under "Sources" in the round's note (step 8), or in the chat without a canvas. Before you search, read that note: a later round on the same screen uses what is there, and you search only for a spectrum end the note does not cover, or when the person asks for new references.
 
 ## 6. Draft the directions
 
@@ -102,7 +107,7 @@ Before you show the directions, check them. Do this silently; do not print it.
   - Draw one section around the whole round, titled with the screen, such as `Upgrade page · directions`. It holds the baseline where it stands, and below it one section for each spectrum, titled with the spectrum, such as `Speed ↔ certainty`, with its cards from one end to the other. Pick treats the outer section as one comparison: when the person picks a direction, the canvas sets all the others aside, each spectrum's section whole, and the baseline too.
   - Start each card's `bet` with its position, such as `Speed end: …`.
   - Sketch the one screen that shows the bet, and mark the part that differs from the baseline as the key change.
-  - Add one canvas note beside the round's section: the job, the criteria, the spectra you used, and the ones you considered and did not use, with their reasons. People who open the shared file were not in the conversation.
+  - Add one canvas note beside the round's section: the job, the criteria, the spectra you used, and the ones you considered and did not use, with their reasons, then "Sources", one line for each product you looked at, with its link. People who open the shared file were not in the conversation, and a later round reads it instead of searching again. For a later round, add to this note; do not write a second one.
   - Give only your sources in the chat.
 - **Without a canvas**, list the directions in the Report format below, grouped by spectrum, with your sources. When building them needs new components or several screens, ask before you build.
 
