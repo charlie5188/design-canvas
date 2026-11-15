@@ -395,6 +395,8 @@ body,
   inset-block-end: 68px;
   gap: 8px;
   padding: 6px 12px;
+  /* The canvas's size, also on an item's own page, which leaves the app's text size alone. */
+  font-size: 14px;
   inline-size: max-content;
   max-inline-size: calc(100vw - 32px);
 }
@@ -578,7 +580,8 @@ body,
   overflow: auto;
   background: var(--canvas-bg-color);
 }
-.canvas-frame-page > * {
+/* The item, not its page's notice. */
+.canvas-frame-page > :not(.canvas-toast, .canvas-live) {
   flex: none;
   margin: auto;
   box-shadow: 0 0 0 1px var(--canvas-border-color);

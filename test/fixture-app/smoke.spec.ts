@@ -2042,6 +2042,119 @@ export const Help = () => (
   }
 })
 
+test('an item opened alone follows its links as on the canvas, and never loads another page', async ({ page, context }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  const example = readFileSync(EXAMPLE, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    writeFileSync(
+      EXAMPLE,
+      `import { type ReactNode, useContext } from "react";
+import { BACK_EVENT, NAVIGATE_EVENT } from "../canvas/bridge";
+import { RouteContext } from "../canvas/routes";
+const push = (href: string) => window.dispatchEvent(new CustomEvent(NAVIGATE_EVENT, { detail: href }));
+function Screen({ title, children }: { title: string; children?: ReactNode }) {
+  const path = useContext(RouteContext);
+  return (
+    <div style={{ padding: 16 }}>
+      <h2 style={{ margin: 0, fontSize: 18 }}>{title}</h2>
+      <p data-path>{path}</p>
+      {children}
+    </div>
+  );
+}
+export const Example = () => (
+  <Screen title="Plans">
+    <a href="/checkout?plan=team">Choose</a> <a href="/nowhere">Lost</a> <a href="/help" target="_blank">Help tab</a>
+    <form><button>Send</button></form>
+  </Screen>
+);
+export const Checkout = () => (
+  <Screen title="Checkout">
+    <button type="button" onClick={() => push("/done")}>Pay</button>{" "}
+    <button type="button" onClick={() => window.dispatchEvent(new Event(BACK_EVENT))}>Back</button>
+  </Screen>
+);
+export const Done = () => (
+  <Screen title="Done">
+    <a href="/plans">Start over</a>
+  </Screen>
+);
+`,
+    )
+    writeFileSync(
+      REGISTRY,
+      original
+        .replace('import { Example } from "./items/Example";', 'import { Checkout, Done, Example } from "./items/Example";')
+        .replace('component: Example,', 'component: Example,\n    path: "/plans",\n    screens: { "/checkout": Checkout, "/done": Done },')
+        .replace(
+          /\];\s*$/,
+          `  { id: "phone", name: "Phone", component: Example, path: "/plans", screens: { "/checkout": Checkout, "/done": Done }, x: 0, y: 260, width: 375, height: 240, viewport: true },
+];
+`,
+        ),
+    )
+    await expect
+      .poll(async () => (await (await page.request.get('/registry.tsx')).text()).includes('id: "phone"'), { timeout: 15_000 })
+      .toBe(true)
+    await expect
+      .poll(async () => (await (await page.request.get('/items/Example.tsx')).text()).includes('Checkout'), { timeout: 15_000 })
+      .toBe(true)
+    // A viewport item runs in a frame of its own size inside its page; a plain item runs in the page itself.
+    for (const [name, id] of [
+      ['a frame item', 'phone'],
+      ['a plain item', 'example'],
+    ] as const) {
+      await page.goto(`/frame.html?item=${id}`)
+      const item = id === 'phone' ? page.frameLocator('iframe.canvas-frame').locator('body') : page.locator('.canvas-frame-root')
+      const frameAddress = () => page.frames().find((frame) => frame !== page.mainFrame())?.url()
+      await expect(item.getByRole('heading'), name).toHaveText('Plans')
+      const address = page.url()
+      const inner = frameAddress()
+      // A link to one of its screens shows that screen in place. The page stays, and so does its frame:
+      // the dev server would answer any other path with the whole canvas.
+      await item.getByRole('link', { name: 'Choose' }).click()
+      await expect(item.getByRole('heading'), name).toHaveText('Checkout')
+      await expect(item.locator('[data-path]'), name).toHaveText('/checkout')
+      await expect(page.locator('.canvas-toast'), name).toHaveCount(0)
+      expect(page.url(), name).toBe(address)
+      expect(frameAddress(), name).toBe(inner)
+      // A router call goes the same way, and its back() returns.
+      await item.getByRole('button', { name: 'Back' }).click()
+      await expect(item.getByRole('heading'), name).toHaveText('Plans')
+      await item.getByRole('link', { name: 'Choose' }).click()
+      await item.getByRole('button', { name: 'Pay' }).click()
+      await expect(item.getByRole('heading'), name).toHaveText('Done')
+      await item.getByRole('link', { name: 'Start over' }).click()
+      await expect(item.getByRole('heading'), name).toHaveText('Plans')
+      // Any other path, a new tab, and a form stay where they are, and say so as the canvas does.
+      await item.getByRole('link', { name: 'Lost' }).click()
+      await expect(page.locator('.canvas-toast'), name).toContainText('This item has no screen for /nowhere')
+      await item.getByRole('link', { name: 'Help tab' }).click()
+      await expect(page.locator('.canvas-toast'), name).toContainText('Opens in a new tab: /help')
+      await item.getByRole('button', { name: 'Send' }).click()
+      await expect(page.locator('.canvas-toast'), name).toContainText("Forms don't submit on the canvas")
+      await expect(item.getByRole('heading'), name).toHaveText('Plans')
+      expect(context.pages(), name).toHaveLength(1)
+      expect(page.url(), name).toBe(address)
+      expect(frameAddress(), name).toBe(inner)
+      // Nothing about the screen is kept: a reload starts at the first one, as Restart does on the canvas.
+      await item.getByRole('link', { name: 'Choose' }).click()
+      await expect(item.getByRole('heading'), name).toHaveText('Checkout')
+      await page.reload()
+      await expect(item.getByRole('heading'), name).toHaveText('Plans')
+    }
+    expect(errors).toEqual([])
+  } finally {
+    if (readFileSync(EXAMPLE, 'utf8') !== example) {
+      const updated = page.waitForEvent('console', { predicate: (m) => m.text().includes('hot updated'), timeout: 10_000 }).catch(() => {})
+      writeFileSync(EXAMPLE, example)
+      await updated
+    }
+    await restoreRegistry(page, original)
+  }
+})
+
 test('an item that was used can be restarted by itself, in a frame too', async ({ page }) => {
   const original = readFileSync(REGISTRY, 'utf8')
   const example = readFileSync(EXAMPLE, 'utf8')

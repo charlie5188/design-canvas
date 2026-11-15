@@ -22,6 +22,8 @@
 // FrameHost.tsx resolves a `viewport` item's own screens inside its frame, and hands the rest
 // to the canvas. Both keep a short history per item, for a router's `back()`. Restart returns
 // an item to its first screen. Nothing here is saved: a reload starts every item at its start.
+// An item opened alone (frame.html?item=<id>) follows the same rules: FrameHost.tsx shows its
+// screens, and its page says what the item could not show, since no canvas is there to.
 import { type ComponentType, createContext } from "react";
 import type { CanvasItem } from "./types";
 
@@ -57,6 +59,23 @@ export function pathOf(href: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * How a notice names where a link goes: its path and query on this site, its whole address on
+ * another. Null for a link to a place in the page, or to this very page: those say nothing.
+ */
+export function linkName(href: string): string | null {
+  if (href.startsWith("#")) return null;
+  let url: URL;
+  try {
+    url = new URL(href, window.location.href);
+  } catch {
+    return null;
+  }
+  const here = window.location;
+  if (url.origin === here.origin && url.pathname === here.pathname && url.search === here.search) return null;
+  return url.origin === here.origin ? `${url.pathname}${url.search}` : url.href;
 }
 
 /** Whether `pattern` (an item's `path`, or a key of its `screens`) names `path`. `[id]` and `:id` stand for any one segment. */
