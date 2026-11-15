@@ -29,8 +29,8 @@
 // for the page to download. Only the canvas page may ask.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { access, chmod, constants, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import type { Plugin } from "vite";
 import { AGENT_EVENT, AGENT_PATH, type AgentReply, EDIT_PATH, MAX_REPLY, NOTE_ID, REPLY_EVENT, SHARE_PATH, VERSION_PATH } from "./channel.ts";
 import { addEntry, applyEdits, type DirectAdd, type DirectEdit, type DirectRemove, placeableItems, removeEntry, validAdd, validEdit, validRemove } from "./registry-edit.ts";
@@ -56,6 +56,32 @@ const fromCanvasPage = (request: IncomingMessage) =>
   localHost(request) && request.headers.origin === `http://${request.headers.host}`;
 // Browsers always send Origin or Sec-Fetch-Site; curl sends neither.
 const fromBrowser = (request: IncomingMessage) => !!(request.headers.origin || request.headers["sec-fetch-site"]);
+
+/**
+ * Puts new text in a file in one step. A plain write empties the file first, and a
+ * hot update that reads it in that moment gets a module with nothing in it: the page
+ * then logs "does not provide an export named 'notes'" and stops updating until the
+ * next change. So the text is written to a file beside it, and that file is renamed
+ * over it, which leaves no moment when the file is empty or half written.
+ *
+ * A file the person made read-only is still refused, as a plain write refuses it
+ * (a rename would not). Where a rename over the file is not possible, for example
+ * while another program holds it open on Windows, the plain write is used.
+ */
+async function replaceFile(path: string, text: string) {
+  await access(path, constants.W_OK);
+  // The file itself, so a link to it stays a link.
+  const target = await realpath(path);
+  const beside = join(dirname(target), `.${basename(target)}.saving`);
+  try {
+    await writeFile(beside, text);
+    await chmod(beside, (await stat(target)).mode);
+    await rename(beside, target);
+  } catch {
+    await rm(beside, { force: true }).catch(() => {});
+    await writeFile(target, text);
+  }
+}
 
 function send(response: ServerResponse, status: number, body: string, type = "text/plain") {
   response.writeHead(status, { "Content-Type": `${type}; charset=utf-8`, "Cache-Control": "no-store" });
@@ -362,7 +388,7 @@ export function agentChannel(): Plugin {
                   ids[index] = null;
                 }
               });
-              if (next !== original) await writeFile(path, next);
+              if (next !== original) await replaceFile(path, next);
               return { applied: result.applied, missing: result.missing, rejected, unremoved, ids };
             });
             writing = job.catch(() => {});

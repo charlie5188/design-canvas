@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { appendFileSync, cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { expect, type Page, test } from '@playwright/test'
 
@@ -1012,6 +1012,48 @@ test('the dev server knows the canvas version', async ({ page }) => {
   const v = (await (await page.request.get('/__design-canvas/version')).json()) as { current: number | null; folder: string }
   expect(v.current).toBe(Number(readFileSync('../../skills/design-canvas/VERSION', 'utf8')))
   expect(v.folder).toContain('smoke')
+})
+
+test('a save never leaves the registry empty or half written', async ({ page, baseURL }) => {
+  // The dev server puts the new text in place in one step. A plain write empties the file
+  // first, and a hot update that reads it in that moment breaks the page until the next change.
+  const original = readFileSync(REGISTRY, 'utf8')
+  const save = (x: number) =>
+    page.request.post('/__design-canvas/edit', {
+      headers: { Origin: new URL(baseURL!).origin },
+      data: { edits: [{ kind: 'item', id: 'example', set: { x } }] },
+    })
+  // Reads the file as fast as it can while the saves run, as a hot update might at any moment.
+  let reading = true
+  let reads = 0
+  let broken = 0
+  const read = () => {
+    for (let i = 0; i < 200; i++) {
+      reads++
+      try {
+        const text = readFileSync(REGISTRY, 'utf8')
+        if (!text.includes('export const notes') || !text.trimEnd().endsWith('];')) broken++
+      } catch {
+        broken++
+      }
+    }
+    if (reading) setImmediate(read)
+  }
+  try {
+    read()
+    for (let i = 0; i < 60; i++) expect((await save(10 + (i % 2) * 10)).status()).toBe(200)
+    reading = false
+    expect(reads).toBeGreaterThan(1000)
+    expect(broken).toBe(0)
+    // Nothing is left beside it, and the last save is what the file holds.
+    expect(readdirSync(dirname(REGISTRY)).filter((name) => name.endsWith('.saving'))).toEqual([])
+    expect(readFileSync(REGISTRY, 'utf8')).toMatch(/id: "example",[^}]*\bx: 20,/)
+  } finally {
+    reading = false
+    await save(0)
+    if (readFileSync(REGISTRY, 'utf8') !== original) writeFileSync(REGISTRY, original)
+    await expect.poll(async () => (await (await page.request.get('/registry.tsx')).text()).includes('x: 0,')).toBe(true)
+  }
 })
 
 test('a save the dev server cannot take says why, and the change waits for the agent', async ({ page }) => {
