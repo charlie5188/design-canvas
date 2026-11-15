@@ -1,6 +1,16 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { BACK_EVENT, frameParams, frameSource, fromThisCanvas, NAVIGATE_EVENT, postToCanvas, readCanvasMessage } from "./bridge";
-import { opensNewTab, pathOf, RouteContext, screenAt } from "./routes";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  BACK_EVENT,
+  type FrameMessage,
+  frameParams,
+  frameSource,
+  fromThisCanvas,
+  NAVIGATE_EVENT,
+  postToCanvas,
+  readCanvasMessage,
+  readFrameMessage,
+} from "./bridge";
+import { linkName, opensNewTab, pathOf, RouteContext, screenAt } from "./routes";
 import {
   clearPending,
   describeArea,
@@ -25,10 +35,28 @@ import "./canvas.css";
 /** Z by key position or by letter: Alt changes the letter on a Mac (Ω), and other layouts move the key. */
 const zoomKey = (event: KeyboardEvent) => event.code === "KeyZ" || event.key === "z" || event.key === "Z";
 
+/** As long as the canvas shows a notice (Canvas.tsx `TOAST_MS`). */
+const NOTICE_MS = 2500;
+
+/**
+ * What an item's own page says about a link the item did not show, or a form it did not
+ * send, in the canvas's words (Canvas.tsx `followLink`). Null for a link that says nothing.
+ */
+function noticeOf(item: CanvasItem, message: FrameMessage): string | null {
+  if (message.type === "form") return labels.formBlocked;
+  if (message.type !== "link") return null;
+  const named = linkName(message.href);
+  if (named === null) return null;
+  // No other item is here to show a new tab.
+  if (message.blank) return labels.newTabBlocked(named);
+  return pathOf(message.href) && (item.path || item.screens) ? labels.screenMissing(named) : labels.linkBlocked(named);
+}
+
 /**
  * One canvas item alone, at its real size. The canvas loads it in an iframe
  * for `viewport` items; opened directly (frame.html?item=<id>) it is a clean
- * page for screenshots, Figma capture, or sharing.
+ * page for screenshots, Figma capture, or sharing. Its links work there as on
+ * the canvas (routes.ts).
  */
 export function FrameHost({
   items,
@@ -46,6 +74,15 @@ export function FrameHost({
   const item = items.find((entry) => entry.id === id);
   // Only a frame inside the canvas hands its gestures to the parent page.
   const inCanvas = context === "canvas" && window.parent !== window;
+  // Opened alone in a tab, this is the item's own page. It shows a `viewport` item in a frame
+  // of the item's size (in=page), and any other item right here.
+  const alone = !context;
+  const framed = alone && !!item?.viewport;
+  // Wherever a person uses the item, its links stay in it, as a click in the product stays in
+  // its tab: on the canvas, and on the item's own page. Before, only the canvas frame did this,
+  // and a link on the item's own page loaded that path, which the dev server answers with the
+  // whole canvas. The flow view's screens take no clicks.
+  const follows = inCanvas || (context === "page" && window.parent !== window) || (alone && !!item && !item.viewport);
   const rootRef = useRef<HTMLDivElement>(null);
   // The screens this frame went through, newest last; empty at the item's first screen (routes.ts).
   // The flow view opens a frame at one of its screens.
@@ -57,6 +94,41 @@ export function FrameHost({
   itemRef.current = item;
   const pickRef = useRef<HTMLDivElement>(null);
   const drawRef = useRef<HTMLDivElement>(null);
+  // Annotate mode, which the canvas turns on and off: a click then places an annotation.
+  const annotatingRef = useRef(false);
+
+  // The item's own page says what the item could not show, as the canvas does. No canvas is
+  // there to say it, and before, nothing did.
+  const [notice, setNotice] = useState("");
+  const noticeTimer = useRef(0);
+  const liveRef = useRef<HTMLDivElement>(null);
+  const pageFrameRef = useRef<HTMLIFrameElement>(null);
+  const say = useCallback((message: FrameMessage) => {
+    const text = itemRef.current && noticeOf(itemRef.current, message);
+    if (!text) return;
+    window.clearTimeout(noticeTimer.current);
+    setNotice(text);
+    noticeTimer.current = window.setTimeout(() => setNotice(""), NOTICE_MS);
+    // Emptied first, so the same notice twice is read out twice.
+    const live = liveRef.current;
+    if (!live) return;
+    live.textContent = "";
+    requestAnimationFrame(() => {
+      live.textContent = text;
+    });
+  }, []);
+  useEffect(() => () => window.clearTimeout(noticeTimer.current), []);
+  // A `viewport` item's frame on its own page hands this page what it did not show.
+  useEffect(() => {
+    if (!framed) return;
+    const onMessage = (event: MessageEvent) => {
+      if (!fromThisCanvas(event) || !event.source || event.source !== pageFrameRef.current?.contentWindow) return;
+      const message = readFrameMessage(event.data);
+      if (message) say(message);
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [framed, say]);
 
   // Open in the canvas's saved theme, before the first paint.
   useLayoutEffect(() => {
@@ -77,6 +149,63 @@ export function FrameHost({
     return () => window.removeEventListener("message", onMessage);
   }, [inCanvas, theme]);
 
+  // Navigation never leaves the item, as a click in the product stays in its tab. A path that is
+  // one of this item's own screens is shown here, in place. Anything else is handed on to be
+  // reported: to the canvas, to the item's own page around this frame, or, for an item shown
+  // right in its own page, to that page's notice. A link that opens a new tab in the product is
+  // never shown here: the canvas takes the view to another item that shows it (routes.ts).
+  // Registered before the gesture handlers below: a link's click is seen first.
+  useEffect(() => {
+    if (!follows) return;
+    const report = alone ? say : postToCanvas;
+    const inside = (href: string) => {
+      const path = pathOf(href);
+      const current = itemRef.current;
+      if (!path || !current || !screenAt(current, path)) return false;
+      setStack((was) => (was[was.length - 1] === path ? was : [...was, path]));
+      return true;
+    };
+    const onLinkClick = (event: MouseEvent) => {
+      // A click in annotate mode places an annotation; the pick handler cancels it.
+      if (annotatingRef.current) return;
+      const anchor = previewLink(event);
+      if (!anchor) return;
+      event.preventDefault();
+      const href = anchor.getAttribute("href") ?? "";
+      if (opensNewTab(anchor)) report({ type: "link", href, blank: true });
+      else if (!inside(href)) report({ type: "link", href });
+    };
+    const onBack = () => setStack((was) => was.slice(0, -1));
+    const onSubmit = (event: SubmitEvent) => {
+      if (event.defaultPrevented) return;
+      event.preventDefault();
+      report({ type: "form" });
+    };
+    const onNavigate = (event: Event) => {
+      const href = (event as CustomEvent<unknown>).detail;
+      if (typeof href === "string" && !inside(href)) report({ type: "link", href });
+    };
+    // A link in another item on the canvas names one of this frame's screens.
+    const onCanvasMessage = (event: MessageEvent) => {
+      if (!inCanvas || !fromThisCanvas(event) || event.source !== window.parent) return;
+      const message = readCanvasMessage(event.data);
+      if (message?.type === "screen") inside(message.path);
+    };
+
+    window.addEventListener(NAVIGATE_EVENT, onNavigate);
+    window.addEventListener(BACK_EVENT, onBack);
+    window.addEventListener("click", onLinkClick, { capture: true });
+    window.addEventListener("submit", onSubmit);
+    window.addEventListener("message", onCanvasMessage);
+    return () => {
+      window.removeEventListener(NAVIGATE_EVENT, onNavigate);
+      window.removeEventListener(BACK_EVENT, onBack);
+      window.removeEventListener("click", onLinkClick, { capture: true });
+      window.removeEventListener("submit", onSubmit);
+      window.removeEventListener("message", onCanvasMessage);
+    };
+  }, [alone, follows, inCanvas, say]);
+
   useEffect(() => {
     const root = rootRef.current;
     if (!inCanvas || !root) return;
@@ -93,7 +222,7 @@ export function FrameHost({
       if (event.key === "Alt") document.documentElement.setAttribute("data-canvas-alt", "");
       if (event.key === "Alt" && pointer.x >= 0) showPick(document.elementFromPoint(pointer.x, pointer.y));
       // Keys inside a frame never reach the canvas page, so Escape is handed over.
-      if (event.key === "Escape" && annotating) postToCanvas({ type: "escape" });
+      if (event.key === "Escape" && annotatingRef.current) postToCanvas({ type: "escape" });
       const active = document.activeElement;
       const typing = !!active && active !== document.body && isEditable(active);
       // Z held is the canvas's zoom, as in Figma, unless a field here takes the letter.
@@ -108,7 +237,7 @@ export function FrameHost({
       if (event.code === "Space") postToCanvas({ type: "space", down: false });
       if (zoomKey(event)) postToCanvas({ type: "zoom-key", down: false, out: false });
       if (event.key === "Alt") document.documentElement.removeAttribute("data-canvas-alt");
-      if (event.key === "Alt" && !annotating) hidePick();
+      if (event.key === "Alt" && !annotatingRef.current) hidePick();
     };
     const onBlur = () => {
       postToCanvas({ type: "space", down: false });
@@ -119,8 +248,7 @@ export function FrameHost({
     };
 
     // Element references and annotations, same as on the canvas page. The canvas
-    // tells each frame when annotate mode turns on or off.
-    let annotating = false;
+    // tells each frame when annotate mode turns on or off (annotatingRef).
     const pointer = { x: -1, y: -1 };
     const hidePick = () => {
       if (pickRef.current) pickRef.current.hidden = true;
@@ -208,7 +336,7 @@ export function FrameHost({
         }
         return;
       }
-      if (event.altKey || annotating) showPick(event.target);
+      if (event.altKey || annotatingRef.current) showPick(event.target);
       else hidePick();
     };
     const blockPick = (event: MouseEvent) => {
@@ -218,10 +346,10 @@ export function FrameHost({
         return;
       }
       textEdit?.finish(true);
-      if ((!event.altKey && !annotating) || !(event.target instanceof Element) || !root.contains(event.target)) return;
+      if ((!event.altKey && !annotatingRef.current) || !(event.target instanceof Element) || !root.contains(event.target)) return;
       event.preventDefault();
       event.stopPropagation();
-      if (annotating && !event.altKey && event.button === 0 && event.type === "pointerdown") {
+      if (annotatingRef.current && !event.altKey && event.button === 0 && event.type === "pointerdown") {
         const pointerEvent = event as PointerEvent;
         if (pointerEvent.pointerType !== "touch")
           drawing = { pointerId: pointerEvent.pointerId, x: event.clientX, y: event.clientY, moved: false };
@@ -230,7 +358,7 @@ export function FrameHost({
     const onPickClick = (event: MouseEvent) => {
       // Inside the text being edited a click follows no link and presses no button;
       // a double-click's second click leaves the double-click to edit the text.
-      if (inTextEdit(event.target) || (annotating && !event.altKey && event.detail > 1)) {
+      if (inTextEdit(event.target) || (annotatingRef.current && !event.altKey && event.detail > 1)) {
         event.preventDefault();
         event.stopPropagation();
         return;
@@ -240,7 +368,7 @@ export function FrameHost({
         event.stopPropagation();
         return;
       }
-      if ((!event.altKey && !annotating) || !(event.target instanceof Element)) return;
+      if ((!event.altKey && !annotatingRef.current) || !(event.target instanceof Element)) return;
       const element = pickElement(event.target, root);
       if (!element) return;
       event.preventDefault();
@@ -255,7 +383,7 @@ export function FrameHost({
         event.stopPropagation();
         return;
       }
-      if (!annotating || event.altKey || !(event.target instanceof Element) || !root.contains(event.target)) return;
+      if (!annotatingRef.current || event.altKey || !(event.target instanceof Element) || !root.contains(event.target)) return;
       event.preventDefault();
       event.stopPropagation();
       const element = textTarget(event.target, root);
@@ -295,52 +423,15 @@ export function FrameHost({
       const message = readCanvasMessage(event.data);
       if (message?.type === "text-edit-end") textEdit?.finish(true);
       if (message?.type === "text-revert") clearPending(message.id);
-      if (message?.type === "screen") inside(message.path);
       if (message?.type !== "annotate-mode") return;
       if (!message.on) textEdit?.finish(false);
-      annotating = message.on;
-      document.documentElement.toggleAttribute("data-canvas-annotating", annotating);
-      if (annotating && pointer.x >= 0) showPick(document.elementFromPoint(pointer.x, pointer.y));
+      annotatingRef.current = message.on;
+      document.documentElement.toggleAttribute("data-canvas-annotating", annotatingRef.current);
+      if (annotatingRef.current && pointer.x >= 0) showPick(document.elementFromPoint(pointer.x, pointer.y));
       else hidePick();
     };
 
-    // Navigation never leaves the frame, as a click in the product stays in its tab. A path
-    // that is one of this item's own screens is shown here, in place. Anything else goes to
-    // the canvas to report. A link that opens a new tab in the product is never shown here:
-    // the canvas takes the view to another item that shows it (routes.ts).
-    const inside = (href: string) => {
-      const path = pathOf(href);
-      const current = itemRef.current;
-      if (!path || !current || !screenAt(current, path)) return false;
-      setStack((was) => (was[was.length - 1] === path ? was : [...was, path]));
-      return true;
-    };
-    const onLinkClick = (event: MouseEvent) => {
-      // A click in annotate mode places an annotation; the pick handler cancels it.
-      if (annotating) return;
-      const anchor = previewLink(event);
-      if (!anchor) return;
-      event.preventDefault();
-      const href = anchor.getAttribute("href") ?? "";
-      if (opensNewTab(anchor)) postToCanvas({ type: "link", href, blank: true });
-      else if (!inside(href)) postToCanvas({ type: "link", href });
-    };
-    const onBack = () => setStack((was) => was.slice(0, -1));
-    const onSubmit = (event: SubmitEvent) => {
-      if (event.defaultPrevented) return;
-      event.preventDefault();
-      postToCanvas({ type: "form" });
-    };
-    const onNavigate = (event: Event) => {
-      const href = (event as CustomEvent<unknown>).detail;
-      if (typeof href === "string" && !inside(href)) postToCanvas({ type: "link", href });
-    };
-
     window.addEventListener("wheel", onWheel, { passive: false });
-    window.addEventListener(NAVIGATE_EVENT, onNavigate);
-    window.addEventListener(BACK_EVENT, onBack);
-    window.addEventListener("click", onLinkClick, { capture: true });
-    window.addEventListener("submit", onSubmit);
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("blur", onBlur);
@@ -357,10 +448,6 @@ export function FrameHost({
     return () => {
       window.removeEventListener("message", onCanvasMessage);
       window.removeEventListener("wheel", onWheel);
-      window.removeEventListener(NAVIGATE_EVENT, onNavigate);
-      window.removeEventListener(BACK_EVENT, onBack);
-      window.removeEventListener("click", onLinkClick, { capture: true });
-      window.removeEventListener("submit", onSubmit);
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
@@ -377,18 +464,32 @@ export function FrameHost({
 
   if (!item) return <p className="canvas-frame-missing">{labels.missingItem(id)}</p>;
 
+  // The item's own page: the notice, where the canvas shows its own, and a reader's live region.
+  const notices = alone && (
+    <>
+      {notice && (
+        <div className="canvas-toast">
+          <span>{notice}</span>
+        </div>
+      )}
+      <div ref={liveRef} className="canvas-live" aria-live="polite" />
+    </>
+  );
+
   // Opened in a tab, a viewport item nests in a frame of its own size, so its
   // breakpoints see the item's width instead of the tab's.
-  if (!context && item.viewport) {
+  if (framed) {
     return (
       <div className="canvas-frame-page">
         <iframe
+          ref={pageFrameRef}
           className="canvas-frame"
           {...frameSource(item.id, "page")}
           title={item.name}
           width={item.width}
           height={item.height}
         />
+        {notices}
       </div>
     );
   }
@@ -404,7 +505,14 @@ export function FrameHost({
       </RouteContext.Provider>
     </div>
   );
-  if (!context) return <div className="canvas-frame-page">{body}</div>;
+  if (!context) {
+    return (
+      <div className="canvas-frame-page">
+        {body}
+        {notices}
+      </div>
+    );
+  }
   return (
     <>
       {body}

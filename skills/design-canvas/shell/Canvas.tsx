@@ -98,7 +98,7 @@ import {
 } from "./dom";
 import { Icon } from "./icons";
 import { controlWords, type FlowStep, FlowView } from "./FlowView";
-import { opensNewTab, pathOf, RouteContext, screenAt, screenIndex, screensOf, stateCount } from "./routes";
+import { linkName, opensNewTab, pathOf, RouteContext, screenAt, screenIndex, screensOf, stateCount } from "./routes";
 import { labels } from "./labels";
 import {
   type Bounds,
@@ -3866,15 +3866,8 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
         }
         return;
       }
-      let url: URL;
-      try {
-        url = new URL(href, window.location.href);
-      } catch {
-        return;
-      }
-      const here = window.location;
-      if (url.origin === here.origin && url.pathname === here.pathname && url.search === here.search) return;
-      const named = url.origin === here.origin ? `${url.pathname}${url.search}` : url.href;
+      const named = linkName(href);
+      if (named === null) return;
       const path = pathOf(href);
       const from = shown.find((item) => item.id === (fromId ?? frontIdRef.current));
       if (!path) return notify(blank ? labels.newTabBlocked(named) : labels.linkBlocked(named));
