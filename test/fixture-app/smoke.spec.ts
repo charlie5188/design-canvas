@@ -1909,6 +1909,50 @@ test('a text in a viewport item is rewritten in place too, and a press outside k
   }
 })
 
+test('zoomed out, the name row and its actions take a press, and the top edge still resizes', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    writeFileSync(REGISTRY, withVersions(original))
+    await servesId(page, 'c')
+    await page.goto('/')
+    const item = (id: string) => page.locator(`.canvas-item[data-canvas-item="${id}"]`)
+    await expect(item('c')).toBeVisible()
+    await page.waitForTimeout(400)
+    // The resize zones keep one size on screen, so at 25% the top one used to reach up over the name row.
+    await page.mouse.move(400, 300)
+    await page.locator('.canvas-viewport').focus()
+    await page.keyboard.press('0')
+    await page.keyboard.press('-')
+    await page.keyboard.press('-')
+    await expect(page.locator('.canvas-zoom')).toHaveText('25%')
+    const preview = (await page.locator('[data-canvas-preview="b"]').boundingBox())!
+    await page.mouse.move(preview.x + preview.width / 2, preview.y + preview.height / 2)
+    const pick = page.getByRole('button', { name: 'Pick Version B and set the others aside' })
+    await expect(pick).toHaveCSS('opacity', '1')
+    const under = (x: number, y: number) =>
+      page.evaluate(([px, py]) => {
+        const hit = document.elementFromPoint(px!, py!)
+        const edge = hit?.closest('.canvas-item-edge')
+        if (edge) return `edge ${edge.getAttribute('data-edge')}`
+        return hit?.closest('.canvas-item-title') ? 'title' : 'other'
+      }, [x, y])
+    // The lowest pixels of Pick and of the name are the name row's, not a resize zone's.
+    const button = (await pick.boundingBox())!
+    expect(await under(button.x + button.width / 2, button.y + button.height - 1)).toBe('title')
+    const name = (await item('b').locator('.canvas-name').boundingBox())!
+    expect(await under(name.x + 4, name.y + name.height - 1)).toBe('title')
+    // Just inside the preview's top, the top edge still takes the press.
+    expect(await page.evaluate(([px, py]) => document.elementFromPoint(px!, py!)?.getAttribute('data-edge') ?? null, [preview.x + preview.width / 2, preview.y + 2])).toBe('n')
+    await pick.click()
+    await expect.poll(() => entryOf('b')).toContain('picked: true')
+    expect(entryOf('b')).toContain('width: 360, height: 180')
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
 test("an item's actions sit at its top right: Ask with quick requests, Pick, and More", async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   const original = readFileSync(REGISTRY, 'utf8')

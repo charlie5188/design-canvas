@@ -77,12 +77,14 @@ body,
   transform-origin: 0 0;
 }
 .canvas-item {
+  /* The room between the name row and the preview. The top resize zone stays inside it. */
+  --item-gap: 8px;
   position: absolute;
   inset-block-start: 0;
   inset-inline-start: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--item-gap);
   cursor: default;
 }
 /* The item last touched or focused rises above overlapping items, so its
@@ -1323,9 +1325,12 @@ html[data-canvas-alt] .canvas-frame-root * {
   inline-size: var(--edge);
   cursor: ew-resize;
 }
+/* The top zone straddles the edge, but reaches no further up than the gap above the
+   preview. Its size is fixed on screen, so at low zoom a straddling zone grew over the
+   name row, and a press on Pick, Ask, or the name resized the item instead. At 100%
+   it straddles the edge evenly, as before; zoomed out, more of it lies inside the preview. */
 .canvas-item-edge[data-edge="n"] {
-  inset-block-start: 0;
-  translate: 0 -50%;
+  inset-block-start: calc(-1 * min(var(--edge) / 2, var(--item-gap, 8px)));
 }
 .canvas-item-edge[data-edge="s"] {
   inset-block-end: 0;
@@ -1346,16 +1351,17 @@ html[data-canvas-alt] .canvas-frame-root * {
   inline-size: calc(var(--edge) * 1.6);
   block-size: calc(var(--edge) * 1.6);
 }
+/* The top corners stop at the same line as the top edge, for the same reason. */
 .canvas-item-edge[data-edge="nw"] {
-  inset-block-start: 0;
+  inset-block-start: calc(-1 * min(var(--edge) * 0.8, var(--item-gap, 8px)));
   inset-inline-start: 0;
-  translate: -50% -50%;
+  translate: -50% 0;
   cursor: nwse-resize;
 }
 .canvas-item-edge[data-edge="ne"] {
-  inset-block-start: 0;
+  inset-block-start: calc(-1 * min(var(--edge) * 0.8, var(--item-gap, 8px)));
   inset-inline-end: 0;
-  translate: 50% -50%;
+  translate: 50% 0;
   cursor: nesw-resize;
 }
 .canvas-item-edge[data-edge="sw"] {
