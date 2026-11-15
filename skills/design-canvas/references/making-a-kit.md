@@ -63,7 +63,7 @@ Files in the app's `public/` folder are served from `/`, as in the app. Imported
 ## 10. Check
 
 - Typecheck: `npx tsc --noEmit -p design-canvas/<name>/tsconfig.json`.
-- The console shows no errors, and one item matches the app side by side.
+- The console shows no errors, and one item matches the app side by side. Compare it as "Match the current product first" in `SKILL.md` says. A difference in type, color, or spacing usually means a step above is not done yet, most often fonts or global styles.
 
 ## Save the fit as a private kit
 
