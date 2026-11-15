@@ -11,9 +11,8 @@ Instead of asking the agent to build a canvas from scratch for every project, th
 ## What you get
 
 - **Your real components.** Each item is your app's own component, with its styles and themes, and made-up data in place of a backend. Ask for a phone or desktop width, and breakpoints behave as on the device.
-- **Versions side by side.** Ask for a change, and the agent keeps the original and adds a new version next to it, so you compare both.
 - **Ask the agent where you are looking.** Press A, click an element, and write a change or a question. Send it, and the agent makes the change or answers on that pin.
-- **Pick one.** Hover a version's name and press the check. It gets a Picked mark, and the others move into a "Set aside" section. A reason you give in the conversation stays beside the version as a note.
+- **Iterate fast, and the canvas keeps the process in order.** A change you ask for becomes a new version next to the original, so you compare both. Press the check on the version you want, and the others move into a "Set aside" section, with your reasons kept as notes.
 - **The one you pick is already code.** The agent builds versions from your components' props first. Ask it to ship one, and it moves that version into the product and checks it in your running app.
 - **Share as one file.** Click Share to get one HTML file that opens with a double-click, and that you can put in Figma or Notion. See [Share a canvas](#share-a-canvas).
 
@@ -110,9 +109,8 @@ React アプリの実際のコンポーネントを、パン・ズームでき�
 ### できること
 
 - **本物のコンポーネント。** アイテムはアプリ自身のコンポーネントで、スタイルとテーマもアプリのままです。バックエンドの代わりに架空のデータを使います。スマートフォンやデスクトップの幅を頼むと、ブレークポイントが実機と同じように動きます。
-- **案を並べて比べる。** 変更を頼むと、エージェントは元の案を残して、新しい案を隣に追加します。2 つを見比べられます。
 - **見ている場所で、エージェントに頼む・聞く。** A キーを押して要素をクリックし、変更の依頼か質問を書いて送ります。エージェントは変更を加えるか、そのピンの上で答えます。
-- **1 つ選ぶ。** 案の名前にカーソルを合わせて、チェックを押します。その案に「Picked」の印が付き、ほかの案は「Set aside」セクションに移ります。会話で伝えた理由は、ノートとしてその案のそばに残ります。
+- **すばやく案を進められ、経過はキャンバスが整理する。** 変更を頼むと、元の案の隣に新しい案が追加され、2 つを見比べられます。採用したい案のチェックを押すと、ほかの案は「Set aside」セクションに移り、会話で伝えた理由はノートとして残ります。
 - **選んだ案は、すでにコード。** エージェントはまず既存コンポーネントの props で案を作ります。プロダクトに入れるよう頼むと、エージェントが組み込み、実際のアプリで確認します。
 - **1 つのファイルで共有。** Share をクリックすると、ダブルクリックで開ける 1 つの HTML ファイルができます。Figma や Notion にも置けます。詳しくは[キャンバスを共有する](#キャンバスを共有する)を見てください。
 
