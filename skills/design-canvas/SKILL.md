@@ -110,6 +110,17 @@ Write each entry out by hand, in `registry`, `notes`, and `sections` alike. Its 
 - Give a new item a source position in empty space near related ones. If that spot overlaps the user's saved layout, the canvas moves only the new item to free space beside its row; existing items never move. That move is a change to apply too, so a new item whose source position overlaps shows a "Not applied yet" tag until you set its position in the registry: choose a free spot.
 - Previews never navigate the canvas away. A link or a mocked router call to one of the item's own screens shows that screen in place (see "Flows and paths"); any other, and a native form submit, is cancelled with a short notice, while the component's own handlers still run. A link to `#<item-id>` reveals that item.
 
+### Match the current product first
+
+Versions start from the item that shows the product as it is today. If that item looks different from the real app, every version has the same differences, and people judge the versions against a wrong base. So before you add versions, check each item that shows the current product:
+
+- Render the screen's own component, with synthetic data through its props or the canvas providers. Compose it from smaller components only when it cannot render alone, and then say so in its `note`.
+- Open that screen in the running app, and the item alone at `frame.html?item=<id>`, at the same width and theme. Compare screenshots of the two side by side: type, color, spacing, sizes, borders, icons, and layout. Differences that come only from the synthetic data do not count.
+- If the screen does not open without a sign-in, a backend, or secrets, do not work around that. Ask the person for a screenshot of the screen as it ships, and compare with it.
+- Fix each difference where it comes from: the kit (styles, fonts, providers, themes; see `references/making-a-kit.md`), `viewport`, or the item's props and data. Do not add styles to the item to copy the screenshot: that hides the cause, and the next item has the same difference.
+- Write each difference you cannot fix in the item's `note`, starting with `Differs from the app:`, for example `Differs from the app: system font, not Inter`. The note shows under the item's name, so nobody takes the difference for a design choice.
+- Check again after you change the kit, and when the person says an item looks different from the app.
+
 ### Flows and paths
 
 A product's screens point at each other by path: `<Link href="/checkout">`, `router.push("/done")`. Keep those links as they are in the real code. Do not rewrite them into state, and do not change them to `#<item-id>`. Tell the canvas which paths an item shows instead:
@@ -301,6 +312,7 @@ Set each listed item's `x` and `y` in the registry to the position shown. The ta
 - Open the canvas in the browser. Confirm it mounts, every item renders, and the console shows no errors. A hidden browser pane pauses animation frames, so the camera may not repaint; show the pane before judging what you see.
 - Typecheck the canvas when the app uses TypeScript, from the app folder: `npx tsc --noEmit -p design-canvas/<name>/tsconfig.json`. App type checks may include the canvas folder too.
 - Interact with what you changed, check `viewport` items at their real width, and switch themes when the app has them.
+- Each item that shows the current product matches the app, or its `note` lists what differs (see "Match the current product first").
 - The shell is already tested. Retest shell behavior only after changing the shell.
 - Only report a check as passed if you ran it.
 
@@ -338,7 +350,7 @@ Only when the user asks.
 
 ## Report
 
-End with: changed paths and new item names, marking those built on a new component as needing engineering before they ship; checks run and results; what is not working or not tested; defaults you chose without asking.
+End with: changed paths and new item names, marking those built on a new component as needing engineering before they ship; checks run and results; for each item that shows the current product, what you compared it with and what still differs; what is not working or not tested; defaults you chose without asking.
 
 ## Changing the shell
 
