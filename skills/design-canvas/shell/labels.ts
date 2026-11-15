@@ -100,10 +100,9 @@ export const labels = {
   moreHint: "More",
   /** One-press requests in a new note about a whole item. The words go into the note, to send or to change first. */
   quickAsks: [
-    { label: "Bolder", text: "Make a bolder version of this." },
-    { label: "Simpler", text: "Make a simpler version of this." },
     { label: "Phone", text: "Show this at phone width." },
     { label: "States", text: "Add its empty, loading, and error states." },
+    { label: "Languages", text: "Show this in the other languages the app has." },
   ],
   quickAsksLabel: "Quick requests",
   restart: (name: string) => `Restart ${name}`,

@@ -1809,9 +1809,9 @@ test("an item's actions sit at its top right: Ask with quick requests, Pick, and
     const note = page.getByRole('dialog', { name: 'Ask agent about Version B' })
     await expect(note).toBeVisible()
     const quick = note.getByRole('group', { name: 'Quick requests' })
-    await expect(quick.getByRole('button')).toHaveText(['Bolder', 'Simpler', 'Phone', 'States'])
-    await quick.getByRole('button', { name: 'Simpler' }).click()
-    await expect(note.getByRole('textbox')).toHaveValue('Make a simpler version of this.')
+    await expect(quick.getByRole('button')).toHaveText(['Phone', 'States', 'Languages'])
+    await quick.getByRole('button', { name: 'States' }).click()
+    await expect(note.getByRole('textbox')).toHaveValue('Add its empty, loading, and error states.')
     await expect(note.getByRole('textbox')).toBeFocused()
     // With words in the note the quick requests are gone; the words can be changed like any others.
     await expect(quick).toHaveCount(0)
@@ -1821,7 +1821,7 @@ test("an item's actions sit at its top right: Ask with quick requests, Pick, and
     // A second press opens the note that waits; it does not add another.
     await item.locator('.canvas-preview').hover()
     await ask.click()
-    await expect(note.getByRole('textbox')).toHaveValue('Make a simpler version of this.')
+    await expect(note.getByRole('textbox')).toHaveValue('Add its empty, loading, and error states.')
     await page.keyboard.press('Escape')
     await expect(item.locator('.canvas-pin')).toHaveCount(1)
     // More holds what is used seldom. It opens on a press and closes on Escape or a press outside.
