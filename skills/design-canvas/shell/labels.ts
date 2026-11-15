@@ -1,11 +1,4 @@
 // Canvas chrome copy. Edit here to change the language of the controls.
-const ANNOTATE_HELP =
-  "Press A to ask the agent: click an element, drag across an area, or click an item's name or a section's title for all of it, then ask for a change or ask a question. Double-click a text to rewrite it in place. Then send or copy them all at once. An answer shows beside its pin";
-
-const EDIT_HELP =
-  "Drag the border of an item, a note, or a section to resize it. Click a note, or empty space in a section, to select it, then press Delete to remove it. Double-click a caption, a note, or a section's title to edit it";
-const SAVE_HELP = "Moves, edits, and new notes save into registry.tsx as you make them; ⌘/Ctrl + Z undoes the last one";
-
 export const labels = {
   region: "Design canvas",
   toolbar: "Canvas view",
@@ -15,30 +8,72 @@ export const labels = {
   changesBar: "Not sent to the agent yet",
   theme: "Theme",
   help: "Canvas controls",
-  /** The help line a shared file leaves out, since it has no annotations. */
-  annotateHelp: ANNOTATE_HELP,
-  /** Also left out of a shared file, which saves nothing. */
-  saveHelp: SAVE_HELP,
-  editHelp: EDIT_HELP,
-  helpLines: [
-    "Drag empty space to pan",
-    "Drag an item's name or grip to move it. It snaps to other items; hold Shift to keep it straight",
-    "⌘/Ctrl + scroll or pinch to zoom. Or hold Z and click to zoom in, add ⌥/Alt to zoom out, or drag to zoom to an area",
-    "Hold Space or the middle button and drag to pan anywhere",
-    "Hold ⌥/Alt and click an element to copy a reference to it",
-    ANNOTATE_HELP,
-    "Hover an item's name to open it alone or move it to the trash",
-    SAVE_HELP,
-    EDIT_HELP,
-    "With the canvas focused: arrow keys pan, + and − step the zoom (25, 50, 100, 200%), 0 resets, 1 or Shift + 1 fits all, Shift + 0 zooms to 100%, Shift + 2 zooms to the selected note or section",
-  ],
+  /**
+   * Canvas controls, in groups. Words between backticks are keys and are drawn as key caps.
+   * `local` marks what a shared file leaves out: it has no agent, and saves nothing.
+   */
+  helpGroups: [
+    {
+      title: "Move around",
+      rows: [
+        { what: "Pan", how: "Drag, or `Space` + drag" },
+        { what: "Zoom", how: "`⌘/Ctrl` + scroll" },
+        { what: "Zoom to an area", how: "`Z` + drag" },
+        { what: "Zoom in at a point", how: "`Z` + click" },
+        { what: "Zoom out at a point", how: "`Z` `⌥/Alt` + click" },
+        { what: "Fit all", how: "`1`" },
+        { what: "Actual size", how: "`Shift` `0`" },
+        { what: "Zoom to the selection", how: "`Shift` `2`" },
+        { what: "Reset the view", how: "`0`" },
+        { what: "Pan and zoom with keys", how: "Arrows, `+` `−`" },
+      ],
+    },
+    {
+      title: "Items",
+      rows: [
+        { what: "Move", how: "Drag the name" },
+        { what: "Keep a move straight", how: "`Shift` + drag" },
+        { what: "Resize", how: "Drag the border" },
+        { what: "An item's actions", how: "Hover the item" },
+        { what: "Copy an element's reference", how: "`⌥/Alt` + click" },
+        { what: "Undo a saved change", how: "`⌘/Ctrl` `Z`", local: true },
+      ],
+    },
+    {
+      title: "Ask the agent",
+      local: true,
+      rows: [
+        { what: "Start asking", how: "`A`" },
+        { what: "About an element", how: "Click it" },
+        { what: "About an area", how: "Drag across it" },
+        { what: "About a whole item", how: "Click its name" },
+        { what: "Rewrite a text in place", how: "Double-click it" },
+        { what: "Send", how: "`⌘/Ctrl` `Enter`" },
+        { what: "Keep a note for later", how: "`Enter`" },
+      ],
+    },
+    {
+      title: "Notes and sections",
+      local: true,
+      rows: [
+        { what: "Add a note", how: "`N`, then click" },
+        { what: "Add a section", how: "`S`, then drag" },
+        { what: "Edit a caption or a note", how: "Double-click it" },
+        { what: "Remove the selected one", how: "`Delete`" },
+        { what: "Back to Select", how: "`V` or `Esc`" },
+      ],
+    },
+  ] as { title: string; local?: boolean; rows: { what: string; how: string; local?: boolean }[] }[],
   linkBlocked: (target: string) => `Links stay on the canvas: ${target}`,
+  /** A link inside an item that names its screens, to a path that is not one of them. */
+  screenMissing: (target: string) => `This item has no screen for ${target}`,
+  /** A link that opens a new tab in the product, to a path that no other item shows. */
+  newTabBlocked: (target: string) => `Opens in a new tab: ${target}`,
   formBlocked: "Forms don't submit on the canvas",
   zoomIn: "Zoom in",
   zoomOut: "Zoom out",
   fitAll: "Fit all",
   resetCamera: "Reset view (actual size)",
-  copyNameHint: "Click to copy · drag to move",
   openAlone: (name: string) => `Open ${name} in a new tab`,
   openAloneHint: "Open in new tab",
   copied: "Copied",
@@ -57,6 +92,22 @@ export const labels = {
   pickFailed: "Couldn't save the pick. Is the canvas's dev server running?",
   /** The title of the section a pick makes for the versions that were not picked. */
   setAside: "Set aside",
+  /** On the Pick button, beside its check: the one action with a word, because it is the decision. */
+  pickShort: "Pick",
+  askItem: (name: string) => `Ask agent about ${name}`,
+  askItemHint: "Ask agent about this item",
+  more: (name: string) => `More actions for ${name}`,
+  moreHint: "More",
+  /** One-press requests in a new note about a whole item. The words go into the note, to send or to change first. */
+  quickAsks: [
+    { label: "Bolder", text: "Make a bolder version of this." },
+    { label: "Simpler", text: "Make a simpler version of this." },
+    { label: "Phone", text: "Show this at phone width." },
+    { label: "States", text: "Add its empty, loading, and error states." },
+  ],
+  quickAsksLabel: "Quick requests",
+  restart: (name: string) => `Restart ${name}`,
+  restartHint: "Restart",
   moveToTrash: (name: string) => `Move ${name} to the trash`,
   moveToTrashHint: "Move to trash",
   movedToTrash: (name: string) => `Moved ${name} to the trash`,

@@ -25,6 +25,19 @@ body,
   --canvas-fill-color: color-mix(in srgb, var(--canvas-focus-color) 86%, #000);
   --canvas-hover-color: var(--canvas-hover, rgb(0 0 0 / 6%));
   --canvas-radius-size: var(--canvas-radius, 8px);
+  /* The chrome's own scale, so every control and surface agrees. Small controls and
+     hints; buttons and fields; floating surfaces (bars, popovers, the note for the
+     agent). A bar's 12px corner with 4px of padding leaves 8px for the button in it. */
+  --canvas-radius-s: 6px;
+  --canvas-radius-m: 8px;
+  --canvas-radius-l: 12px;
+  /* Two heights. Raised: bars and notices, which stay. Overlay: what opens over the work. */
+  --canvas-shadow-raised: 0 1px 2px rgb(0 0 0 / 6%), 0 4px 12px rgb(0 0 0 / 8%);
+  --canvas-shadow-overlay: 0 2px 6px rgb(0 0 0 / 6%), 0 12px 32px rgb(0 0 0 / 14%);
+  /* One curve and two lengths for all motion (see "Motion" at the end). */
+  --canvas-ease: cubic-bezier(0.2, 0, 0, 1);
+  --canvas-fast: 120ms;
+  --canvas-slow: 200ms;
   color: var(--canvas-text-color);
 }
 /* Chrome text uses the app font when a kit maps --canvas-font, else the system font. */
@@ -35,6 +48,8 @@ body,
 .canvas-share-popover,
 .canvas-frame-missing {
   font-family: var(--canvas-font, system-ui, -apple-system, "Segoe UI", sans-serif);
+  /* Only the chrome: a preview keeps the app's own text rendering. */
+  -webkit-font-smoothing: antialiased;
 }
 .canvas-root {
   position: fixed;
@@ -100,14 +115,13 @@ body,
   block-size: 24px;
   padding: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--canvas-radius-s);
   background: transparent;
   color: var(--canvas-subtle-color);
   cursor: grab;
   touch-action: none;
 }
 .canvas-handle:hover,
-.canvas-name:hover,
 .canvas-button:hover,
 .canvas-item-action:hover {
   background: var(--canvas-hover-color);
@@ -119,30 +133,59 @@ body,
   outline: 2px solid var(--canvas-focus-color);
   outline-offset: 1px;
 }
-.canvas-name-row {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-inline-size: 0;
-}
-/* A name, not a button: no chrome at rest, a plain-button wash on hover. It
-   copies on click, Enter, or Space, and drags the item when pulled. */
+/* The item's name, on one line. It drags the item when pulled. A name too long for the
+   item, or for the room the actions leave while they show, is cut with an ellipsis: a
+   second line would push the preview down, under the pointer. */
 .canvas-name {
   position: relative;
+  flex: 0 1 auto;
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   padding: 2px 6px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--canvas-radius-s);
   background: transparent;
   color: var(--canvas-text-color);
   font: inherit;
   font-weight: 600;
   font-size: 15px;
   text-align: start;
-  /* It copies on click and moves the item on drag; the hand says it can move. */
+  /* It moves the item on drag; the hand says so. */
   cursor: grab;
 }
-/* Open alone and move to trash: quiet until the title is hovered or one has
-   keyboard focus. */
+/* An item's actions sit at the frame's top right, so they do not move with the length
+   of the name: Restart (once the item was used), Ask agent about the item, Pick, More.
+   Quiet until the item is hovered or one of them has keyboard focus. While quiet they take
+   no room, so the name has the whole row; while they show, the name gives them room on
+   its one line. Nothing moves down in either case. */
+.canvas-item-title {
+  position: relative;
+}
+.canvas-item-actions {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-end: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  margin-inline-start: auto;
+  opacity: 0;
+  transition: opacity var(--canvas-fast) var(--canvas-ease);
+}
+.canvas-item:hover .canvas-item-actions,
+.canvas-item-actions:focus-within {
+  position: static;
+  opacity: 1;
+}
+@media (hover: none) {
+  .canvas-item-actions {
+    position: static;
+    opacity: 1;
+  }
+}
 .canvas-item-action {
   position: relative;
   display: inline-flex;
@@ -152,24 +195,80 @@ body,
   block-size: 24px;
   padding: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--canvas-radius-s);
   background: transparent;
   color: var(--canvas-subtle-color);
   font: inherit;
   cursor: default;
-  opacity: 0;
 }
-.canvas-item-head:hover .canvas-item-action,
-.canvas-item-action:focus-visible {
-  opacity: 1;
-}
-.canvas-item-action:hover {
+.canvas-item-action:hover,
+.canvas-item-action[aria-expanded="true"] {
+  background: var(--canvas-hover-color);
   color: var(--canvas-text-color);
 }
-@media (hover: none) {
-  .canvas-item-action {
-    opacity: 1;
-  }
+/* Pick is the decision the canvas is for, so it alone has a word and a surface. */
+.canvas-item-pick {
+  gap: 3px;
+  inline-size: auto;
+  padding: 0 8px 0 5px;
+  box-shadow: inset 0 0 0 1px var(--canvas-border-color);
+  background: var(--canvas-surface-color);
+  color: var(--canvas-text-color);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.canvas-item-pick:hover {
+  background: color-mix(in srgb, var(--canvas-surface-color) 92%, var(--canvas-text-color));
+}
+/* More: the actions used seldom, under their button. */
+.canvas-item-more {
+  position: relative;
+  display: inline-flex;
+}
+.canvas-item-menu {
+  position: absolute;
+  inset-block-start: calc(100% + 6px);
+  inset-inline-end: 0;
+  z-index: 6;
+  display: grid;
+  min-inline-size: 176px;
+  padding: 4px;
+  border: 1px solid var(--canvas-border-color);
+  border-radius: var(--canvas-radius-l);
+  background: var(--canvas-surface-color);
+  box-shadow: var(--canvas-shadow-overlay);
+  color: var(--canvas-text-color);
+  font-size: 13px;
+  font-weight: 400;
+  cursor: default;
+}
+.canvas-item-menu-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  block-size: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--canvas-radius-m);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: default;
+}
+.canvas-item-menu-entry:hover {
+  background: var(--canvas-hover-color);
+}
+.canvas-item-menu-entry:focus-visible {
+  outline: 2px solid var(--canvas-focus-color);
+  outline-offset: -2px;
+}
+.canvas-item-menu-entry svg {
+  flex: none;
+  color: var(--canvas-subtle-color);
 }
 /* Hint on hover and keyboard focus; hovering never copies. */
 [data-tip]:hover::after,
@@ -178,8 +277,8 @@ body,
   position: absolute;
   inset-block-end: calc(100% + 6px);
   inset-inline-start: 0;
-  padding: 2px 6px;
-  border-radius: 4px;
+  padding: 3px 7px;
+  border-radius: var(--canvas-radius-s);
   background: var(--canvas-text-color);
   color: var(--canvas-surface-color);
   font-size: 12px;
@@ -253,9 +352,9 @@ body,
   gap: 2px;
   padding: 4px;
   border: 1px solid var(--canvas-border-color);
-  border-radius: 12px;
+  border-radius: var(--canvas-radius-l);
   background: var(--canvas-surface-color);
-  box-shadow: 0 2px 8px rgb(0 0 0 / 8%);
+  box-shadow: var(--canvas-shadow-raised);
 }
 .canvas-toolbar {
   z-index: 5;
@@ -307,7 +406,7 @@ body,
   min-block-size: 30px;
   padding: 0 10px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--canvas-radius-m);
   background: transparent;
   color: var(--canvas-text-color);
   font: inherit;
@@ -353,31 +452,89 @@ body,
   position: relative;
   display: inline-flex;
 }
-/* Shown while the help button is hovered or keyboard-focused. */
+/* Canvas controls: a panel under the help button, opened by a press. Groups run in two
+   columns; each row has what it does on the left and how on the right, with keys as caps. */
 .canvas-help-popover {
   position: absolute;
   inset-block-end: calc(100% + 10px);
   inset-inline-end: 0;
-  display: none;
-  flex-direction: column;
-  gap: 4px;
-  inline-size: max-content;
-  max-inline-size: 320px;
-  padding: 10px 12px;
+  display: grid;
+  gap: 12px;
+  box-sizing: border-box;
+  inline-size: min(620px, calc(100vw - 32px));
+  max-block-size: calc(100vh - 96px);
+  overflow: auto;
+  padding: 16px 20px 6px;
   border: 1px solid var(--canvas-border-color);
-  border-radius: var(--canvas-radius-size);
+  border-radius: var(--canvas-radius-l);
   background: var(--canvas-surface-color);
-  box-shadow: 0 4px 16px rgb(0 0 0 / 10%);
+  box-shadow: var(--canvas-shadow-overlay);
   color: var(--canvas-text-color);
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.4;
+  cursor: default;
+}
+.canvas-help-popover[hidden] {
+  display: none;
 }
 .canvas-toolbar[data-place="top"] .canvas-help-popover {
   inset-block: calc(100% + 10px) auto;
 }
-.canvas-help:hover .canvas-help-popover,
-.canvas-help:focus-within .canvas-help-popover {
-  display: flex;
+.canvas-help-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+.canvas-help-groups {
+  columns: 2;
+  column-gap: 32px;
+}
+.canvas-help-group {
+  break-inside: avoid;
+  margin: 0 0 16px;
+}
+.canvas-help-group h2 {
+  margin: 0 0 6px;
+  color: var(--canvas-subtle-color);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+}
+.canvas-help-group dl {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+.canvas-help-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: baseline;
+}
+.canvas-help-row dd {
+  margin: 0;
+  color: var(--canvas-subtle-color);
+  text-align: end;
+  white-space: nowrap;
+}
+.canvas-help-popover kbd {
+  display: inline-block;
+  min-inline-size: 10px;
+  margin-inline: 1px;
+  padding: 0 5px;
+  border: 1px solid var(--canvas-border-color);
+  border-block-end-width: 2px;
+  border-radius: 5px;
+  background: var(--canvas-bg-color);
+  color: var(--canvas-text-color);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+@media (max-width: 640px) {
+  .canvas-help-groups {
+    columns: 1;
+  }
 }
 .canvas-zoom {
   min-inline-size: 44px;
@@ -596,6 +753,8 @@ html[data-canvas-alt] .canvas-frame-root * {
 .canvas-pins {
   position: absolute;
   inset: 0;
+  /* Above the item's tag (z-index 4): "Picked" was drawn over an open note. */
+  z-index: 5;
   pointer-events: none;
 }
 /* Notes on whole sections: a layer above items and notes, at the section's
@@ -684,9 +843,9 @@ html[data-canvas-alt] .canvas-frame-root * {
   padding: 12px;
   box-sizing: border-box;
   border: 1px solid var(--canvas-border-color);
-  border-radius: var(--canvas-radius-size);
+  border-radius: var(--canvas-radius-l);
   background: var(--canvas-surface-color);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 14%);
+  box-shadow: var(--canvas-shadow-overlay);
   color: var(--canvas-text-color);
   font-size: 13px;
   cursor: default;
@@ -729,6 +888,30 @@ html[data-canvas-alt] .canvas-frame-root * {
   inset-block-start: 8px;
   inset-block-end: auto;
 }
+.canvas-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.canvas-quick-ask {
+  block-size: 24px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px var(--canvas-border-color);
+  background: transparent;
+  color: var(--canvas-text-color);
+  font: inherit;
+  font-size: 12px;
+  cursor: default;
+}
+.canvas-quick-ask:hover {
+  background: var(--canvas-hover-color);
+}
+.canvas-quick-ask:focus-visible {
+  outline: 2px solid var(--canvas-focus-color);
+  outline-offset: 1px;
+}
 .canvas-annotation-sent {
   color: var(--canvas-subtle-color);
   font-size: 12px;
@@ -742,7 +925,7 @@ html[data-canvas-alt] .canvas-frame-root * {
   max-block-size: calc(1.4em * 10 + 18px);
   padding: 8px 10px;
   border: 1px solid var(--canvas-border-color);
-  border-radius: 6px;
+  border-radius: var(--canvas-radius-m);
   background: var(--canvas-surface-color);
   color: var(--canvas-text-color);
   font: inherit;
@@ -809,9 +992,9 @@ html[data-canvas-alt] .canvas-frame-root * {
   max-block-size: min(480px, calc(100vh - 96px));
   padding: 10px;
   border: 1px solid var(--canvas-border-color);
-  border-radius: 12px;
+  border-radius: var(--canvas-radius-l);
   background: var(--canvas-surface-color);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 14%);
+  box-shadow: var(--canvas-shadow-overlay);
   color: var(--canvas-text-color);
   font-size: 13px;
 }
@@ -839,7 +1022,7 @@ html[data-canvas-alt] .canvas-frame-root * {
   flex-direction: column;
   gap: 6px;
   padding: 6px;
-  border-radius: 8px;
+  border-radius: var(--canvas-radius-m);
 }
 .canvas-trash-entry:hover {
   background: var(--canvas-hover-color);
@@ -851,7 +1034,7 @@ html[data-canvas-alt] .canvas-frame-root * {
   block-size: 100px;
   overflow: hidden;
   border: 1px solid var(--canvas-border-color);
-  border-radius: 6px;
+  border-radius: var(--canvas-radius-s);
   background: var(--canvas-bg-color);
   pointer-events: none;
 }
@@ -891,7 +1074,7 @@ html[data-canvas-alt] .canvas-frame-root * {
   content: "";
   position: absolute;
   inset: 0;
-  border-radius: 8px;
+  border-radius: var(--canvas-radius-m);
 }
 .canvas-trash-name:focus-visible {
   outline: none;
@@ -921,9 +1104,9 @@ html[data-canvas-alt] .canvas-frame-root * {
   inline-size: min(400px, calc(100vw - 32px));
   padding: 10px 10px 14px 16px;
   border: 1px solid var(--canvas-border-color);
-  border-radius: 12px;
+  border-radius: var(--canvas-radius-l);
   background: var(--canvas-surface-color);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 14%);
+  box-shadow: var(--canvas-shadow-overlay);
   color: var(--canvas-text-color);
 }
 .canvas-share-head {
@@ -1251,7 +1434,7 @@ html[data-canvas-alt] .canvas-frame-root * {
 }
 .canvas-ghost[data-state="sent"] .canvas-ghost-tag,
 .canvas-ghost[data-state="queued"] .canvas-ghost-tag {
-  background: #5f6b76;
+  background: var(--canvas-subtle-color);
 }
 .canvas-ghost-delete {
   display: inline-flex;
@@ -1523,7 +1706,7 @@ html[data-canvas-alt] .canvas-frame-root * {
   margin: 0 0 0 30px;
   padding: 0 4px;
   border: 1px solid var(--canvas-focus-color);
-  border-radius: 4px;
+  border-radius: var(--canvas-radius-s);
   outline: 0;
   background: transparent;
   color: inherit;
@@ -1632,7 +1815,7 @@ html[data-canvas-alt] .canvas-frame-root * {
 .canvas-thread {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 .canvas-thread-turn {
   display: flex;
@@ -1647,13 +1830,162 @@ html[data-canvas-alt] .canvas-frame-root * {
 .canvas-thread-who {
   color: var(--canvas-subtle-color);
   font-size: 12px;
+  font-weight: 600;
   line-height: 1.4;
 }
 .canvas-thread-text {
   color: var(--canvas-text-color);
   font-size: 13px;
-  line-height: 1.45;
+  line-height: 1.5;
+  text-wrap: pretty;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   user-select: text;
+}
+
+/* Motion. The chrome moves in three ways, and in no other:
+   1. A control answers the pointer. Its wash and color ease in, and a button gives a
+      little under a press.
+   2. A thing that appears (a popover, a notice, a tag, a hint, a pin) fades in, and a
+      surface rises a few pixels as it does. Nothing animates out: what the person
+      dismissed is gone at once. A hint waits a moment, so a pointer passing over a bar
+      does not set off a row of them.
+   3. Items that the canvas moves by itself (a pick sets the others aside; Undo brings
+      them back) glide to their new place, so the person sees where each one went.
+      Canvas.tsx sets data-glide on the viewport for that moment only: a drag, a resize,
+      and a hot update never glide.
+   Everything uses one curve and two lengths, changes no layout, and is off under
+   prefers-reduced-motion. Only the chrome is named here, never a preview's content:
+   that is the app's own. */
+.canvas-handle,
+.canvas-name,
+.canvas-button,
+.canvas-item-action,
+.canvas-trash-entry,
+.canvas-ghost-delete,
+.canvas-item-menu-entry,
+.canvas-quick-ask,
+.canvas-annotation-handle::before {
+  transition:
+    background-color var(--canvas-fast) var(--canvas-ease),
+    color var(--canvas-fast) var(--canvas-ease),
+    opacity var(--canvas-fast) var(--canvas-ease),
+    box-shadow var(--canvas-fast) var(--canvas-ease),
+    scale var(--canvas-fast) var(--canvas-ease);
+}
+.canvas-button:active:not(:disabled),
+.canvas-item-action:active {
+  scale: 0.96;
+}
+.canvas-preview,
+.canvas-section-frame,
+.canvas-section-tab,
+.canvas-note-card,
+.canvas-pin-bubble,
+.canvas-annotation-card textarea {
+  transition:
+    border-color var(--canvas-fast) var(--canvas-ease),
+    background-color var(--canvas-fast) var(--canvas-ease),
+    box-shadow var(--canvas-fast) var(--canvas-ease),
+    color var(--canvas-fast) var(--canvas-ease);
+}
+@keyframes canvas-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+/* With `transform`, never `translate`: a notice is centred with `translate`, and a note
+   the person drags aside is moved with it. An animation of `translate` would hold the
+   note back from the pointer until it ended. */
+@keyframes canvas-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+/* A pin grows from the point it marks. */
+@keyframes canvas-pin-in {
+  from {
+    opacity: 0;
+    scale: 0.6;
+  }
+}
+[data-tip]:hover::after,
+[data-tip]:focus-visible::after {
+  animation: canvas-fade-in var(--canvas-fast) var(--canvas-ease) 350ms backwards;
+}
+.canvas-trash-popover,
+.canvas-share-popover,
+.canvas-help-popover,
+.canvas-item-menu,
+.canvas-toast {
+  animation: canvas-rise-in var(--canvas-slow) var(--canvas-ease);
+}
+/* The note for the agent only fades: it opens at its pin, which has just grown from the
+   point, and the person may take hold of it at once. */
+.canvas-toolbar[data-place="pending"],
+.canvas-annotation-card,
+.canvas-ghost-tag,
+.canvas-area {
+  animation: canvas-fade-in var(--canvas-slow) var(--canvas-ease);
+}
+.canvas-pin-bubble {
+  transform-origin: 0 100%;
+  animation: canvas-pin-in var(--canvas-slow) var(--canvas-ease);
+}
+.canvas-pin[data-area] .canvas-pin-bubble {
+  transform-origin: 0 0;
+}
+.canvas-viewport[data-glide] .canvas-item {
+  transition: transform 280ms var(--canvas-ease);
+}
+/* The item a link led to (routes.ts): a ring that fades, so the person sees where it went
+   also when the view did not have to move. With reduced motion the ring shows, and then goes. */
+@keyframes canvas-arrive {
+  from {
+    box-shadow: 0 0 0 3px var(--canvas-focus-color);
+  }
+}
+.canvas-item[data-arrived] .canvas-preview {
+  animation: canvas-arrive 900ms var(--canvas-ease);
+}
+@media (prefers-reduced-motion: reduce) {
+  .canvas-handle,
+  .canvas-name,
+  .canvas-button,
+  .canvas-item-action,
+  .canvas-trash-entry,
+  .canvas-ghost-delete,
+  .canvas-annotation-handle::before,
+  .canvas-preview,
+  .canvas-section-frame,
+  .canvas-section-tab,
+  .canvas-note-card,
+  .canvas-pin-bubble,
+  .canvas-annotation-card textarea,
+  .canvas-viewport[data-glide] .canvas-item {
+    transition: none;
+  }
+  .canvas-button:active:not(:disabled),
+  .canvas-item-action:active {
+    scale: none;
+  }
+  .canvas-item[data-arrived] .canvas-preview {
+    animation: none;
+    box-shadow: 0 0 0 3px var(--canvas-focus-color);
+  }
+  [data-tip]:hover::after,
+  [data-tip]:focus-visible::after,
+  .canvas-item-menu,
+  .canvas-annotation-card,
+  .canvas-trash-popover,
+  .canvas-share-popover,
+  .canvas-help-popover,
+  .canvas-toast,
+  .canvas-toolbar[data-place="pending"],
+  .canvas-ghost-tag,
+  .canvas-area,
+  .canvas-pin-bubble {
+    animation: none;
+  }
 }

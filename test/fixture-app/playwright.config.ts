@@ -7,7 +7,9 @@ if (!url) throw new Error('Set CANVAS_URL to the URL install.sh printed')
 
 export default defineConfig({
   testMatch: 'smoke.spec.ts',
-  use: { baseURL: url },
+  // A press on something that never shows fails in ten seconds, not at the test's own limit:
+  // a test then still has time to put the registry back, and the tests after it start clean.
+  use: { baseURL: url, actionTimeout: 10_000 },
   // The dev server, as users run it. `vite build` covers only index.html.
   webServer: {
     command: 'npx vite --config design-canvas/smoke/vite.config.mts',

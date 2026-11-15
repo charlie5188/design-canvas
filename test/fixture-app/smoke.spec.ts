@@ -207,7 +207,8 @@ test('picking a version marks it and sets the others aside in one step, and Undo
       expect(place(id).y + 48 + height).toBeLessThanOrEqual(frameY + frameH)
     }
     await expect(page.locator('.canvas-section-tab')).toHaveText('Set aside')
-    expect((await item('example').boundingBox())!.y).toBeGreaterThan(before.y + 100)
+    // The others glide to the section, so their place is asked until they have arrived.
+    await expect.poll(async () => (await item('example').boundingBox())!.y).toBeGreaterThan(before.y + 100)
     // Set aside, they are out of the running: no pick is offered on them, and none on the picked one.
     await expect(page.getByRole('button', { name: /^Pick / })).toHaveCount(0)
     // The toast's Undo is the whole pick: the registry reads as it did before.
@@ -329,6 +330,7 @@ test('an item moves to the trash and is put back', async ({ page }) => {
     await page.goto('/')
     const item = page.locator('.canvas-item[data-canvas-item="example"]')
     await expect(item).toContainText('Canvas is ready')
+    await page.getByRole('button', { name: 'More actions for Example · replace me' }).click()
     await page.getByRole('button', { name: 'Move Example · replace me to the trash' }).click()
     await expect(item).toHaveCount(0)
     // The trash is written into the registry, so the shared file and the next session have it.
@@ -1151,6 +1153,47 @@ test('the zoom buttons and keys step between fixed levels', async ({ page }) => 
   expect(errors).toEqual([])
 })
 
+test('the help opens on a press, shows the controls in groups, and stays until it is closed', async ({ page }) => {
+  const errors = collectErrors(page)
+  await page.goto('/')
+  await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toBeVisible()
+  const button = page.getByRole('button', { name: 'Canvas controls' })
+  const help = page.locator('#canvas-help')
+  // Closed until asked for: hovering the button only shows its hint.
+  await button.hover()
+  await page.waitForTimeout(500)
+  await expect(help).toBeHidden()
+  await button.click()
+  await expect(help).toBeVisible()
+  await expect(button).toHaveAttribute('aria-expanded', 'true')
+  for (const title of ['Move around', 'Items', 'Ask the agent', 'Notes and sections']) {
+    await expect(help.getByRole('heading', { name: title })).toBeVisible()
+  }
+  // A key is a key cap beside what it does.
+  const row = help.locator('.canvas-help-row', { hasText: 'Start asking' })
+  await expect(row.locator('kbd')).toHaveText('A')
+  // It stays while the pointer is elsewhere, and fits in the window.
+  await page.mouse.move(200, 300)
+  await page.waitForTimeout(300)
+  await expect(help).toBeVisible()
+  const box = (await help.boundingBox())!
+  const size = page.viewportSize()!
+  expect(box.x).toBeGreaterThanOrEqual(0)
+  expect(box.x + box.width).toBeLessThanOrEqual(size.width)
+  expect(box.y + box.height).toBeLessThanOrEqual(size.height)
+  // Escape closes it; so does a press outside it, and the button again.
+  await page.keyboard.press('Escape')
+  await expect(help).toBeHidden()
+  await button.click()
+  await expect(help).toBeVisible()
+  await page.mouse.click(200, 300)
+  await expect(help).toBeHidden()
+  await button.click()
+  await button.click()
+  await expect(help).toBeHidden()
+  expect(errors).toEqual([])
+})
+
 test('after a reload the canvas is at its saved view from the first frame', async ({ page }) => {
   const errors = collectErrors(page)
   // Where the world is in the first frame that has an item in it.
@@ -1724,6 +1767,364 @@ test('a text in a viewport item is rewritten in place too, and a press outside k
   }
 })
 
+test("an item's actions sit at its top right: Ask with quick requests, Pick, and More", async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    writeFileSync(REGISTRY, withVersions(original))
+    await servesId(page, 'c')
+    await page.goto('/')
+    const item = page.locator('.canvas-item[data-canvas-item="b"]')
+    await expect(item).toBeVisible()
+    await page.waitForTimeout(600)
+    const ask = page.getByRole('button', { name: 'Ask agent about Version B' })
+    const pick = page.getByRole('button', { name: 'Pick Version B and set the others aside' })
+    const more = page.getByRole('button', { name: 'More actions for Version B' })
+    // Quiet until the item is hovered, on its name or on its preview.
+    const actions = item.locator('.canvas-item-actions')
+    await page.mouse.move(5, 5)
+    await expect(actions).toHaveCSS('opacity', '0')
+    const resting = (await item.locator('.canvas-preview').boundingBox())!
+    await item.locator('.canvas-preview').hover()
+    await expect(actions).toHaveCSS('opacity', '1')
+    // Showing them moves nothing down: the preview stays where it was, under the pointer.
+    expect(Math.abs((await item.locator('.canvas-preview').boundingBox())!.y - resting.y)).toBeLessThan(0.5)
+    // At the frame's right edge, in this order, and Pick says its word.
+    const preview = (await item.locator('.canvas-preview').boundingBox())!
+    const boxes = [(await ask.boundingBox())!, (await pick.boundingBox())!, (await more.boundingBox())!]
+    expect(boxes[0]!.x).toBeLessThan(boxes[1]!.x)
+    expect(boxes[1]!.x).toBeLessThan(boxes[2]!.x)
+    expect(Math.abs(boxes[2]!.x + boxes[2]!.width - (preview.x + preview.width))).toBeLessThan(3)
+    expect(boxes[2]!.y + boxes[2]!.height).toBeLessThanOrEqual(preview.y)
+    await expect(pick).toHaveText('Pick')
+    // The name is a title: a click on it copies nothing and shows nothing.
+    await page.evaluate(() => navigator.clipboard.writeText('untouched'))
+    await item.locator('.canvas-name').click()
+    await page.waitForTimeout(300)
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('untouched')
+    await expect(page.locator('.canvas-toast')).toHaveCount(0)
+    // Ask opens a note about the whole item, with no tool chosen first, and offers quick requests.
+    await ask.click()
+    const note = page.getByRole('dialog', { name: 'Ask agent about Version B' })
+    await expect(note).toBeVisible()
+    const quick = note.getByRole('group', { name: 'Quick requests' })
+    await expect(quick.getByRole('button')).toHaveText(['Bolder', 'Simpler', 'Phone', 'States'])
+    await quick.getByRole('button', { name: 'Simpler' }).click()
+    await expect(note.getByRole('textbox')).toHaveValue('Make a simpler version of this.')
+    await expect(note.getByRole('textbox')).toBeFocused()
+    // With words in the note the quick requests are gone; the words can be changed like any others.
+    await expect(quick).toHaveCount(0)
+    await note.getByRole('textbox').press('Enter')
+    await expect(note).toHaveCount(0)
+    await expect(item.locator('.canvas-pin')).toHaveCount(1)
+    // A second press opens the note that waits; it does not add another.
+    await item.locator('.canvas-preview').hover()
+    await ask.click()
+    await expect(note.getByRole('textbox')).toHaveValue('Make a simpler version of this.')
+    await page.keyboard.press('Escape')
+    await expect(item.locator('.canvas-pin')).toHaveCount(1)
+    // More holds what is used seldom. It opens on a press and closes on Escape or a press outside.
+    const open = page.getByRole('link', { name: 'Open Version B in a new tab' })
+    const trash = page.getByRole('button', { name: 'Move Version B to the trash' })
+    await expect(trash).toHaveCount(0)
+    await item.locator('.canvas-preview').hover()
+    await more.click()
+    await expect(open).toBeVisible()
+    await expect(trash).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(trash).toHaveCount(0)
+    await more.click()
+    await page.mouse.click(5, 5)
+    await expect(trash).toHaveCount(0)
+    // A press on an action never starts a move.
+    const before = (await item.boundingBox())!
+    await more.click()
+    await trash.click()
+    await expect(page.locator('.canvas-toast')).toContainText('Moved Version B to the trash')
+    await page.locator('.canvas-toast').getByRole('button', { name: 'Undo' }).click()
+    await expect(item).toBeVisible()
+    expect(Math.abs((await item.boundingBox())!.x - before.x)).toBeLessThan(1)
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
+test('a link or a router call stays in its item, and only a new-tab link goes to another item', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  const example = readFileSync(EXAMPLE, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    // Screens that point at each other as a product's do: links by path, and a router's push and back.
+    writeFileSync(
+      EXAMPLE,
+      `import { type ReactNode, useContext } from "react";
+import { BACK_EVENT, NAVIGATE_EVENT } from "../canvas/bridge";
+import { RouteContext } from "../canvas/routes";
+const push = (href: string) => window.dispatchEvent(new CustomEvent(NAVIGATE_EVENT, { detail: href }));
+function Screen({ title, children }: { title: string; children?: ReactNode }) {
+  const path = useContext(RouteContext);
+  return (
+    <div style={{ padding: 16 }}>
+      <h2 style={{ margin: 0, fontSize: 18 }}>{title}</h2>
+      <p data-path>{path}</p>
+      {children}
+    </div>
+  );
+}
+export const Example = () => (
+  <Screen title="Plans">
+    <a href="/checkout?plan=team">Choose</a> <a href="/orders/42">Order</a> <a href="/help">Help here</a>{" "}
+    <a href="/help" target="_blank">Help tab</a> <a href="/checkout" target="_blank">Checkout tab</a> <a href="/nowhere">Lost</a>{" "}
+    <a href="/nowhere" target="_blank">Lost tab</a>
+  </Screen>
+);
+export const Checkout = () => (
+  <Screen title="Checkout">
+    <button type="button" onClick={() => push("/done")}>Pay</button>{" "}
+    <button type="button" onClick={() => window.dispatchEvent(new Event(BACK_EVENT))}>Back</button>
+  </Screen>
+);
+export const Done = () => (
+  <Screen title="Done">
+    <a href="/plans">Start over</a>
+  </Screen>
+);
+export const Order = () => <Screen title="Order" />;
+export const Help = () => (
+  <Screen title="Help">
+    <a href="/checkout">To checkout</a> <a href="/checkout" target="_blank">Checkout tab</a>
+  </Screen>
+);
+`,
+    )
+    writeFileSync(
+      REGISTRY,
+      original
+        .replace('import { Example } from "./items/Example";', 'import { Checkout, Done, Example, Help, Order } from "./items/Example";')
+        .replace('component: Example,', 'component: Example,\n    path: "/plans",\n    screens: { "/checkout": Checkout, "/done": Done, "/orders/[id]": Order },')
+        .replace(
+          /\];\s*$/,
+          `  { id: "help", name: "Help page", component: Help, path: "/help", x: 1500, y: 0, width: 300, height: 160 },
+  { id: "phone", name: "Phone", component: Example, path: "/plans", screens: { "/checkout": Checkout, "/done": Done }, x: 0, y: 260, width: 375, height: 200, viewport: true },
+];
+`,
+        ),
+    )
+    await expect
+      .poll(async () => (await (await page.request.get('/registry.tsx')).text()).includes('id: "phone"'), { timeout: 15_000 })
+      .toBe(true)
+    await expect
+      .poll(async () => (await (await page.request.get('/items/Example.tsx')).text()).includes('Checkout'), { timeout: 15_000 })
+      .toBe(true)
+    await page.goto('/')
+    const plain = page.locator('.canvas-item[data-canvas-item="example"] .canvas-preview')
+    const frame = page.frameLocator('.canvas-item[data-canvas-item="phone"] iframe').locator('body')
+    const help = page.locator('.canvas-item[data-canvas-item="help"]')
+    await expect(frame.getByRole('heading')).toHaveText('Plans')
+    await page.waitForTimeout(600)
+    const address = page.url()
+    for (const [name, item] of [
+      ['a plain item', plain],
+      ['a frame', frame],
+    ] as const) {
+      const other = item === plain ? frame : plain
+      // The item knows its own path.
+      await expect(item.locator('[data-path]'), name).toHaveText('/plans')
+      // A link to one of its screens shows that screen in place: no notice, the page stays, no other item changes.
+      await item.getByRole('link', { name: 'Choose' }).click()
+      await expect(item.getByRole('heading'), name).toHaveText('Checkout')
+      await expect(item.locator('[data-path]'), name).toHaveText('/checkout')
+      await expect(other.getByRole('heading'), name).toHaveText('Plans')
+      await expect(page.locator('.canvas-toast')).toHaveCount(0)
+      expect(page.url()).toBe(address)
+      // A router call goes the same way, and its back() returns.
+      await item.getByRole('button', { name: 'Pay' }).click()
+      await expect(item.getByRole('heading'), name).toHaveText('Done')
+      await item.getByRole('link', { name: 'Start over' }).click()
+      await expect(item.getByRole('heading'), name).toHaveText('Plans')
+      await item.getByRole('link', { name: 'Choose' }).click()
+      await item.getByRole('button', { name: 'Back' }).click()
+      await expect(item.getByRole('heading'), name).toHaveText('Plans')
+      // Restart returns to the first screen.
+      await item.getByRole('link', { name: 'Choose' }).click()
+      await expect(item.getByRole('heading'), name).toHaveText('Checkout')
+      const id = item === plain ? 'example' : 'phone'
+      await page.locator(`.canvas-item[data-canvas-item="${id}"] .canvas-name`).hover()
+      await page.getByRole('button', { name: item === plain ? 'Restart Example · replace me' : 'Restart Phone' }).click()
+      await expect(item.getByRole('heading'), name).toHaveText('Plans')
+      await expect(item.locator('[data-path]'), name).toHaveText('/plans')
+    }
+    // A path with a part that changes, "/orders/[id]".
+    await plain.getByRole('link', { name: 'Order' }).click()
+    await expect(plain.getByRole('heading')).toHaveText('Order')
+    await page.locator('.canvas-item[data-canvas-item="example"] .canvas-name').hover()
+    await page.getByRole('button', { name: 'Restart Example · replace me' }).click()
+    // A path the item does not have stays where it is, with a notice, also when another item shows
+    // that path: a click in the product stays in its tab, so a click here never moves the view.
+    await page.getByRole('button', { name: 'Reset view (actual size)' }).click()
+    const inView = async () => {
+      const box = await help.boundingBox()
+      return !!box && box.x >= 0 && box.x + box.width <= page.viewportSize()!.width
+    }
+    // The view is put on the page a frame later, so its place is asked until it is there.
+    await expect.poll(inView).toBe(false)
+    await plain.getByRole('link', { name: 'Help here' }).click()
+    await expect(page.locator('.canvas-toast')).toContainText('This item has no screen for /help')
+    await page.waitForTimeout(400)
+    expect(await inView()).toBe(false)
+    await expect(plain.getByRole('heading')).toHaveText('Plans')
+    // A link that opens a new tab in the product goes to the item that shows the path, and the item it was in stays as it is.
+    await plain.getByRole('link', { name: 'Help tab' }).click()
+    await expect.poll(inView).toBe(true)
+    // The view glides there and puts that item in the middle.
+    const middle = async (locator: typeof help) => {
+      const box = (await locator.locator('.canvas-preview').boundingBox())!
+      return Math.abs(box.x + box.width / 2 - page.viewportSize()!.width / 2)
+    }
+    await expect.poll(() => middle(help)).toBeLessThan(2)
+    await expect(help).toHaveAttribute('data-front', 'true')
+    // A ring shows where the link went, for a moment.
+    await expect(help).toHaveAttribute('data-arrived', '')
+    await expect(help).not.toHaveAttribute('data-arrived', '')
+    await expect(plain.getByRole('heading')).toHaveText('Plans')
+    // The item it went to shows its own first screen, so it has nothing to restart.
+    await expect(page.getByRole('button', { name: 'Restart Help page' })).toHaveCount(0)
+    // From there too: the same tab stays in that item, and a new tab goes to the nearest item that shows the path, on that screen.
+    await help.getByRole('link', { name: 'To checkout' }).click()
+    await expect(page.locator('.canvas-toast')).toContainText('This item has no screen for /checkout')
+    await expect(plain.getByRole('heading')).toHaveText('Plans')
+    await help.getByRole('link', { name: 'Checkout tab' }).click()
+    await expect(plain.getByRole('heading')).toHaveText('Checkout')
+    // Also when that item was in view already: it goes to the middle.
+    await expect.poll(() => middle(page.locator('.canvas-item[data-canvas-item="example"]'))).toBeLessThan(2)
+    await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toHaveAttribute('data-front', 'true')
+    await expect(help.getByRole('heading')).toHaveText('Help')
+    // That item was moved by a link in another one, so it offers Restart though nobody touched it.
+    await page.getByRole('button', { name: 'Fit all' }).click()
+    await page.locator('.canvas-item[data-canvas-item="example"] .canvas-name').hover()
+    await page.getByRole('button', { name: 'Restart Example · replace me' }).click()
+    await expect(plain.getByRole('heading')).toHaveText('Plans')
+    // A new-tab link to a path that is also one of the item's own screens leaves the item as it is,
+    // and opens the nearest other item that shows it: here the frame below.
+    await plain.getByRole('link', { name: 'Checkout tab' }).click()
+    await expect(frame.getByRole('heading')).toHaveText('Checkout')
+    await expect(plain.getByRole('heading')).toHaveText('Plans')
+    await expect(help.getByRole('heading')).toHaveText('Help')
+    // A press during the glide stops it there: the person is not held by it.
+    await page.getByRole('button', { name: 'Reset view (actual size)' }).click()
+    await expect.poll(inView).toBe(false)
+    await plain.getByRole('link', { name: 'Help tab' }).click()
+    await page.mouse.click(640, 700)
+    await page.waitForTimeout(500)
+    expect(await middle(help)).toBeGreaterThan(20)
+    await page.getByRole('button', { name: 'Fit all' }).click()
+    // With no item for it, each says what the link would have done.
+    await plain.getByRole('link', { name: 'Lost tab' }).click()
+    await expect(page.locator('.canvas-toast')).toContainText('Opens in a new tab: /nowhere')
+    await plain.getByRole('link', { name: 'Lost', exact: true }).click()
+    await expect(page.locator('.canvas-toast')).toContainText('This item has no screen for /nowhere')
+    await expect(plain.getByRole('heading')).toHaveText('Plans')
+    expect(page.url()).toBe(address)
+    expect(errors).toEqual([])
+  } finally {
+    if (readFileSync(EXAMPLE, 'utf8') !== example) {
+      const updated = page.waitForEvent('console', { predicate: (m) => m.text().includes('hot updated'), timeout: 10_000 }).catch(() => {})
+      writeFileSync(EXAMPLE, example)
+      await updated
+    }
+    await restoreRegistry(page, original)
+  }
+})
+
+test('an item that was used can be restarted by itself, in a frame too', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  const example = readFileSync(EXAMPLE, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    // An item with steps, as a flow has: "Next" goes on, and nothing goes back.
+    writeFileSync(
+      EXAMPLE,
+      `import { useState } from "react";
+export function Example() {
+  const [step, setStep] = useState(1);
+  return (
+    <div style={{ padding: 24 }}>
+      <h2 style={{ margin: 0, fontSize: 18 }}>Step {step}</h2>
+      <button type="button" onClick={() => setStep(step + 1)}>Next</button>
+    </div>
+  );
+}
+`,
+    )
+    writeFileSync(
+      REGISTRY,
+      original.replace(
+        /\];\s*$/,
+        '  { id: "phone", name: "Phone", component: Example, x: 0, y: 240, width: 375, height: 180, viewport: true },\n];\n',
+      ),
+    )
+    await expect
+      .poll(async () => (await (await page.request.get('/registry.tsx')).text()).includes('id: "phone"'), { timeout: 15_000 })
+      .toBe(true)
+    await expect
+      .poll(async () => (await (await page.request.get('/items/Example.tsx')).text()).includes('setStep'), { timeout: 15_000 })
+      .toBe(true)
+    await page.goto('/')
+    const contents = {
+      example: page.locator('.canvas-item[data-canvas-item="example"] .canvas-preview'),
+      phone: page.frameLocator('.canvas-item[data-canvas-item="phone"] iframe').locator('body'),
+    }
+    const restarts = {
+      example: page.getByRole('button', { name: 'Restart Example · replace me' }),
+      phone: page.getByRole('button', { name: 'Restart Phone' }),
+    }
+    await expect(contents.phone.getByRole('heading')).toHaveText('Step 1')
+    await page.waitForTimeout(600)
+    // Not there until the item was used.
+    await expect(page.getByRole('button', { name: /^Restart / })).toHaveCount(0)
+    for (const id of ['example', 'phone'] as const) {
+      const other = id === 'example' ? 'phone' : 'example'
+      await contents[id].getByRole('button', { name: 'Next' }).click()
+      await contents[id].getByRole('button', { name: 'Next' }).click()
+      await expect(contents[id].getByRole('heading')).toHaveText('Step 3')
+      // Only on the item that was used. It restarts that item and no other, with no page reload.
+      await expect(restarts[id]).toHaveCount(1)
+      await expect(restarts[other]).toHaveCount(0)
+      await page.evaluate(() => ((window as unknown as { __samePage: boolean }).__samePage = true))
+      await page.locator(`.canvas-item[data-canvas-item="${id}"] .canvas-name`).hover()
+      await restarts[id].click()
+      await expect(contents[id].getByRole('heading')).toHaveText('Step 1')
+      await expect(restarts[id]).toHaveCount(0)
+      expect(await page.evaluate(() => (window as unknown as { __samePage?: boolean }).__samePage)).toBe(true)
+      // It can be used and restarted again.
+      await contents[id].getByRole('button', { name: 'Next' }).click()
+      await expect(contents[id].getByRole('heading')).toHaveText('Step 2')
+      await expect(restarts[id]).toHaveCount(1)
+      await page.locator(`.canvas-item[data-canvas-item="${id}"] .canvas-name`).hover()
+      await restarts[id].click()
+      await expect(contents[id].getByRole('heading')).toHaveText('Step 1')
+    }
+    // A click in Ask agent mode does not use the item: the button is not pressed, and no Restart shows.
+    await page.getByRole('button', { name: 'Ask agent', exact: true }).click()
+    await contents.example.getByRole('button', { name: 'Next' }).click()
+    await page.keyboard.press('Escape')
+    await page.keyboard.press('Escape')
+    await expect(contents.example.getByRole('heading')).toHaveText('Step 1')
+    await page.waitForTimeout(700)
+    await expect(page.getByRole('button', { name: /^Restart / })).toHaveCount(0)
+    expect(errors).toEqual([])
+  } finally {
+    if (readFileSync(EXAMPLE, 'utf8') !== example) {
+      const updated = page.waitForEvent('console', { predicate: (m) => m.text().includes('hot updated'), timeout: 10_000 }).catch(() => {})
+      writeFileSync(EXAMPLE, example)
+      await updated
+    }
+    await restoreRegistry(page, original)
+  }
+})
+
 test('a pin stays on its element when its item is resized, in a frame too', async ({ page }) => {
   const original = readFileSync(REGISTRY, 'utf8')
   try {
@@ -1927,7 +2328,13 @@ test('a shared file works from disk, frames included, without the agent tools', 
     await expect(page.locator('.canvas-item[data-canvas-item="old"]')).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Trash, 1 item' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Ask agent', exact: true })).toHaveCount(0)
-    await expect(page.locator('#canvas-help')).not.toContainText('Press A')
+    // The controls that need an agent, or save, are not in its help.
+    await page.getByRole('button', { name: 'Canvas controls' }).click()
+    await expect(page.locator('#canvas-help')).toBeVisible()
+    await expect(page.locator('#canvas-help')).toContainText('Move around')
+    await expect(page.locator('#canvas-help')).not.toContainText('Ask the agent')
+    await expect(page.locator('#canvas-help')).not.toContainText('Undo')
+    await page.keyboard.press('Escape')
     const frame = page.locator('.canvas-item[data-canvas-item="phone"] iframe')
     await expect(page.frameLocator('.canvas-item[data-canvas-item="phone"] iframe').locator('body')).toContainText(
       'Canvas is ready',
@@ -1941,6 +2348,7 @@ test('a shared file works from disk, frames included, without the agent tools', 
     await expect.poll(() => world.evaluate((element) => getComputedStyle(element).transform)).not.toBe(before)
     // What a viewer changes stays across a reload of that file, and a newer file of the
     // same canvas opens as it was shared: files on disk share one origin, and so storage.
+    await page.getByRole('button', { name: 'More actions for Example · replace me' }).click()
     await page.getByRole('button', { name: 'Move Example · replace me to the trash' }).click()
     await expect(example).toHaveCount(0)
     await page.reload()
@@ -1978,7 +2386,11 @@ test('a shared file works from disk, frames included, without the agent tools', 
       await expect(hosted.frameLocator('.canvas-item[data-canvas-item="phone"] iframe').locator('body'), way).toContainText(
         'Canvas is ready',
       )
+      // Inside another page an item has no address of its own, so More has no link to open it alone.
+      await hosted.getByRole('button', { name: /^More actions for / }).first().click()
+      await expect(hosted.getByRole('button', { name: /to the trash$/ }), way).toHaveCount(1)
       await expect(hosted.getByRole('link', { name: /in a new tab/ }), way).toHaveCount(0)
+      await page.keyboard.press('Escape')
       const embeddedWorld = hosted.locator('.canvas-world')
       const start = await embeddedWorld.evaluate((element) => getComputedStyle(element).transform)
       const phone = await hosted.locator('.canvas-item[data-canvas-item="phone"] iframe').boundingBox()

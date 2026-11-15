@@ -94,6 +94,8 @@ Canvases are prototypes. Commit one only when teammates need to change it; to le
 
 The canvas rules are adapted from [`create-canvas`](https://github.com/ibelick/ui-skills) by Julien Thibeaut (MIT).
 
+The canvas's icons are from [Tabler Icons](https://tabler.io/icons) (MIT). The license text is in `skills/design-canvas/shell/icons.tsx`.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
@@ -191,6 +193,8 @@ npx skills add charlie5188/design-canvas --skill '*'
 ### クレジット
 
 キャンバスのルールは、Julien Thibeaut 氏の [`create-canvas`](https://github.com/ibelick/ui-skills)（MIT）をもとにしています。
+
+キャンバスのアイコンは [Tabler Icons](https://tabler.io/icons)（MIT）のものです。ライセンスの全文は `skills/design-canvas/shell/icons.tsx` にあります。
 
 ### ライセンス
 
