@@ -11,10 +11,11 @@ Instead of asking the agent to build a canvas from scratch for every project, th
 ## What you get
 
 - **Your real components.** Each item is your app's own component, with its styles and themes, and made-up data in place of a backend. Ask for a phone or desktop width, and breakpoints behave as on the device.
-- **Ask the agent where you are looking.** Press A, click an element, and write a change or a question. Send it, and the agent makes the change or answers on that pin.
-- **Iterate fast, and the canvas keeps the process in order.** A change you ask for becomes a new version next to the original, so you compare both. Press the check on the version you want, and the others move into a "Set aside" section, with your reasons kept as notes.
+- **Ask the agent where you are looking.** Press A, click an element, and write a change or a question. Send it, and the agent makes the change or answers on that pin, where you can reply. To ask about a whole item, use its Ask agent button. Quick requests fill in the note for you: show it at phone width, add its empty, loading, and error states, or show it in the other languages your app has.
+- **See the whole flow.** One item can hold all the screens of a flow and the states of each screen. Click the count next to its name to see every screen side by side, live, with arrows that name the control that leads there, such as `click "Pay"`. Switch a screen's state in place, and ask about one screen, one element on it, or the whole flow.
+- **Iterate fast, and the canvas keeps the process in order.** A change you ask for becomes a new version next to the original, so you compare both. Press Pick on the version you want, and the others move into a "Set aside" section, with your reasons kept as notes. When directions take real work to build, they start as cards with a rough sketch, and you build or drop each one before any code is written.
 - **The one you pick is already code.** The agent builds versions from your components' props first. Ask it to ship one, and it moves that version into the product and checks it in your running app.
-- **Share as one file.** Click Share to get one HTML file that opens with a double-click, and that you can put in Figma or Notion. See [Share a canvas](#share-a-canvas).
+- **Share as one file.** Click Share to get one HTML file that opens with a double-click, and that you can put in Figma or Notion. With Claude, you can also share it as a link that people comment on. See [Share a canvas](#share-a-canvas).
 
 ## Compared with Claude Design, Paper, and Figma
 
@@ -57,6 +58,7 @@ Then ask your agent, for example:
 - "Make a canvas comparing three layouts for the pricing card."
 - "Add a version of the inbox with grouped notifications next to the current one."
 - "Show the settings page on a phone and on desktop."
+- "Put the whole checkout flow in one item, with the card-declined state."
 
 ## Share a canvas
 
@@ -77,6 +79,8 @@ The file is a snapshot, so share again after changes. It holds every item's data
 - `skills/design-canvas/scripts/install.sh`: copies the shell and kit into `<app>/design-canvas/<name>/` and detects what it can.
 - `skills/design-canvas/scripts/update.sh`: brings an existing canvas's shell up to date with the skill. The agent runs it when it picks up a canvas, so older canvases get new features. Your items and kit settings stay as they are.
 - `skills/design-canvas/scripts/share.sh`: builds a canvas into one self-contained HTML file in `<canvas>/shared/`, with every script, style, image, and font inside it, including files from the app's public folder. The toolbar's Share button builds the same file through the dev server and downloads it.
+- `skills/design-canvas/scripts/listen.sh` and `reply.sh`: how your notes reach the agent and its answers come back. While the agent runs `listen.sh` in the background, the canvas's Send button delivers your notes to it, and the agent answers a question on its pin with `reply.sh`. When no agent listens, the button reads Copy, and you paste the notes into your agent. `listen-codex.mjs` does the same for Codex Desktop.
+- `skills/design-canvas/scripts/remove.sh`: removes a canvas from the project.
 - `skills/design-canvas/scripts/check-version.sh`: when a canvas is installed or updated, reads the skill's version number from this repository on GitHub, and the agent tells you when a newer version is out. Set `DESIGN_CANVAS_NO_UPDATE_CHECK=1` to turn it off.
 - `skills/design-canvas/references/making-a-kit.md`: the checklist the agent follows to finish fitting your app, and how to save that fit as a private kit in `~/.agents/design-canvas-kits/` so the next install needs none.
 - `skills/design-directions/SKILL.md`: how the agent plans directions before it builds them. It looks at how a few real products solve the same job, keeps the product's design system fixed, gives each direction one bet in its structure, and reworks any two that look alike. Your own instructions about directions come first.
@@ -89,6 +93,7 @@ Canvases are prototypes. Commit one only when teammates need to change it; to le
 - Server components, server actions, and anything that needs a server secret cannot render on the canvas; preview the client component beneath them instead.
 - Inside an item shown at a fixed screen width (a `viewport` item), middle-button pan and touch pinch do not reach the canvas.
 - A shared file is a snapshot of the canvas. Files loaded by a path built at runtime, such as `/avatars/${id}.png`, are not inside it; import them in the item instead.
+- In a flow, only the path decides which screen shows: query strings and hashes are ignored, `useParams()` is empty, and `window.open` and server redirects are not followed. A step that code makes, such as a router call in a click handler, gets its arrow in the flow view after you make that step once in the item.
 
 ## Credits
 
@@ -111,10 +116,11 @@ React アプリの実際のコンポーネントを、パン・ズームでき�
 ### できること
 
 - **本物のコンポーネント。** アイテムはアプリ自身のコンポーネントで、スタイルとテーマもアプリのままです。バックエンドの代わりに架空のデータを使います。スマートフォンやデスクトップの幅を頼むと、ブレークポイントが実機と同じように動きます。
-- **見ている場所で、エージェントに頼む・聞く。** A キーを押して要素をクリックし、変更の依頼か質問を書いて送ります。エージェントは変更を加えるか、そのピンの上で答えます。
-- **すばやく案を進められ、経過はキャンバスが整理する。** 変更を頼むと、元の案の隣に新しい案が追加され、2 つを見比べられます。採用したい案のチェックを押すと、ほかの案は「Set aside」セクションに移り、会話で伝えた理由はノートとして残ります。
+- **見ている場所で、エージェントに頼む・聞く。** A キーを押して要素をクリックし、変更の依頼か質問を書いて送ります。エージェントは変更を加えるか、そのピンの上で答えます。同じピンで返信もできます。アイテム全体について聞くときは、そのアイテムの Ask agent ボタンを使います。クイックリクエストを押すと、スマートフォン幅での表示、空・読み込み中・エラーの状態の追加、アプリにあるほかの言語での表示を頼む文がノートに入ります。
+- **フロー全体を見る。** 1 つのアイテムに、フローのすべての画面と、各画面の状態を持たせられます。名前の横の数をクリックすると、すべての画面が実際に動く状態で横に並び、画面どうしは矢印でつながります。矢印には `click "Pay"` のように、その画面へ進むための操作が書かれます。画面の状態はその場で切り替えられ、1 つの画面、画面上の要素、フロー全体のどれについてもエージェントに聞けます。
+- **すばやく案を進められ、経過はキャンバスが整理する。** 変更を頼むと、元の案の隣に新しい案が追加され、2 つを見比べられます。採用したい案の Pick を押すと、ほかの案は「Set aside」セクションに移り、会話で伝えた理由はノートとして残ります。作るのに手間がかかる方向性は、まずラフなスケッチ付きのカードとしてキャンバスに並ぶので、コードを書く前に 1 つずつ作るか外すかを決められます。
 - **選んだ案は、すでにコード。** エージェントはまず既存コンポーネントの props で案を作ります。プロダクトに入れるよう頼むと、エージェントが組み込み、実際のアプリで確認します。
-- **1 つのファイルで共有。** Share をクリックすると、ダブルクリックで開ける 1 つの HTML ファイルができます。Figma や Notion にも置けます。詳しくは[キャンバスを共有する](#キャンバスを共有する)を見てください。
+- **1 つのファイルで共有。** Share をクリックすると、ダブルクリックで開ける 1 つの HTML ファイルができます。Figma や Notion にも置けます。Claude を使っている場合は、コメントできるリンクとしても共有できます。詳しくは[キャンバスを共有する](#キャンバスを共有する)を見てください。
 
 ### Claude Design、Paper、Figma との違い
 
@@ -157,6 +163,7 @@ npx skills add charlie5188/design-canvas --skill '*'
 - 「料金カードのレイアウトを 3 案比較するキャンバスを作って」
 - 「通知をグループ化した受信箱を、今のものの隣に追加して」
 - 「設定ページをスマートフォンとデスクトップで並べて見せて」
+- 「チェックアウトのフロー全体を 1 つのアイテムにまとめて。カードが拒否された状態も入れて」
 
 ### キャンバスを共有する
 
@@ -177,6 +184,8 @@ npx skills add charlie5188/design-canvas --skill '*'
 - `skills/design-canvas/scripts/install.sh`：本体とキットを `<app>/design-canvas/<name>/` にコピーし、検出できるものを自動で設定します。
 - `skills/design-canvas/scripts/update.sh`：既存のキャンバスの本体を、スキルの最新版に更新します。エージェントが既存のキャンバスを使うときに実行するので、古いキャンバスにも新しい機能が入ります。アイテムとキットの設定はそのまま残ります。
 - `skills/design-canvas/scripts/share.sh`：キャンバスを、スクリプト、スタイル、画像、フォント（アプリの public フォルダのファイルも含む）をすべて含む 1 つの HTML ファイルにして、`<canvas>/shared/` に保存します。ツールバーの Share ボタンは、開発サーバーで同じファイルを作ってダウンロードします。
+- `skills/design-canvas/scripts/listen.sh` と `reply.sh`：ノートがエージェントに届き、答えが戻ってくるしくみです。エージェントが `listen.sh` をバックグラウンドで動かしている間は、キャンバスの Send ボタンでノートがエージェントに直接届きます。質問への答えは、エージェントが `reply.sh` でそのピンに書きます。待ち受けているエージェントがいないときは、ボタンが Copy になるので、コピーしたノートをエージェントに貼り付けます。`listen-codex.mjs` は Codex Desktop 用の同じしくみです。
+- `skills/design-canvas/scripts/remove.sh`：プロジェクトからキャンバスを取り除きます。
 - `skills/design-canvas/scripts/check-version.sh`：キャンバスのインストール時と更新時に、GitHub 上のこのリポジトリからスキルのバージョン番号を読み取ります。新しいバージョンが出ていれば、エージェントが知らせます。オフにするには `DESIGN_CANVAS_NO_UPDATE_CHECK=1` を設定します。
 - `skills/design-canvas/references/making-a-kit.md`：アプリへの設定を仕上げるためにエージェントが使うチェックリストです。仕上がった設定を `~/.agents/design-canvas-kits/` にプライベートキットとして保存し、次回からは設定なしでインストールする方法も書かれています。
 - `skills/design-directions/SKILL.md`：エージェントが方向性を作る前の進め方です。いくつかの実在する製品が同じ課題をどう解いているかを調べ、製品のデザインシステムは変えずに、各方向性に構造上の賭けを 1 つずつ持たせ、似すぎた 2 つは作り直します。方向性についてのユーザー自身の指示が優先されます。
@@ -189,6 +198,7 @@ npx skills add charlie5188/design-canvas --skill '*'
 - サーバーコンポーネント、サーバーアクション、サーバー側の秘密情報が必要なものは、キャンバス上で表示できません。代わりに、その下にあるクライアントコンポーネントをプレビューしてください。
 - 画面幅を固定して表示するアイテム（`viewport` のアイテム）の上では、中ボタンでのパンとタッチのピンチ操作がキャンバスに届きません。
 - 共有ファイルは、その時点のキャンバスのスナップショットです。実行時に組み立てるパス（`/avatars/${id}.png` など）で読み込むファイルは含まれません。アイテム内で import してください。
+- フローでは、どの画面を表示するかはパスだけで決まります。クエリ文字列とハッシュは無視され、`useParams()` は空になり、`window.open` とサーバー側のリダイレクトはたどりません。クリック時のルーター呼び出しのようにコードで進む画面遷移は、アイテムの中で一度その操作をすると、フロービューに矢印が表示されます。
 
 ### クレジット
 
