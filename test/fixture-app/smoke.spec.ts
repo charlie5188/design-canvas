@@ -248,6 +248,10 @@ test('a later pick sets the earlier one aside too, in the same section', async (
     )
     await servesId(page, 'd')
     await expect(item('d')).toBeVisible()
+    // The canvas places the new version at the right end of the row, where its header can sit
+    // under the top bar on a small screen. Pan it clear, as the person would.
+    await page.mouse.move(640, 600)
+    await page.mouse.wheel(400, -200)
     await page.getByRole('button', { name: 'Pick Version D and set the others aside' }).click()
     await expect(page.locator('.canvas-toast')).toContainText('Picked Version D. Set 1 other aside.')
     await expect.poll(() => entryOf('d')).toContain('picked: true')
