@@ -54,6 +54,7 @@ import {
   frameUrl,
   fromThisCanvas,
   hasAddress,
+  BACK_EVENT,
   NAVIGATE_EVENT,
   PLAN_EVENT,
   postToFrame,
@@ -95,6 +96,8 @@ import {
   TYPING,
   wheelPixels,
 } from "./dom";
+import { Icon } from "./icons";
+import { opensNewTab, pathOf, RouteContext, screenAt } from "./routes";
 import { labels } from "./labels";
 import {
   type Bounds,
@@ -245,227 +248,108 @@ const ItemFrame = memo(function ItemFrame({ item }: { item: CanvasItem }) {
   );
 });
 
-const GripIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor">
-    <circle cx="6" cy="4" r="1.2" />
-    <circle cx="10" cy="4" r="1.2" />
-    <circle cx="6" cy="8" r="1.2" />
-    <circle cx="10" cy="8" r="1.2" />
-    <circle cx="6" cy="12" r="1.2" />
-    <circle cx="10" cy="12" r="1.2" />
-  </svg>
-);
-
-const OpenIcon = () => (
-  <svg
-    width="16"
-    height="16"
-    viewBox="0 0 16 16"
-    aria-hidden="true"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.4"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <path d="M9 3h4v4" />
-    <path d="M13 3 7.5 8.5" />
-    <path d="M11 9.5V12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h2.5" />
-  </svg>
-);
-
-/** Toolbar icons: 16px outline, drawn in the text color. */
-const ToolIcon = ({ children }: { children: ReactNode }) => (
-  <svg
-    width="16"
-    height="16"
-    viewBox="0 0 16 16"
-    aria-hidden="true"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.4"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    {children}
-  </svg>
-);
-const MinusIcon = () => (
-  <ToolIcon>
-    <path d="M3.5 8h9" />
-  </ToolIcon>
-);
-const PlusIcon = () => (
-  <ToolIcon>
-    <path d="M3.5 8h9M8 3.5v9" />
-  </ToolIcon>
-);
-const FitIcon = () => (
-  <ToolIcon>
-    <path d="M2.5 5.5v-3h3M10.5 2.5h3v3M13.5 10.5v3h-3M5.5 13.5h-3v-3" />
-  </ToolIcon>
-);
-const ResetIcon = () => (
-  <ToolIcon>
-    <path d="M3 8a5 5 0 1 0 1.5-3.6" />
-    <path d="M3 2.5v2.5h2.5" />
-  </ToolIcon>
-);
-const SunIcon = () => (
-  <ToolIcon>
-    <circle cx="8" cy="8" r="2.75" />
-    <path d="M8 1.75v1.5M8 12.75v1.5M1.75 8h1.5M12.75 8h1.5M3.6 3.6l1.05 1.05M11.35 11.35l1.05 1.05M3.6 12.4l1.05-1.05M11.35 4.65l1.05-1.05" />
-  </ToolIcon>
-);
-const MoonIcon = () => (
-  <ToolIcon>
-    <path d="M13 9.6A5.5 5.5 0 1 1 6.4 3a4.4 4.4 0 0 0 6.6 6.6Z" />
-  </ToolIcon>
-);
+// Every icon comes from icons.tsx: one set, one weight. Toolbar and title icons are 16 px,
+// and the marks inside a pin are 14 px.
+const GripIcon = () => <Icon name="grip-vertical" />;
+const OpenIcon = () => <Icon name="external-link" />;
+const MinusIcon = () => <Icon name="minus" />;
+const PlusIcon = () => <Icon name="plus" />;
+const FitIcon = () => <Icon name="maximize" />;
+const ResetIcon = () => <Icon name="zoom-reset" />;
+const SunIcon = () => <Icon name="sun" />;
+const MoonIcon = () => <Icon name="moon" />;
 /** Light and dark get icons; other themes show their label. */
 const THEME_ICONS: Partial<Record<string, () => ReactNode>> = { light: SunIcon, dark: MoonIcon };
 
-const AnnotateIcon = () => (
-  <ToolIcon>
-    <path d="M3 3.5h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H7l-3 2.5v-2.5H3a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1Z" />
-  </ToolIcon>
-);
-const SelectIcon = () => (
-  <ToolIcon>
-    <path d="M3.5 2.5 12.5 7l-4 1.2L7 12.5Z" />
-  </ToolIcon>
-);
-const NoteIcon = () => (
-  <ToolIcon>
-    <path d="M3 2.5h10v7.5l-3.5 3.5H3Z" />
-    <path d="M13 10H9.5v3.5" />
-  </ToolIcon>
-);
-const SectionIcon = () => (
-  <ToolIcon>
-    <rect x="2" y="3.5" width="12" height="9.5" rx="1.5" strokeDasharray="2.5 2" />
-    <path d="M2 1.75h4" />
-  </ToolIcon>
-);
-const CopyIcon = () => (
-  <ToolIcon>
-    <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" />
-    <path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" />
-  </ToolIcon>
-);
-const SendIcon = () => (
-  <ToolIcon>
-    <path d="M8 13V3.5M4 7.5l4-4 4 4" />
-  </ToolIcon>
-);
-const PickIcon = () => (
-  <ToolIcon>
-    <path d="M3.5 8.5l3 3 6-7" />
-  </ToolIcon>
-);
-
-const TrashIcon = () => (
-  <ToolIcon>
-    <path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.1a1 1 0 0 0 1 .9h3.8a1 1 0 0 0 1-.9l.6-8.1" />
-  </ToolIcon>
-);
-
-const EraserIcon = () => (
-  <ToolIcon>
-    <path d="M9.5 2.5 13.5 6.5 7 13 3 9Z" />
-    <path d="M5.9 6.1 9.9 10.1" />
-    <path d="M7.5 13.5h6" />
-  </ToolIcon>
-);
-
-const SentIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M3.5 8.5 6.5 11.5 12.5 4.5" />
-  </svg>
-);
+const AnnotateIcon = () => <Icon name="message-circle" />;
+const SelectIcon = () => <Icon name="pointer" />;
+const NoteIcon = () => <Icon name="note" />;
+const SectionIcon = () => <Icon name="folder" />;
+const CopyIcon = () => <Icon name="copy" />;
+const SendIcon = () => <Icon name="arrow-up" />;
+const PickIcon = () => <Icon name="check" />;
+const TrashIcon = () => <Icon name="trash" />;
+const EraserIcon = () => <Icon name="eraser" />;
+const SentIcon = () => <Icon name="check" size={14} />;
 /** On a pin whose note the agent answered. */
-const ReplyIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M3 3.5h10v7H8.5L5.5 13v-2.5H3z" />
-  </svg>
-);
-const QueuedIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="8" cy="8" r="5.5" />
-    <path d="M8 5v3l2 1.5" />
-  </svg>
-);
-
-const ShareIcon = () => (
-  <ToolIcon>
-    <path d="M8 10V2.5M5 5.5l3-3 3 3" />
-    <path d="M4.5 7.5h-1v6h9v-6h-1" />
-  </ToolIcon>
-);
-const CloseIcon = () => (
-  <ToolIcon>
-    <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
-  </ToolIcon>
-);
-const HelpIcon = () => (
-  <ToolIcon>
-    <circle cx="8" cy="8" r="5.75" />
-    <path d="M6.4 6.4a1.7 1.7 0 0 1 3.3.5c0 1.1-1.7 1.4-1.7 2.4" />
-    <path d="M8 11.2h.01" />
-  </ToolIcon>
-);
+const ReplyIcon = () => <Icon name="message-circle" size={14} />;
+const QueuedIcon = () => <Icon name="clock" size={14} />;
+const ShareIcon = () => <Icon name="share-2" />;
+const CloseIcon = () => <Icon name="x" />;
+const HelpIcon = () => <Icon name="help" />;
+const RestartIcon = () => <Icon name="player-skip-back" />;
+const MoreIcon = () => <Icon name="dots" />;
 
 async function writeClipboard(text: string) {
   if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
   await navigator.clipboard.writeText(text);
 }
 
-function NameButton({
-  name,
-  announce,
-  children,
-}: {
-  name: string;
-  announce: (text: string) => void;
-  /** Controls that sit right after the name, before any copy feedback. */
-  children?: ReactNode;
-}) {
-  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
-  const timer = useRef(0);
-  useEffect(() => () => window.clearTimeout(timer.current), []);
-  const copy = async () => {
-    try {
-      await writeClipboard(name);
-      setState("copied");
-      announce(labels.copiedText(name));
-      window.clearTimeout(timer.current);
-      timer.current = window.setTimeout(() => setState("idle"), 1500);
-    } catch {
-      setState("failed");
-    }
-  };
+/**
+ * The actions an item needs seldom: open it alone, and move it to the trash. They sit behind
+ * one "More" button, so the row has at most three fixed controls, and the trash is not one
+ * press away, beside the controls used all the time. Opened by a press; Escape, a press
+ * outside it, or a choice closes it.
+ */
+function ItemMore({ item, onTrash }: { item: CanvasItem; onTrash: (item: CanvasItem) => void }) {
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (event: PointerEvent) => {
+      if (event.target instanceof Node && !wrap.current?.contains(event.target)) setOpen(false);
+    };
+    const key = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("pointerdown", away, true);
+    window.addEventListener("keydown", key, true);
+    return () => {
+      window.removeEventListener("pointerdown", away, true);
+      window.removeEventListener("keydown", key, true);
+    };
+  }, [open]);
   return (
-    <span className="canvas-name-row">
-      <button type="button" className="canvas-name" data-tip={labels.copyNameHint} onClick={() => void copy()}>
-        {name}
+    <span className="canvas-item-more" ref={wrap}>
+      <button
+        type="button"
+        className="canvas-item-action"
+        aria-label={labels.more(item.name)}
+        aria-expanded={open}
+        data-tip={open ? undefined : labels.moreHint}
+        onClick={() => setOpen((was) => !was)}
+      >
+        <MoreIcon />
       </button>
-      {children}
-      {state === "copied" && (
-        <span className="canvas-subtle" aria-hidden="true">
-          {labels.copied}
-        </span>
-      )}
-      {state === "failed" && (
-        <span className="canvas-copy-fallback">
-          <input
-            readOnly
-            value={name}
-            aria-label={labels.copyFailed}
-            onFocus={(event) => event.currentTarget.select()}
-            // biome-ignore lint/a11y/noAutofocus: the fallback appears only after a copy attempt.
-            autoFocus
-          />
-          <span className="canvas-subtle">{labels.copyFailed}</span>
+      {open && (
+        <span className="canvas-item-menu" role="group" aria-label={labels.more(item.name)}>
+          {/* A new tab keeps the canvas, its camera, and preview state intact.
+              A shared file shown inside another page has no address to open. */}
+          {hasAddress && (
+            <a
+              className="canvas-item-menu-entry canvas-open"
+              href={frameUrl(item.id)}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={labels.openAlone(item.name)}
+              onClick={() => setOpen(false)}
+            >
+              <OpenIcon />
+              {labels.openAloneHint}
+            </a>
+          )}
+          <button
+            type="button"
+            className="canvas-item-menu-entry"
+            aria-label={labels.moveToTrash(item.name)}
+            onClick={() => {
+              setOpen(false);
+              onTrash(item);
+            }}
+          >
+            <TrashIcon />
+            {labels.moveToTrashHint}
+          </button>
         </span>
       )}
     </span>
@@ -565,6 +449,8 @@ function AnnotationCard({ annotation, handlers, done }: { annotation: Annotation
     done();
   };
   const onSection = sectionOf(annotation) !== null;
+  // A whole item's note covers the item and is named by the item alone; an area's name says more.
+  const wholeItem = !onSection && !!annotation.w && !annotation.ref.includes(" › ");
   return (
     <div
       ref={cardRef}
@@ -618,6 +504,24 @@ function AnnotationCard({ annotation, handlers, done }: { annotation: Annotation
         </span>
       )}
       {annotation.queued && <span className="canvas-annotation-sent">{labels.queuedNote}</span>}
+      {/* A new note about a whole item offers a few requests people make often. A press puts
+          the words in the field, to send as they are or to change first. They go once there are words. */}
+      {wholeItem && !answered && !turns.length && !annotation.sent && !annotation.queued && !value.trim() && (
+        <span className="canvas-quick" role="group" aria-label={labels.quickAsksLabel}>
+          {labels.quickAsks.map((quick) => (
+            <button
+              key={quick.label}
+              type="button"
+              className="canvas-quick-ask"
+              // The field keeps the focus, so the words can be sent or changed at once.
+              onPointerDown={(event) => event.preventDefault()}
+              onClick={() => handlers.onText(annotation.id, quick.text)}
+            >
+              {quick.label}
+            </button>
+          ))}
+        </span>
+      )}
       <textarea
         ref={fieldRef}
         rows={turns.length ? 2 : 3}
@@ -837,11 +741,13 @@ function CanvasItemView({
   onTitlePointerDown,
   onHandleKey,
   onResize,
-  announce,
   pins,
   openAnnotation,
   annotationHandlers,
   onTrash,
+  onAsk,
+  route,
+  onRestart,
   onPickVersion,
   picked,
   move,
@@ -863,12 +769,17 @@ function CanvasItemView({
   onHandleKey: (item: CanvasItem, dx: number, dy: number) => void;
   /** Absent where nothing can be saved or while annotating. */
   onResize?: (event: ReactPointerEvent<HTMLElement>, item: CanvasItem, edge: ResizeEdge) => void;
-  announce: (text: string) => void;
   /** This item's annotations with their list numbers. */
   pins: { annotation: Annotation; number?: number }[];
   openAnnotation: string | null;
   annotationHandlers: AnnotationHandlers;
   onTrash: (item: CanvasItem) => void;
+  /** Opens a note about the whole item. Absent in a shared file, which has no agent. */
+  onAsk?: (item: CanvasItem) => void;
+  /** The path of the screen a plain item shows now, when a link took it past its first one (routes.ts). */
+  route?: string;
+  /** Restart: the item goes back to its first screen. */
+  onRestart: (id: string) => void;
   /** Absent where a pick cannot be saved or would mean nothing: a shared file, while annotating, an item already set aside. */
   onPickVersion?: (item: CanvasItem) => void;
   /** This is the version the person chose. */
@@ -897,6 +808,98 @@ function CanvasItemView({
   const waiting = move === "sent" || move === "queued" || move === "failed" ? move : undefined;
   const tag = working || (agentWorking && move === "sent") ? "working" : (waiting ?? fresh ?? (savingLate ? "saving" : picked ? "picked" : undefined));
   const ref = useCallback((element: HTMLDivElement | null) => register(item.id, element), [item.id, register]);
+
+  // Restart. An item can hold a whole flow, and the person steps through it. To see it
+  // from the start again, the only way was to reload the page, which restarts every item.
+  // So an item the person has used gets a Restart action beside its name. It shows only
+  // once the item's content differs from what it was before the person first touched it:
+  // an item nobody used, or one that only shows a design, never has it.
+  //   - `run` is the key of the item's content. A new key mounts it again: a plain item's
+  //     component starts over, and a viewport item's frame loads again.
+  //   - `before` is the content as it was at the first press or key since it was mounted
+  //     (taken in the capture phase, so before the item's own handlers change anything).
+  //     After each press, key, or input the content is read again, a moment later and once
+  //     more for a change that takes a little time, and compared with it.
+  //   - A frame's events do not reach this document, so they are heard in the frame's own.
+  //   - A click in Ask agent mode changes nothing in the item, so it shows nothing.
+  const [run, setRun] = useState(0);
+  const [used, setUsed] = useState(false);
+  const previewRef = useRef<HTMLDivElement>(null);
+  const before = useRef<string | undefined>(undefined);
+  const stateOf = useCallback(() => {
+    const preview = previewRef.current;
+    const print = fingerprintItem(preview);
+    if (!preview || print === undefined) return undefined;
+    // What a field holds is not in the markup, so it is read too.
+    let root: ParentNode = preview;
+    try {
+      root = preview.querySelector<HTMLIFrameElement>("iframe[data-canvas-frame]")?.contentDocument ?? preview;
+    } catch {
+      // A frame that cannot be read: its markup alone decides.
+    }
+    const fields = [...root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input, textarea, select")]
+      .map((field) => ("checked" in field && (field.type === "checkbox" || field.type === "radio") ? String(field.checked) : field.value))
+      .join("\u0001");
+    return `${print}\u0000${fields}`;
+  }, []);
+  useEffect(() => {
+    const preview = previewRef.current;
+    if (!preview) return;
+    const timers = new Set<number>();
+    const touch = () => {
+      if (before.current === undefined) before.current = stateOf();
+    };
+    const look = () => {
+      for (const wait of [60, 500]) {
+        const timer = window.setTimeout(() => {
+          timers.delete(timer);
+          const now = stateOf();
+          if (before.current !== undefined && now !== undefined) setUsed(now !== before.current);
+        }, wait);
+        timers.add(timer);
+      }
+    };
+    const heard: [EventTarget, string, () => void][] = [];
+    const hear = (target: EventTarget) => {
+      for (const [type, handler] of [
+        ["pointerdown", touch],
+        ["keydown", touch],
+        ["pointerup", look],
+        ["keyup", look],
+        ["input", look],
+        ["change", look],
+      ] as const) {
+        target.addEventListener(type, handler, true);
+        heard.push([target, type, handler]);
+      }
+    };
+    hear(preview);
+    // A frame gets a new document each time it loads.
+    const frame = preview.querySelector<HTMLIFrameElement>("iframe[data-canvas-frame]");
+    const hearFrame = () => {
+      try {
+        if (frame?.contentDocument) hear(frame.contentDocument);
+      } catch {
+        // Not readable: this item gets no Restart.
+      }
+    };
+    hearFrame();
+    frame?.addEventListener("load", hearFrame);
+    return () => {
+      frame?.removeEventListener("load", hearFrame);
+      for (const [target, type, handler] of heard) target.removeEventListener(type, handler, true);
+      for (const timer of timers) window.clearTimeout(timer);
+    };
+  }, [run, stateOf]);
+  const restart = () => {
+    before.current = undefined;
+    setUsed(false);
+    setRun((n) => n + 1);
+    onRestart(item.id);
+  };
+  // The screen shown: the item's own component, or the one a link inside it led to.
+  const Shown = (route && screenAt(item, route)) || item.component;
+
   return (
     <div
       ref={ref}
@@ -953,52 +956,53 @@ function CanvasItemView({
           >
             <GripIcon />
           </button>
-          <NameButton name={item.name} announce={announce}>
-            {/* A new tab keeps the canvas, its camera, and preview state intact.
-                A shared file shown inside another page has no address to open. */}
-            {hasAddress && (
-              <a
-                className="canvas-item-action canvas-open"
-                href={frameUrl(item.id)}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label={labels.openAlone(item.name)}
-                data-tip={labels.openAloneHint}
-              >
-                <OpenIcon />
-              </a>
-            )}
-            {onPickVersion && !picked && (
-              <button
-                type="button"
-                className="canvas-item-action"
-                aria-label={labels.pick(item.name)}
-                data-tip={labels.pickHint}
-                onClick={() => onPickVersion(item)}
-              >
-                <PickIcon />
+          {/* The name shows what the item is and moves it when dragged. It no longer copies
+              on a click: Ask agent carries an item's name to the agent by itself. */}
+          <span className="canvas-name" title={item.name}>
+            {item.name}
+          </span>
+          {/* The item's actions, at the frame's top right, where they do not move with the
+              length of the name. At most three are fixed: Ask agent about the whole item, Pick
+              (with its word: it is the decision the canvas is for), and More. Restart comes
+              first, so nothing moves when it appears. They show while the item is hovered. */}
+          <span className="canvas-item-actions">
+            {/* Also when a link in another item brought this one to a later screen: the person did not touch it, and it is not at its start. */}
+            {(used || !!route) && (
+              <button type="button" className="canvas-item-action" aria-label={labels.restart(item.name)} data-tip={labels.restartHint} onClick={restart}>
+                <RestartIcon />
               </button>
             )}
-            <button
-              type="button"
-              className="canvas-item-action"
-              aria-label={labels.moveToTrash(item.name)}
-              data-tip={labels.moveToTrashHint}
-              onClick={() => onTrash(item)}
-            >
-              <TrashIcon />
-            </button>
-          </NameButton>
+            {onAsk && (
+              <button type="button" className="canvas-item-action" aria-label={labels.askItem(item.name)} data-tip={labels.askItemHint} onClick={() => onAsk(item)}>
+                <AnnotateIcon />
+              </button>
+            )}
+            {onPickVersion && !picked && (
+              <button type="button" className="canvas-item-action canvas-item-pick" aria-label={labels.pick(item.name)} onClick={() => onPickVersion(item)}>
+                <PickIcon />
+                {labels.pickShort}
+              </button>
+            )}
+            <ItemMore item={item} onTrash={onTrash} />
+          </span>
         </span>
         {caption && <ItemCaption text={caption} editable={editable} onSave={(text) => onCaption(item, text)} />}
       </div>
       <div className="canvas-preview-wrap">
         <div
+          ref={previewRef}
           className="canvas-preview"
           data-canvas-preview={item.id}
           style={{ inlineSize: item.width, blockSize: item.height }}
         >
-          {item.viewport ? <ItemFrame item={item} /> : <Preview component={item.component} />}
+          {item.viewport ? (
+            <ItemFrame key={run} item={item} />
+          ) : (
+            // The path is there for a router stand-in's `usePathname`. A frame provides its own.
+            <RouteContext.Provider value={route ?? item.path ?? null}>
+              <Preview key={run} component={Shown} />
+            </RouteContext.Provider>
+          )}
         </div>
         <WorkingBeam on={working} />
         {onResize &&
@@ -1172,7 +1176,73 @@ type OpenAnnotation = { id: string; original: Annotation; versions: Map<string, 
 type HotUpdates = { on(event: string, listener: () => void): void; off?(event: string, listener: () => void): void };
 
 // A shared file has no annotations, so its help leaves out annotate mode.
-const HELP_LINES = shared ? labels.helpLines.filter((line) => line !== labels.annotateHelp && line !== labels.saveHelp && line !== labels.editHelp) : labels.helpLines;
+// A shared file has no agent and saves nothing, so it leaves those controls out.
+const HELP_GROUPS = labels.helpGroups
+  .filter((group) => !shared || !group.local)
+  .map((group) => ({ ...group, rows: group.rows.filter((row) => !shared || !row.local) }));
+
+/**
+ * Canvas controls: what the mouse and the keys do, in groups, with the keys as key caps.
+ * It opens on a press of the help button and stays until Escape, a press outside it, or
+ * the button again, so a person can keep it open and try a key. Before, it was a list of
+ * long sentences that showed while the button was hovered, and went when the pointer left.
+ * It is always in the page (hidden while closed), because the canvas names it as its
+ * description for a screen reader.
+ */
+function Help() {
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (event: PointerEvent) => {
+      if (event.target instanceof Node && !wrap.current?.contains(event.target)) setOpen(false);
+    };
+    const key = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("pointerdown", away, true);
+    window.addEventListener("keydown", key, true);
+    return () => {
+      window.removeEventListener("pointerdown", away, true);
+      window.removeEventListener("keydown", key, true);
+    };
+  }, [open]);
+  return (
+    <span className="canvas-help" ref={wrap}>
+      <button
+        type="button"
+        className="canvas-button canvas-icon-button"
+        aria-label={labels.help}
+        aria-expanded={open}
+        aria-controls="canvas-help"
+        aria-pressed={open}
+        data-tip={open ? undefined : labels.help}
+        onClick={() => setOpen((was) => !was)}
+      >
+        <HelpIcon />
+      </button>
+      <div id="canvas-help" role="dialog" aria-label={labels.help} className="canvas-help-popover" hidden={!open}>
+        <div className="canvas-help-title">{labels.help}</div>
+        <div className="canvas-help-groups">
+          {HELP_GROUPS.map((group) => (
+            <section key={group.title} className="canvas-help-group">
+              <h2>{group.title}</h2>
+              <dl>
+                {group.rows.map((row) => (
+                  <div key={row.what} className="canvas-help-row">
+                    <dt>{row.what}</dt>
+                    {/* Words between backticks are keys. */}
+                    <dd>{row.how.split("`").map((part, index) => (index % 2 ? <kbd key={index}>{part}</kbd> : part))}</dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
+          ))}
+        </div>
+      </div>
+    </span>
+  );
+}
 
 const NO_NOTES: CanvasNote[] = [];
 const NO_SECTIONS: CanvasSection[] = [];
@@ -1298,6 +1368,13 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
   const [toast, setToast] = useState<Toast | null>(null);
   const toastTimer = useRef(0);
   const [frontId, setFrontId] = useState<string | null>(null);
+  // The item last touched: where a router call came from, since the call itself does not say.
+  const frontIdRef = useRef(frontId);
+  frontIdRef.current = frontId;
+  // The paths each plain item went through, newest last (routes.ts). An item with no entry,
+  // or an empty one, shows its first screen. A `viewport` item keeps its own, in its frame.
+  const [routes, setRoutes] = useState<Record<string, string[]>>({});
+  const restartRoute = useCallback((id: string) => setRoutes((was) => (was[id]?.length ? { ...was, [id]: [] } : was)), []);
   // Items the saved layout already knows. Anything else is new and gets
   // placed in free space and revealed once it has a measured size.
   const known = useRef<Set<string> | null>(null);
@@ -1344,6 +1421,19 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
   // and then jumped to the saved one, for longer on a slow machine or a large canvas.
   useLayoutEffect(paint, [paint]);
 
+  // Items glide to a place the canvas moved them to by itself (a pick sets the others
+  // aside; Undo brings things back), so the person sees where each one went. Only for
+  // that moment: a drag, a resize, and a hot update set positions too, and must not
+  // trail the pointer or animate on load. The motion itself is in canvas.css ("Motion").
+  const glideTimer = useRef(0);
+  const glide = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    viewport.setAttribute("data-glide", "");
+    window.clearTimeout(glideTimer.current);
+    glideTimer.current = window.setTimeout(() => viewport.removeAttribute("data-glide"), 400);
+  }, []);
+
   const saveTimer = useRef(0);
   const firstQueued = useRef(0);
   const flushSave = useCallback(() => {
@@ -1364,13 +1454,53 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     saveTimer.current = window.setTimeout(flushSave, wait);
   }, [flushSave]);
 
+  // A glide of the camera in progress (flyTo), as its animation frame; 0 when there is none.
+  const flight = useRef(0);
   const setCamera = useCallback(
     (next: Camera) => {
+      // Anything else that sets the camera takes over from a glide.
+      cancelAnimationFrame(flight.current);
+      flight.current = 0;
       camera.current = sanitizeCamera(next);
       render();
       queueSave();
     },
     [render, queueSave],
+  );
+  // Glides the camera to `to` in about a quarter of a second, so the person sees where the
+  // view came from. Used when a link that opens a new tab takes the view to another item: a
+  // jump there would leave them not knowing where the first item went. The person is never
+  // held by it: a press, a wheel turn, or a key stops the glide where it is, and they go on
+  // from there. With reduced motion the camera is set at once.
+  const flyTo = useCallback(
+    (to: Camera) => {
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return setCamera(to);
+      cancelAnimationFrame(flight.current);
+      const from = camera.current;
+      const start = performance.now();
+      const events = ["pointerdown", "wheel", "keydown"] as const;
+      const stop = () => {
+        cancelAnimationFrame(flight.current);
+        flight.current = 0;
+        for (const type of events) window.removeEventListener(type, stop, true);
+        queueSave();
+      };
+      for (const type of events) window.addEventListener(type, stop, true);
+      const step = (now: number) => {
+        const part = Math.min(1, (now - start) / 260);
+        const eased = 1 - (1 - part) ** 3;
+        camera.current = sanitizeCamera({
+          x: from.x + (to.x - from.x) * eased,
+          y: from.y + (to.y - from.y) * eased,
+          z: from.z + (to.z - from.z) * eased,
+        });
+        render();
+        if (part < 1) flight.current = requestAnimationFrame(step);
+        else stop();
+      };
+      flight.current = requestAnimationFrame(step);
+    },
+    [queueSave, render, setCamera],
   );
 
   const setTrash = useCallback(
@@ -1729,6 +1859,18 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     }
     shownBefore.current = annotations;
   }, [annotations]);
+  // Ask agent about a whole item, from the button at its top right: the same note a click on
+  // its name makes in Ask agent mode, with no tool to choose first. A note about the item
+  // that still waits opens again, so two presses do not make two notes.
+  const askItem = useCallback(
+    (item: CanvasItem) => {
+      const waiting = annotationsRef.current.find((a) => a.itemId === item.id && a.ref === item.name && a.w && !a.sent && !a.queued);
+      if (waiting) return openExisting(waiting.id);
+      const preview = worldRef.current?.querySelector<HTMLElement>(`[data-canvas-preview="${CSS.escape(item.id)}"]`);
+      if (preview) startAnnotation(item.id, 0, 0, item.name, { w: preview.offsetWidth, h: preview.offsetHeight });
+    },
+    [openExisting, startAnnotation],
+  );
   const annotationHandlers = useMemo<AnnotationHandlers>(
     () => ({
       onOpen: openExisting,
@@ -2290,6 +2432,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     if (Object.keys(change.positions).length) {
       const next = { ...positionsRef.current };
       for (const [id, place] of Object.entries(change.positions)) next[id] = sanitizePosition(place);
+      glide();
       positionsRef.current = next;
       setPositions(next);
       queueSave();
@@ -3068,9 +3211,14 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
   const fitAllRef = useRef(fitAll);
   fitAllRef.current = fitAll;
 
-  /** Moves the camera only as far as needed to show `targets`, keeping the zoom when they fit. */
+  /**
+   * Moves the camera only as far as needed to show `targets`, keeping the zoom when they fit.
+   * With `centre`, the targets go to the middle of the view also when they were in view
+   * already: for a link that opens a new tab, where the person's attention moves to the new
+   * item as it would to the new tab.
+   */
   const reveal = useCallback(
-    (targets: CanvasItem[]) => {
+    (targets: CanvasItem[], centre = false) => {
       const viewport = viewportRef.current;
       const bounds = boundsOf(targets);
       if (!viewport || !bounds) return;
@@ -3088,7 +3236,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
         bounds.minY * z + y >= top &&
         bounds.maxX * z + x <= w - m &&
         bounds.maxY * z + y <= h - bottom;
-      if (visible) return;
+      if (visible && !centre) return;
       // Zoom out only as far as the targets need; never zoom in.
       const next = clampZoom(
         Math.min(
@@ -3097,13 +3245,13 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
           (h - top - bottom) / Math.max(1, bounds.maxY - bounds.minY),
         ),
       );
-      setCamera({
+      (centre ? flyTo : setCamera)({
         x: w / 2 - ((bounds.minX + bounds.maxX) / 2) * next,
         y: (top + h - bottom) / 2 - ((bounds.minY + bounds.maxY) / 2) * next,
         z: next,
       });
     },
-    [boundsOf, setCamera],
+    [boundsOf, flyTo, setCamera],
   );
 
   /**
@@ -3527,6 +3675,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       const saving = Object.fromEntries(movedIds.map((id) => [id, { ...placed[id]!, state: "saving" as const }]));
       moveStatesRef.current = { ...moveStatesRef.current, ...saving };
       setMoveStates((prev) => ({ ...prev, ...saving }));
+      glide();
       positionsRef.current = { ...positionsRef.current, ...placed };
       setPositions(positionsRef.current);
       queueSave();
@@ -3641,9 +3790,29 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     if (!trashedItems.length) setTrashOpen(false);
   }, [trashedItems.length]);
 
-  /** Canvas-item links (`#<id>`) reveal their item; anything else stays on the canvas. */
+  // The item a link led to shows a ring for a moment. When that item is already in view the
+  // camera does not move, and without this nothing on the canvas would say where the link went.
+  // Set on the element itself: it is over in a second, and no state needs to follow it.
+  const arrive = useCallback((id: string) => {
+    const element = worldRef.current?.querySelector<HTMLElement>(`[data-canvas-item="${CSS.escape(id)}"]`);
+    if (!element) return;
+    element.removeAttribute("data-arrived");
+    // Read once, so a second arrival starts the ring again.
+    void element.offsetWidth;
+    element.setAttribute("data-arrived", "");
+    window.setTimeout(() => element.removeAttribute("data-arrived"), 1000);
+  }, []);
+
+  /**
+   * Where a link or a router call goes (routes.ts). `#<id>` reveals that item. A path stays
+   * in the item it came from: one of that item's screens shows in place, and any other path
+   * shows a notice. Only a link that opens a new tab in the product (`blank`) leaves the
+   * item: the view goes to the nearest other item that shows the path.
+   * `fromId` is the item the link was in; a router call does not say, so the item last
+   * touched stands for it.
+   */
   const followLink = useCallback(
-    (href: string) => {
+    (href: string, fromId?: string, blank = false) => {
       if (href.startsWith("#")) {
         const target = shown.find((item) => item.id === decodeURIComponent(href.slice(1)));
         if (target) {
@@ -3660,9 +3829,44 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       }
       const here = window.location;
       if (url.origin === here.origin && url.pathname === here.pathname && url.search === here.search) return;
-      notify(labels.linkBlocked(url.origin === here.origin ? `${url.pathname}${url.search}` : url.href));
+      const named = url.origin === here.origin ? `${url.pathname}${url.search}` : url.href;
+      const path = pathOf(href);
+      const from = shown.find((item) => item.id === (fromId ?? frontIdRef.current));
+      if (!path) return notify(blank ? labels.newTabBlocked(named) : labels.linkBlocked(named));
+      // An item at its first screen that is sent to its first screen has gone nowhere:
+      // nothing is noted, so it does not offer Restart for it.
+      const push = (item: CanvasItem) =>
+        setRoutes((was) => {
+          const stack = was[item.id] ?? [];
+          if (stack[stack.length - 1] === path || (!stack.length && screenAt(item, path) === item.component)) return was;
+          return { ...was, [item.id]: [...stack, path] };
+        });
+      if (!blank) {
+        // The same tab: a screen of this item, in place. A frame shows its own screens itself,
+        // so a path that reaches here from one is not its own.
+        if (from && !from.viewport && screenAt(from, path)) return push(from);
+        return notify(from && (from.path || from.screens) ? labels.screenMissing(named) : labels.linkBlocked(named));
+      }
+      // A new tab: another item that shows the path, the nearest one, since several versions
+      // of a flow can each show the same path, and the one meant is the one beside the link.
+      const centre = (item: CanvasItem) => {
+        const at = positionsRef.current[item.id] ?? item;
+        return { x: at.x + item.width / 2, y: at.y + item.height / 2 };
+      };
+      const origin = from && centre(from);
+      const away = (item: CanvasItem) => (origin ? Math.hypot(centre(item).x - origin.x, centre(item).y - origin.y) : 0);
+      const target = shown.filter((item) => item.id !== from?.id && screenAt(item, path)).sort((a, b) => away(a) - away(b))[0];
+      if (!target) return notify(labels.newTabBlocked(named));
+      setFrontId(target.id);
+      reveal([target], true);
+      arrive(target.id);
+      // Noted for a frame too, though the frame shows its screens itself: it is how the item knows to offer Restart.
+      push(target);
+      if (!target.viewport) return;
+      const frame = worldRef.current?.querySelector<HTMLIFrameElement>(`iframe[data-canvas-frame="${CSS.escape(target.id)}"]`);
+      if (frame?.contentWindow) postToFrame(frame.contentWindow, { type: "screen", path });
     },
-    [notify, reveal, shown],
+    [arrive, notify, reveal, shown],
   );
 
   const resetCamera = useCallback(() => setCamera(DEFAULT_CAMERA), [setCamera]);
@@ -4174,7 +4378,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     };
     // In annotate mode an item's title (its name or grip, not its actions) stands for the whole item.
     const headItem = (target: EventTarget | null) => {
-      if (!(target instanceof Element) || target.closest(".canvas-item-action")) return null;
+      if (!(target instanceof Element) || target.closest(".canvas-item-actions")) return null;
       const element = target.closest(".canvas-item-head")?.closest<HTMLElement>(".canvas-item");
       const item = element && items.find((entry) => entry.id === element.dataset.canvasItem);
       const preview = element?.querySelector<HTMLElement>("[data-canvas-preview]");
@@ -4559,7 +4763,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       } else if (message.type === "escape") {
         if (annotatingRef.current) setAnnotateMode(false);
       } else if (message.type === "link") {
-        followLink(message.href);
+        followLink(message.href, item.id, message.blank);
       } else {
         notify(labels.formBlocked);
       }
@@ -4573,12 +4777,18 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       const anchor = previewLink(event);
       if (!anchor) return;
       event.preventDefault();
-      if (!clickSuppressed.current) followLink(anchor.getAttribute("href") ?? "");
+      if (!clickSuppressed.current)
+        followLink(anchor.getAttribute("href") ?? "", anchor.closest<HTMLElement>("[data-canvas-item]")?.dataset.canvasItem, opensNewTab(anchor));
     };
     // Router mocks report programmatic navigation the same way.
     const onNavigate = (event: Event) => {
       const href = (event as CustomEvent<unknown>).detail;
       if (typeof href === "string") followLink(href);
+    };
+    // A router's back(): the item last touched goes to the screen it showed before.
+    const onBack = () => {
+      const id = frontIdRef.current;
+      if (id) setRoutes((was) => (was[id]?.length ? { ...was, [id]: was[id]!.slice(0, -1) } : was));
     };
     // Bubble phase: a preview that handles its own submit has already cancelled it.
     const onSubmit = (event: SubmitEvent) => {
@@ -4619,6 +4829,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     window.addEventListener("pagehide", onPageHide);
     window.addEventListener("message", onMessage);
     window.addEventListener(NAVIGATE_EVENT, onNavigate);
+    window.addEventListener(BACK_EVENT, onBack);
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
       viewport.removeEventListener("pointerdown", onPointerDown, { capture: true });
@@ -4646,6 +4857,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       window.removeEventListener("pagehide", onPageHide);
       window.removeEventListener("message", onMessage);
       window.removeEventListener(NAVIGATE_EVENT, onNavigate);
+      window.removeEventListener(BACK_EVENT, onBack);
       document.removeEventListener("visibilitychange", onVisibility);
       html.style.overscrollBehaviorX = previous.html;
       document.body.style.overscrollBehaviorX = previous.body;
@@ -4678,7 +4890,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
   const onTitlePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLElement>, item: CanvasItem) => {
       const target = event.target as Element;
-      if (event.button !== 0 || gesture.current || target.closest(".canvas-item-action, .canvas-item-tag, input")) return;
+      if (event.button !== 0 || gesture.current || target.closest(".canvas-item-actions, .canvas-item-tag, input")) return;
       // Stops text selection while dragging; the click still fires.
       event.preventDefault();
       const pointerId = event.pointerId;
@@ -4820,7 +5032,6 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
               onTitlePointerDown={onTitlePointerDown}
               onHandleKey={onHandleKey}
               onResize={!shared && !annotating ? onResizeItem : undefined}
-              announce={announce}
               pins={visibleAnnotations.flatMap((annotation) =>
                 annotation.itemId === item.id
                   ? [{ annotation, number: annotation.sent || annotation.queued ? undefined : pending.indexOf(annotation) + 1 }]
@@ -4829,6 +5040,9 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
               openAnnotation={openAnnotation?.id ?? null}
               annotationHandlers={annotationHandlers}
               onTrash={moveToTrash}
+              onAsk={shared ? undefined : askItem}
+              route={routes[item.id]?.[routes[item.id]!.length - 1]}
+              onRestart={restartRoute}
               onPickVersion={!shared && !annotating && !setAsideIds.has(item.id) ? pickVersion : undefined}
               picked={picks[item.id] ?? !!item.picked}
               move={(() => {
@@ -5102,22 +5316,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
             <span className="canvas-separator" aria-hidden="true" />
           </>
         )}
-        {/* Instructions stay one hover or focus away instead of filling the toolbar. */}
-        <span className="canvas-help">
-          <button
-            type="button"
-            className="canvas-button canvas-icon-button"
-            aria-label={labels.help}
-            aria-describedby="canvas-help"
-          >
-            <HelpIcon />
-          </button>
-          <span id="canvas-help" role="tooltip" className="canvas-help-popover">
-            {HELP_LINES.map((line) => (
-              <span key={line}>{line}</span>
-            ))}
-          </span>
-        </span>
+        <Help />
       </div>
       {/* Only while something is still to apply: the one place to apply or drop every change, so it is hard to miss.
           What the agent is working on says so with a tag on each object instead. */}

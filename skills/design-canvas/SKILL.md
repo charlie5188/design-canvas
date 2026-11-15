@@ -5,7 +5,7 @@ description: Build or update a local design canvas of live, real product compone
 
 # Design canvas
 
-A freeform canvas of live previews: the app's real components, synthetic data, no backend. People pan, zoom, drag items by their name or grip, drag an item's border to resize it like an OS window (the new width and height are saved into `registry.tsx`), click a name to copy it, open an item alone in a new tab, move items to the trash and put them back, pick the version they choose (which sets the versions beside it aside), switch the app's themes, Alt/Option-click any element to copy a reference for the conversation, send you requests and questions straight from the canvas and read your answers beside their pins, add notes and sections that explain the canvas to whoever you share it with, and download the canvas as one HTML file to share. You change content in source files. The canvas shell is already built and tested, so never rebuild it.
+A freeform canvas of live previews: the app's real components, synthetic data, no backend. People pan, zoom, drag items by their name or grip, drag an item's border to resize it like an OS window (the new width and height are saved into `registry.tsx`), restart an item they have used, open an item alone in a new tab, move items to the trash and put them back, pick the version they choose (which sets the versions beside it aside), switch the app's themes, Alt/Option-click any element to copy a reference for the conversation, send you requests and questions straight from the canvas and read your answers beside their pins, add notes and sections that explain the canvas to whoever you share it with, and download the canvas as one HTML file to share. You change content in source files. The canvas shell is already built and tested, so never rebuild it.
 
 Rules adapted from `create-canvas` in ibelick/ui-skills (MIT).
 
@@ -102,7 +102,28 @@ Write each entry out by hand, in `registry`, `notes`, and `sections` alike. Its 
 - When comparing one feature, keep data, content, size, and theme the same across items. For broader alternatives, name the layout differences. No full variant matrix unless asked.
 - Add the states that matter for the decision, such as empty, long content, or error, as separate items when they are relevant.
 - Give a new item a source position in empty space near related ones. If that spot overlaps the user's saved layout, the canvas moves only the new item to free space beside its row; existing items never move. That move is a change to apply too, so a new item whose source position overlaps shows a "Not applied yet" tag until you set its position in the registry: choose a free spot.
-- Previews never navigate the canvas away. Links, native form submits, and mocked router calls are cancelled with a short notice, while the component's own handlers still run. A link to `#<item-id>` reveals that item, so use it for flows that span items.
+- Previews never navigate the canvas away. A link or a mocked router call to one of the item's own screens shows that screen in place (see "Flows and paths"); any other, and a native form submit, is cancelled with a short notice, while the component's own handlers still run. A link to `#<item-id>` reveals that item.
+
+### Flows and paths
+
+A product's screens point at each other by path: `<Link href="/checkout">`, `router.push("/done")`. Keep those links as they are in the real code. Do not rewrite them into state, and do not change them to `#<item-id>`. Tell the canvas which paths an item shows instead:
+
+```tsx
+// One frame holds the whole flow: a link inside it to one of its screens shows that screen in place.
+{ id: "upgrade-a", name: "Upgrade · stacked", component: Plans, path: "/plans",
+  screens: { "/checkout": Checkout, "/orders/[id]": Order, "/done": Done }, x: 0, y: 0, width: 420, height: 560 },
+
+// A screen of its own. Only a link that opens a new tab in the product (target="_blank") brings the view here.
+{ id: "help", name: "Help", component: Help, path: "/help", x: 520, y: 0, width: 420, height: 560 },
+```
+
+- An item stands for a browser tab. `path` is the path of the item's own `component`. `screens` adds more screens to the same item, by path. `[id]` or `:id` stands for any one segment.
+- A link or a router call stays in the item it is in, as a click in the product stays in its tab: a path that is one of the item's screens shows in place, and any other path shows a notice. It never moves the view to another item. So put every screen that the core flow reaches into the item's `screens`.
+- Only a link that opens a new tab in the product (`target="_blank"`) leaves the item: the view jumps to the nearest other item that shows that path and centres it, and the first item stays as it is. Place such an item beside the flow it belongs to.
+- One item is one solution: put a solution's whole flow in one item, and put the versions side by side, so the person tries each as a user would. To let them see every step at once, or comment on one step, add each screen as an item of its own as well; those are for looking, and a click in one does not lead to the next.
+- The person returns a flow to its start with Restart, beside the item's name. Nothing about the screen shown is saved: a reload starts every item at its first screen.
+- A router's `back()` returns to the screen before. `usePathname()` gives the path of the screen shown. Only `next/navigation` has a stand-in in the built-in kit; for another router, make its stand-in dispatch `NAVIGATE_EVENT` and `BACK_EVENT` from `canvas/bridge` and read `RouteContext` from `canvas/routes`, as `mocks/next-navigation.ts` does.
+- Not handled: query strings and hashes (the path alone decides), `useParams()` (it is empty), `window.open`, and a path only the server knows, such as a redirect.
 
 ### Planned directions
 

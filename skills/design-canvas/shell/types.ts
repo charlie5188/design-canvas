@@ -19,6 +19,23 @@ export type CanvasItem = {
    */
   viewport?: boolean;
   /**
+   * The path this item shows, as the app's own links name it, for example
+   * "/checkout". It is the path of `component`, for a router stand-in's
+   * `usePathname`, and where a link that opens a new tab in the product
+   * (`target="_blank"`) to this path brings the view. `[id]` or `:id` stands for
+   * any one segment: "/orders/[id]".
+   */
+  path?: string;
+  /**
+   * More screens in this item, by path: a whole flow in one frame. `component`
+   * is the first one (at `path`); a link or a router call inside the item to one
+   * of these paths shows that screen in place, as a click in the product stays
+   * in its tab, and Restart returns to the first. A path the item does not have
+   * shows a notice: a click never moves the view to another item.
+   * `{ "/checkout": Checkout, "/done": Done }`
+   */
+  screens?: Record<string, ComponentType>;
+  /**
    * The id of the item this one is a new version of. The canvas places it
    * beside that item, and its arrival clears that item's sent "new version"
    * annotations.

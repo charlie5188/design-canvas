@@ -1,5 +1,6 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
-import { frameParams, frameSource, fromThisCanvas, NAVIGATE_EVENT, postToCanvas, readCanvasMessage } from "./bridge";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { BACK_EVENT, frameParams, frameSource, fromThisCanvas, NAVIGATE_EVENT, postToCanvas, readCanvasMessage } from "./bridge";
+import { opensNewTab, pathOf, RouteContext, screenAt } from "./routes";
 import {
   clearPending,
   describeArea,
@@ -46,6 +47,10 @@ export function FrameHost({
   // Only a frame inside the canvas hands its gestures to the parent page.
   const inCanvas = context === "canvas" && window.parent !== window;
   const rootRef = useRef<HTMLDivElement>(null);
+  // The screens this frame went through, newest last; empty at the item's first screen (routes.ts).
+  const [stack, setStack] = useState<string[]>([]);
+  const itemRef = useRef(item);
+  itemRef.current = item;
   const pickRef = useRef<HTMLDivElement>(null);
   const drawRef = useRef<HTMLDivElement>(null);
 
@@ -286,6 +291,7 @@ export function FrameHost({
       const message = readCanvasMessage(event.data);
       if (message?.type === "text-edit-end") textEdit?.finish(true);
       if (message?.type === "text-revert") clearPending(message.id);
+      if (message?.type === "screen") inside(message.path);
       if (message?.type !== "annotate-mode") return;
       if (!message.on) textEdit?.finish(false);
       annotating = message.on;
@@ -294,15 +300,28 @@ export function FrameHost({
       else hidePick();
     };
 
-    // Navigation never leaves the frame; the canvas reveals or reports it.
+    // Navigation never leaves the frame, as a click in the product stays in its tab. A path
+    // that is one of this item's own screens is shown here, in place. Anything else goes to
+    // the canvas to report. A link that opens a new tab in the product is never shown here:
+    // the canvas takes the view to another item that shows it (routes.ts).
+    const inside = (href: string) => {
+      const path = pathOf(href);
+      const current = itemRef.current;
+      if (!path || !current || !screenAt(current, path)) return false;
+      setStack((was) => (was[was.length - 1] === path ? was : [...was, path]));
+      return true;
+    };
     const onLinkClick = (event: MouseEvent) => {
       // A click in annotate mode places an annotation; the pick handler cancels it.
       if (annotating) return;
       const anchor = previewLink(event);
       if (!anchor) return;
       event.preventDefault();
-      postToCanvas({ type: "link", href: anchor.getAttribute("href") ?? "" });
+      const href = anchor.getAttribute("href") ?? "";
+      if (opensNewTab(anchor)) postToCanvas({ type: "link", href, blank: true });
+      else if (!inside(href)) postToCanvas({ type: "link", href });
     };
+    const onBack = () => setStack((was) => was.slice(0, -1));
     const onSubmit = (event: SubmitEvent) => {
       if (event.defaultPrevented) return;
       event.preventDefault();
@@ -310,11 +329,12 @@ export function FrameHost({
     };
     const onNavigate = (event: Event) => {
       const href = (event as CustomEvent<unknown>).detail;
-      if (typeof href === "string") postToCanvas({ type: "link", href });
+      if (typeof href === "string" && !inside(href)) postToCanvas({ type: "link", href });
     };
 
     window.addEventListener("wheel", onWheel, { passive: false });
     window.addEventListener(NAVIGATE_EVENT, onNavigate);
+    window.addEventListener(BACK_EVENT, onBack);
     window.addEventListener("click", onLinkClick, { capture: true });
     window.addEventListener("submit", onSubmit);
     window.addEventListener("keydown", onKeyDown);
@@ -334,6 +354,7 @@ export function FrameHost({
       window.removeEventListener("message", onCanvasMessage);
       window.removeEventListener("wheel", onWheel);
       window.removeEventListener(NAVIGATE_EVENT, onNavigate);
+      window.removeEventListener(BACK_EVENT, onBack);
       window.removeEventListener("click", onLinkClick, { capture: true });
       window.removeEventListener("submit", onSubmit);
       window.removeEventListener("keydown", onKeyDown);
@@ -368,10 +389,13 @@ export function FrameHost({
     );
   }
 
-  const Component = item.component;
+  const route = stack[stack.length - 1];
+  const Component = (route && screenAt(item, route)) || item.component;
   const body = (
     <div ref={rootRef} className="canvas-frame-root" style={{ inlineSize: item.width, blockSize: item.height }}>
-      <Component />
+      <RouteContext.Provider value={route ?? item.path ?? null}>
+        <Component />
+      </RouteContext.Provider>
     </div>
   );
   if (!context) return <div className="canvas-frame-page">{body}</div>;

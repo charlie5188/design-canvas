@@ -8,6 +8,7 @@
 
 import { type KeyboardEvent, type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
 import { type BoardKind, type BoardMark, NOTE_WIDTH } from "./marks";
+import { Icon } from "./icons";
 import { labels } from "./labels";
 import type { CanvasNote, CanvasSection } from "./types";
 
@@ -42,10 +43,7 @@ export function DiscardButton({ onClick, keepFocus = false }: { onClick: () => v
       onPointerDown={keepFocus ? (event) => event.preventDefault() : undefined}
       onClick={onClick}
     >
-      <svg viewBox="0 0 14 14" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M5 3 2.5 5.5 5 8" />
-        <path d="M2.5 5.5H8a3.5 3.5 0 0 1 0 7H5" />
-      </svg>
+      <Icon name="arrow-back-up" size={12} />
     </button>
   );
 }
@@ -70,9 +68,7 @@ function onKey(event: KeyboardEvent<HTMLElement>, ref: BoardRef, handlers: Board
 /** The same grip an item's name has, so a section's tab reads as something to pull. */
 function Grip() {
   return (
-    <svg className="canvas-section-grip" viewBox="0 0 10 14" width="8" height="12" aria-hidden="true">
-      {[2, 8].flatMap((x) => [2, 7, 12].map((y) => <circle key={`${x}-${y}`} cx={x} cy={y} r="1.1" fill="currentColor" />))}
-    </svg>
+    <Icon name="grip-vertical" size={12} className="canvas-section-grip" />
   );
 }
 

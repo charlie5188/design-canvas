@@ -90,8 +90,8 @@ export type FrameMessage =
   /** Z pressed or released inside the frame: the canvas's Figma-style zoom. `out`: Alt was down too. */
   | { type: "zoom-key"; down: boolean; out: boolean }
   | { type: "pick"; label: string }
-  /** A link the frame blocked; the canvas reveals or reports it. */
-  | { type: "link"; href: string }
+  /** A link the frame did not show itself; the canvas reveals or reports it. `blank`: it opens a new tab in the product. */
+  | { type: "link"; href: string; blank?: boolean }
   /** A form submit the frame blocked. */
   | { type: "form" }
   /** In annotate mode: the element clicked, at (x, y) in the frame. */
@@ -132,7 +132,7 @@ export function readFrameMessage(data: unknown): FrameMessage | undefined {
     return { type: "pick", label: m.label };
   }
   if (m.type === "link" && typeof m.href === "string" && m.href.length <= MAX_HREF) {
-    return { type: "link", href: m.href };
+    return { type: "link", href: m.href, ...(m.blank === true ? { blank: true } : {}) };
   }
   if (m.type === "form") return { type: "form" };
   if (m.type === "annotate" && typeof m.label === "string" && m.label.length <= MAX_LABEL && finite(m.x) && finite(m.y)) {
@@ -184,6 +184,7 @@ export function readFrameMessage(data: unknown): FrameMessage | undefined {
 // Messages from the canvas page to its item frames.
 
 const MAX_THEME = 64;
+const MAX_PATH = 512;
 
 export type CanvasMessage =
   | { type: "theme"; id: string }
@@ -192,7 +193,9 @@ export type CanvasMessage =
   /** A press outside the frame ends its text edit and keeps it. */
   | { type: "text-edit-end" }
   /** The annotation went (deleted, discarded, or applied): the frame shows the text's own words again. */
-  | { type: "text-revert"; id: string };
+  | { type: "text-revert"; id: string }
+  /** A link in another item names one of this frame's screens: show it (routes.ts). */
+  | { type: "screen"; path: string };
 
 export function postToFrame(frame: Window, message: CanvasMessage) {
   frame.postMessage({ source: SOURCE, ...message }, messageTarget);
@@ -205,11 +208,14 @@ export function readCanvasMessage(data: unknown): CanvasMessage | undefined {
   if (m.type === "annotate-mode" && typeof m.on === "boolean") return { type: "annotate-mode", on: m.on };
   if (m.type === "text-edit-end") return { type: "text-edit-end" };
   if (m.type === "text-revert" && typeof m.id === "string" && ANNOTATION_ID.test(m.id)) return { type: "text-revert", id: m.id };
+  if (m.type === "screen" && typeof m.path === "string" && m.path.startsWith("/") && m.path.length <= MAX_PATH) return { type: "screen", path: m.path };
   return undefined;
 }
 
 /** Mocked app routers dispatch this so a programmatic navigation also stays on the canvas. */
 export const NAVIGATE_EVENT = "design-canvas:navigate";
+/** A mocked router's `back()`: the item goes to the screen it showed before (routes.ts). */
+export const BACK_EVENT = "design-canvas:back";
 
 /**
  * A planned card's own buttons (Planned.tsx) dispatch this from inside their
