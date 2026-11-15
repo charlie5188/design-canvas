@@ -1151,6 +1151,37 @@ test('the zoom buttons and keys step between fixed levels', async ({ page }) => 
   expect(errors).toEqual([])
 })
 
+test('after a reload the canvas is at its saved view from the first frame', async ({ page }) => {
+  const errors = collectErrors(page)
+  // Where the world is in the first frame that has an item in it.
+  await page.addInitScript(() => {
+    const seen = new MutationObserver(() => {
+      const world = document.querySelector('.canvas-world')
+      if (!world?.querySelector('.canvas-item')) return
+      seen.disconnect()
+      requestAnimationFrame(() => {
+        ;(window as unknown as { __firstFrame: string }).__firstFrame = getComputedStyle(world).transform
+      })
+    })
+    seen.observe(document, { childList: true, subtree: true })
+  })
+  await page.goto('/')
+  await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toBeVisible()
+  await page.waitForTimeout(600)
+  // A view that is not the default one.
+  await page.getByRole('button', { name: 'Reset view (actual size)' }).click()
+  await page.getByRole('button', { name: 'Zoom in' }).click()
+  await expect(page.locator('.canvas-zoom')).toHaveText('200%')
+  const saved = await page.locator('.canvas-world').evaluate((world) => getComputedStyle(world).transform)
+  expect(saved).toMatch(/^matrix\(2, /)
+  await page.reload()
+  await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toBeVisible()
+  // Not the default view first and the saved one a frame later: that showed as a jump.
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __firstFrame?: string }).__firstFrame)).toBe(saved)
+  await expect(page.locator('.canvas-zoom')).toHaveText('200%')
+  expect(errors).toEqual([])
+})
+
 // A section around the example item, for the tests below. Waits for the page to take it.
 async function withSection(page: Page, original: string) {
   const sectioned = original.replace(
@@ -1746,10 +1777,12 @@ test('a pin stays on its element when its item is resized, in a frame too', asyn
       await expect.poll(async () => (await place(id)).width, { message: id, timeout: 15_000 }).toBeGreaterThan(before.width + 50)
       await expect.poll(async () => Math.abs((await place(id)).share - before.share), { message: id }).toBeLessThan(0.03)
     }
-    // The new places are kept.
+    // The new places are kept. place() reads the text and then the pin, so it is asked until the
+    // page is still: one read during the reload once caught the text before the camera was applied
+    // and the pin after it, on GitHub's slower runner.
     await page.reload()
     await expect(texts.phone).toBeVisible()
-    for (const id of ids) expect(Math.abs((await place(id)).share - 0.8), id).toBeLessThan(0.03)
+    for (const id of ids) await expect.poll(async () => Math.abs((await place(id)).share - 0.8), { message: id }).toBeLessThan(0.03)
     expect(errors).toEqual([])
   } finally {
     await restoreRegistry(page, original)
