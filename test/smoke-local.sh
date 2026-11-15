@@ -2,24 +2,16 @@
 # Runs the smoke job's steps (.github/workflows/smoke.yml) on this machine: install
 # the canvas, update an older one, typecheck, build, and load it in a browser.
 #
-# When everything passes on a clean commit that is pushed, it marks that commit
-# "local-smoke" on GitHub. That is the check `main` requires, so the pull request can
-# merge, or auto-merge, without waiting for GitHub's runner. GitHub's own smoke job
-# still runs and shows its result, but it does not block.
+# Use it to find a failure before pushing. It is not a merge check: `main` requires
+# GitHub's own smoke job, which runs on a slower machine and has caught timing
+# problems that passed here. It used to mark the commit "local-smoke" on GitHub,
+# and that was the merge check, until a pass here was followed by a failure there.
 #
-# Usage: test/smoke-local.sh [--no-status]    (--no-status runs the checks and marks nothing)
+# Usage: test/smoke-local.sh
 set -euo pipefail
 
-mark=1
-[[ "${1:-}" == "--no-status" ]] && mark=0
 root="$(git rev-parse --show-toplevel)"
 step() { printf '\n== %s\n' "$1"; }
-
-# The mark says "this commit passed", so what ran must be this commit and nothing else.
-if [[ $mark == 1 && -n "$(git -C "$root" status --porcelain)" ]]; then
-  echo "There are uncommitted changes, so a pass would not describe the commit. Commit them, or run with --no-status." >&2
-  exit 1
-fi
 
 cd "$root/test/fixture-app"
 # What an earlier run left behind (all of it ignored by git).
@@ -57,12 +49,3 @@ npx playwright test
 
 echo
 echo "All smoke steps passed."
-if [[ $mark == 0 ]]; then exit 0; fi
-
-sha="$(git -C "$root" rev-parse HEAD)"
-if [[ -z "$(git -C "$root" branch -r --contains "$sha")" ]]; then
-  echo "Passed, but ${sha:0:7} is not pushed yet. Push it, then run this again to mark it." >&2
-  exit 1
-fi
-gh api -X POST "repos/{owner}/{repo}/statuses/$sha" -f state=success -f context=local-smoke -f description="Passed on this machine" > /dev/null
-echo "Marked ${sha:0:7} as local-smoke."

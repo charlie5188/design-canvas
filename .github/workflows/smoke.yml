@@ -3,12 +3,12 @@
 # checks in skills/design-canvas/shell/TESTING.md stay manual.
 name: Smoke test
 
-# Docs and the license cannot change what installs, builds, or loads, so a change
-# that touches only them skips the run. If this check is ever made required for
-# merging, skip inside the job instead: a required check that never starts blocks the PR.
+# This check is required for merging into main. Docs and the license cannot change
+# what installs, builds, or loads, so a pull request that touches only them passes at
+# once. It skips inside the job, not with `paths-ignore`: a required check that never
+# starts blocks the pull request.
 on:
   pull_request:
-    paths-ignore: ['**.md', LICENSE]
   push:
     branches: [main]
     paths-ignore: ['**.md', LICENSE]
@@ -26,17 +26,36 @@ jobs:
         working-directory: test/fixture-app
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Find what the pull request changes
+        id: changes
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if git diff --name-only "$BASE...$HEAD" | grep -qvE '\.md$|^LICENSE$'; then
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Only docs or the license changed; nothing to install, build, or load."
+            echo "docs_only=true" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/setup-node@v7
+        if: steps.changes.outputs.docs_only != 'true'
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: test/fixture-app/package-lock.json
-      - run: npm ci
+      - if: steps.changes.outputs.docs_only != 'true'
+        run: npm ci
       - name: Install the canvas
+        if: steps.changes.outputs.docs_only != 'true'
         run: |
           bash ../../skills/design-canvas/scripts/install.sh react-vite smoke "Smoke" | tee install.log
           echo "CANVAS_URL=$(grep -o 'http://127.0.0.1:[0-9]*/' install.log)" >> "$GITHUB_ENV"
       - name: Update an older canvas
+        if: steps.changes.outputs.docs_only != 'true'
         # Makes the canvas look like one installed before later shell changes:
         # a missing file, an edited file, and a file the shell no longer has.
         # The update must restore the shell exactly, and a second run must find nothing to do.
@@ -49,10 +68,14 @@ jobs:
           diff -r -x TESTING.md -x VERSION ../../skills/design-canvas/shell "$canvas"
           bash ../../skills/design-canvas/scripts/update.sh design-canvas/smoke | grep -q 'already up to date'
       - name: Typecheck the canvas
+        if: steps.changes.outputs.docs_only != 'true'
         run: npx tsc --noEmit -p design-canvas/smoke/tsconfig.json
       - name: Build the canvas
+        if: steps.changes.outputs.docs_only != 'true'
         run: npx vite build --config design-canvas/smoke/vite.config.mts
       - name: Install Chromium
+        if: steps.changes.outputs.docs_only != 'true'
         run: npx playwright install --only-shell chromium
       - name: Load the canvas in a browser
+        if: steps.changes.outputs.docs_only != 'true'
         run: npx playwright test
