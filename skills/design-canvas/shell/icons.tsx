@@ -37,6 +37,13 @@ const SHAPES = {
       <path d="M5 10h11a4 4 0 1 1 0 8h-1" />
     </>
   ),
+  "arrow-left": (
+    <>
+      <path d="M5 12l14 0" />
+      <path d="M5 12l6 6" />
+      <path d="M5 12l6 -6" />
+    </>
+  ),
   "arrow-up": (
     <>
       <path d="M12 5l0 14" />
@@ -142,6 +149,20 @@ const SHAPES = {
       <path d="M8 9h-1a2 2 0 0 0 -2 2v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-8a2 2 0 0 0 -2 -2h-1" />
       <path d="M12 14v-11" />
       <path d="M9 6l3 -3l3 3" />
+    </>
+  ),
+  route: (
+    <>
+      <path d="M3 19a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" />
+      <path d="M19 7a2 2 0 1 0 0 -4a2 2 0 0 0 0 4z" />
+      <path d="M11 19h5.5a3.5 3.5 0 0 0 0 -7h-8a3.5 3.5 0 0 1 0 -7h4.5" />
+    </>
+  ),
+  "stack-2": (
+    <>
+      <path d="M12 4l-8 4l8 4l8 -4l-8 -4" />
+      <path d="M4 12l8 4l8 -4" />
+      <path d="M4 16l8 4l8 -4" />
     </>
   ),
   sun: (

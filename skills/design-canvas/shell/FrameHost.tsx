@@ -48,7 +48,11 @@ export function FrameHost({
   const inCanvas = context === "canvas" && window.parent !== window;
   const rootRef = useRef<HTMLDivElement>(null);
   // The screens this frame went through, newest last; empty at the item's first screen (routes.ts).
-  const [stack, setStack] = useState<string[]>([]);
+  // The flow view opens a frame at one of its screens.
+  const [stack, setStack] = useState<string[]>(() => {
+    const start = params.get("screen");
+    return start && item && screenAt(item, start) && screenAt(item, start) !== item.component ? [start] : [];
+  });
   const itemRef = useRef(item);
   itemRef.current = item;
   const pickRef = useRef<HTMLDivElement>(null);
@@ -390,7 +394,9 @@ export function FrameHost({
   }
 
   const route = stack[stack.length - 1];
-  const Component = (route && screenAt(item, route)) || item.component;
+  // The flow view shows one state of a screen in a frame of its own (types.ts `states`).
+  const state = params.get("state");
+  const Component = (state && item.states?.[route ?? item.path ?? ""]?.[state]) || (route && screenAt(item, route)) || item.component;
   const body = (
     <div ref={rootRef} className="canvas-frame-root" style={{ inlineSize: item.width, blockSize: item.height }}>
       <RouteContext.Provider value={route ?? item.path ?? null}>
