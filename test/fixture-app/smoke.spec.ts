@@ -142,6 +142,70 @@ test('a planned direction shows as a card with a sketch, and its own buttons bui
   }
 })
 
+test("a planned card's sketch draws shapes people recognize, marks the key change once, and keeps a small screen's width", async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  const withPlan = original
+    .replace('import { Example }', 'import { Block, planned } from "./canvas/Planned";\nimport { Example }')
+    .replace(
+      'export const registry: CanvasItem[] = [',
+      `export const registry: CanvasItem[] = [
+  {
+    id: "one-page",
+    name: "Upgrade · pay on the plan page",
+    component: planned({
+      bet: "Pay on the plan page, so there is one step less.",
+      sketch: (
+        <Block>
+          <Block kind="heading" label="Upgrade" />
+          <Block row>
+            <Block size="45%">
+              <Block kind="toggle" options={["Monthly", "Yearly"]} selected={1} />
+              <Block kind="choice" label="Team" checked />
+              <Block kind="list" options={["Shared spaces", "Roles"]} />
+            </Block>
+            <Block label="Payment" emphasis>
+              <Block emphasis>
+                <Block kind="field" label="Card number" />
+              </Block>
+              <Block kind="table" options={["Plan", "Price"]} rows={1} />
+              <Block kind="media" label="Chart" size={40} />
+              <Block kind="button" primary label="Pay $60" />
+            </Block>
+          </Block>
+        </Block>
+      ),
+    }),
+    x: 420,
+    y: 0,
+    width: 960,
+    height: 560,
+  },`,
+    )
+  try {
+    const errors = collectErrors(page)
+    writeFileSync(REGISTRY, withPlan)
+    await servesId(page, 'one-page')
+    await page.goto('/frame.html?item=one-page')
+    const sketch = page.locator('[data-canvas-sketch]')
+    for (const words of ['Upgrade', 'Monthly', 'Yearly', 'Team', 'Shared spaces', 'Payment', 'Card number', 'Plan', 'Price', 'Chart', 'Pay $60']) {
+      await expect(sketch.getByText(words, { exact: true })).toBeVisible()
+    }
+    // A key change inside a key change adds no second tag.
+    await expect(sketch.getByText('Key change', { exact: true })).toHaveCount(1)
+    // The sketch keeps a small screen's width on a desktop-sized card, and the words sit beside it.
+    const box = (await sketch.boundingBox())!
+    expect(box.width).toBeLessThanOrEqual(460)
+    const bet = (await page.getByText('Pay on the plan page, so there is one step less.').boundingBox())!
+    expect(bet.x).toBeGreaterThan(box.x + box.width)
+    // Nothing in the sketch is cut off: every shape fits inside it.
+    const pay = (await sketch.getByText('Pay $60', { exact: true }).boundingBox())!
+    expect(pay.y + pay.height).toBeLessThanOrEqual(box.y + box.height)
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
 // Three versions side by side for the pick tests: the example at 0,0 and two more beside it.
 const withVersions = (source: string, extra = '') =>
   source.replace(
@@ -294,6 +358,80 @@ test('a pick inside a section leaves the items outside it where they are', async
     expect(entryOf('b')).not.toContain('y: 0,')
     // C was not part of that comparison, so it can still be picked among its own.
     await expect(page.getByRole('button', { name: 'Pick Version C and set the others aside' })).toHaveCount(1)
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
+test('a pick in a section inside a section sets the whole round aside, and the other sections go whole', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  // One round of directions: a section around it, and inside it a section for each tradeoff.
+  // The example and B answer one tradeoff; C answers another and has a note beside it.
+  const round = withVersions(original)
+    .replace(
+      'export const sections: CanvasSection[] = [];',
+      `export const sections: CanvasSection[] = [
+  { id: "round", title: "Round", x: -60, y: -140, width: 1280, height: 600 },
+  { id: "speed", title: "Speed", x: -30, y: -80, width: 800, height: 380 },
+  { id: "who", title: "Who", x: 780, y: -80, width: 410, height: 500 },
+];`,
+    )
+    .replace('export const notes: CanvasNote[] = [];', 'export const notes: CanvasNote[] = [\n  { id: "why-c", text: "Why C", x: 800, y: 300, width: 200, height: 60 },\n];')
+  expect(round).toContain('id: "who"')
+  expect(round).toContain('id: "why-c"')
+  const sectionAt = (id: string) => {
+    const m = new RegExp(`^\\s+\\{ id: "${id}", title: "\\w+", x: (-?\\d+), y: (-?\\d+),`, 'm').exec(readFileSync(REGISTRY, 'utf8'))
+    return m ? { x: Number(m[1]), y: Number(m[2]) } : null
+  }
+  const placeOf = (id: string) => ({ x: Number(/\bx: (-?\d+)/.exec(entryOf(id))![1]), y: Number(/\by: (-?\d+)/.exec(entryOf(id))![1]) })
+  try {
+    const errors = collectErrors(page)
+    writeFileSync(REGISTRY, round)
+    await servesId(page, 'why-c')
+    await page.goto('/')
+    await expect(page.locator('.canvas-item[data-canvas-item="c"]')).toBeVisible()
+    await page.waitForTimeout(400)
+    await page.getByRole('button', { name: 'Pick Version B and set the others aside' }).click()
+    // The example beside it and C in the other section: the whole round, not only its own section.
+    await expect(page.locator('.canvas-toast')).toContainText('Picked Version B. Set 2 others aside.')
+    await expect.poll(() => entryOf('b')).toContain('picked: true')
+    const [frameX, frameY, frameW, frameH] = setAsideFrames()[0]!
+    expect(frameY).toBeGreaterThan(460)
+    // The other section moves whole: its frame, its item, and its note by the same step, into "Set aside".
+    const who = sectionAt('who')!
+    const dx = who.x - 780
+    const dy = who.y - -80
+    expect(dy).toBeGreaterThan(400)
+    expect(placeOf('c')).toEqual({ x: 800 + dx, y: 0 + dy })
+    expect(readFileSync(REGISTRY, 'utf8')).toContain(`{ id: "why-c", text: "Why C", x: ${800 + dx}, y: ${300 + dy}`)
+    expect(who.x).toBeGreaterThanOrEqual(frameX)
+    expect(who.y).toBeGreaterThanOrEqual(frameY)
+    expect(who.x + 410).toBeLessThanOrEqual(frameX + frameW)
+    expect(who.y + 500).toBeLessThanOrEqual(frameY + frameH)
+    // The example leaves its section on its own; the picked version's section and the round stay.
+    expect(placeOf('example').y).toBeGreaterThanOrEqual(frameY)
+    expect(sectionAt('speed')).toEqual({ x: -30, y: -80 })
+    expect(sectionAt('round')).toEqual({ x: -60, y: -140 })
+    // Dragging "Set aside" takes the section inside it along.
+    await page.keyboard.press('Shift+Digit1')
+    await page.waitForTimeout(600)
+    const aside = page.locator('.canvas-section[data-board-id="set-aside"] .canvas-section-tab')
+    await expect(aside).toBeVisible()
+    const tab = (await aside.boundingBox())!
+    await page.mouse.move(tab.x + 20, tab.y + tab.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(tab.x + 60, tab.y + tab.height / 2 + 30, { steps: 6 })
+    await page.mouse.up()
+    await expect.poll(() => setAsideFrames()[0]![1]).not.toBe(frameY)
+    const [movedX, movedY] = setAsideFrames()[0]!
+    await expect.poll(() => sectionAt('who')).toEqual({ x: who.x + movedX - frameX, y: who.y + movedY - frameY })
+    // One Undo for the drag, one for the pick: the registry reads as it did.
+    await page.locator('.canvas-viewport').focus()
+    await page.keyboard.press('ControlOrMeta+z')
+    await expect.poll(() => setAsideFrames()[0]![1]).toBe(frameY)
+    await page.keyboard.press('ControlOrMeta+z')
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toBe(round)
     expect(errors).toEqual([])
   } finally {
     await restoreRegistry(page, original)
@@ -1765,6 +1903,50 @@ test('a text in a viewport item is rewritten in place too, and a press outside k
     await note.getByRole('button', { name: 'Delete', exact: true }).click()
     await expect(heading).toHaveText('Canvas is ready')
     await expect(heading).not.toHaveAttribute('data-canvas-pending')
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
+test('zoomed out, the name row and its actions take a press, and the top edge still resizes', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    writeFileSync(REGISTRY, withVersions(original))
+    await servesId(page, 'c')
+    await page.goto('/')
+    const item = (id: string) => page.locator(`.canvas-item[data-canvas-item="${id}"]`)
+    await expect(item('c')).toBeVisible()
+    await page.waitForTimeout(400)
+    // The resize zones keep one size on screen, so at 25% the top one used to reach up over the name row.
+    await page.mouse.move(400, 300)
+    await page.locator('.canvas-viewport').focus()
+    await page.keyboard.press('0')
+    await page.keyboard.press('-')
+    await page.keyboard.press('-')
+    await expect(page.locator('.canvas-zoom')).toHaveText('25%')
+    const preview = (await page.locator('[data-canvas-preview="b"]').boundingBox())!
+    await page.mouse.move(preview.x + preview.width / 2, preview.y + preview.height / 2)
+    const pick = page.getByRole('button', { name: 'Pick Version B and set the others aside' })
+    await expect(pick).toHaveCSS('opacity', '1')
+    const under = (x: number, y: number) =>
+      page.evaluate(([px, py]) => {
+        const hit = document.elementFromPoint(px!, py!)
+        const edge = hit?.closest('.canvas-item-edge')
+        if (edge) return `edge ${edge.getAttribute('data-edge')}`
+        return hit?.closest('.canvas-item-title') ? 'title' : 'other'
+      }, [x, y])
+    // The lowest pixels of Pick and of the name are the name row's, not a resize zone's.
+    const button = (await pick.boundingBox())!
+    expect(await under(button.x + button.width / 2, button.y + button.height - 1)).toBe('title')
+    const name = (await item('b').locator('.canvas-name').boundingBox())!
+    expect(await under(name.x + 4, name.y + name.height - 1)).toBe('title')
+    // Just inside the preview's top, the top edge still takes the press.
+    expect(await page.evaluate(([px, py]) => document.elementFromPoint(px!, py!)?.getAttribute('data-edge') ?? null, [preview.x + preview.width / 2, preview.y + 2])).toBe('n')
+    await pick.click()
+    await expect.poll(() => entryOf('b')).toContain('picked: true')
+    expect(entryOf('b')).toContain('width: 360, height: 180')
     expect(errors).toEqual([])
   } finally {
     await restoreRegistry(page, original)

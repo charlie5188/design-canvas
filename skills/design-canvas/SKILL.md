@@ -100,7 +100,8 @@ Write each entry out by hand, in `registry`, `notes`, and `sections` alike. Its 
 - People can move items to the canvas trash and put them back. The trash only hides an item; its code stays in the registry. The canvas writes `trashed: true` on a trashed item's registry entry and removes it when the item is put back, so the shared file and the next session start with the same trash. Never remove an item's code because it is trashed unless the user asks. To trash an item or put one back when asked, add or remove its `trashed`; an open canvas follows.
 - Before you add new directions (not a change to one version), use the `design-directions` skill when it is installed. Without it, at least: make directions differ in structure (hierarchy, layout, interaction, density), not only in color or theme; keep one close to the current product; and if two look like siblings, rework the weaker one. Put each version's bet and what it gives up in its `note`.
 - When comparing one feature, keep data, content, size, and theme the same across items. For broader alternatives, name the layout differences. No full variant matrix unless asked.
-- Add the states that matter for the decision, such as empty, long content, an error, or loading, to the screen they belong to, in the item's `states`, not as items of their own: they are part of that solution, not other solutions. The canvas shows each item in its first state; the item's screen and state count by its name opens the flow view, where each screen's states switch in place.
+- Build only what the request needs. A new version or direction starts as the one screen that shows its idea, with no other screens, states, phone width, or languages: people judge the idea first, and most versions are dropped before those details matter. Add them when the person asks: the item's Ask has quick requests for some (Phone, States, Languages), and they can ask for the whole flow in words. A version made from an existing item keeps that item's screens and states, and changes only what the request is about.
+- When the person asks for states, such as empty, long content, an error, or loading, add them to the screen they belong to, in the item's `states`, not as items of their own: they are part of that solution, not other solutions. The canvas shows each item in its first state; the item's screen and state count by its name opens the flow view, where each screen's states switch in place.
   ```tsx
   { id: "checkout-a", name: "Checkout · one page", component: Checkout, path: "/checkout",
     states: { "/checkout": { Empty: CheckoutEmpty, "Card error": CheckoutError } }, x: 0, y: 0, width: 420, height: 560 },
@@ -135,34 +136,47 @@ A product's screens point at each other by path: `<Link href="/checkout">`, `rou
 ```
 
 - An item stands for a browser tab. `path` is the path of the item's own `component`. `screens` adds more screens to the same item, by path. `[id]` or `:id` stands for any one segment.
-- A link or a router call stays in the item it is in, as a click in the product stays in its tab: a path that is one of the item's screens shows in place, and any other path shows a notice. It never moves the view to another item. So put every screen that the core flow reaches into the item's `screens`.
+- A link or a router call stays in the item it is in, as a click in the product stays in its tab: a path that is one of the item's screens shows in place, and any other path shows a notice. It never moves the view to another item. So when you build a flow, put every screen that the core flow reaches into the item's `screens`.
 - Only a link that opens a new tab in the product (`target="_blank"`) leaves the item: the view jumps to the nearest other item that shows that path and centres it, and the first item stays as it is. Place such an item beside the flow it belongs to.
-- One item is one solution: put a solution's whole flow in one item, and put the versions side by side, so the person tries each as a user would. An item with more than one screen shows how many beside its name, and a press there opens every screen side by side, with arrows for the links between them. List `screens` in the order a person goes through them, main path first, then each branch (an error, a declined card) after it: the main path is laid out in that order, and a screen that its previous one does not lead to goes in a row under the screen that does. From there the person can ask about one screen, which reaches you as `Name › screen /checkout`, about an element on it, as `Name › screen /checkout › button “Pay”`, or about the whole flow, as `Name › the whole flow (/plans → /checkout → /done)`: change that screen's component, or the flow's screens and their order. Add a screen as an item of its own only when the person asks to compare or comment on one step beside other items.
+- One item is one solution: when a solution has a flow, keep its whole flow in one item, and put the versions side by side, so the person tries each as a user would. An item with more than one screen shows how many beside its name, and a press there opens every screen side by side, with arrows for the links between them. List `screens` in the order a person goes through them, main path first, then each branch (an error, a declined card) after it: the main path is laid out in that order, and a screen that its previous one does not lead to goes in a row under the screen that does. From there the person can ask about one screen, which reaches you as `Name › screen /checkout`, about an element on it, as `Name › screen /checkout › button “Pay”`, or about the whole flow, as `Name › the whole flow (/plans → /checkout → /done)`: change that screen's component, or the flow's screens and their order. Add a screen as an item of its own only when the person asks to compare or comment on one step beside other items.
 - The person returns a flow to its start with Restart, beside the item's name. Nothing about the screen shown is saved: a reload starts every item at its first screen.
 - A router's `back()` returns to the screen before. `usePathname()` gives the path of the screen shown. Only `next/navigation` has a stand-in in the built-in kit; for another router, make its stand-in dispatch `NAVIGATE_EVENT` and `BACK_EVENT` from `canvas/bridge` and read `RouteContext` from `canvas/routes`, as `mocks/next-navigation.ts` does.
 - Not handled: query strings and hashes (the path alone decides), `useParams()` (it is empty), `window.open`, and a path only the server knows, such as a redirect.
 
 ### Planned directions
 
-When new directions are costly to build (they need new components, several screens, or more than three items), show the plan on the canvas before you build it. Do not list it in the chat and wait there: a chat list scrolls away, and the person should judge each direction where its result will appear.
+Show new directions on the canvas as a plan before you build them: one card each, with a rough sketch of its screen. Cards are fast, so a round can show five to seven directions at once, and the person builds only the ones worth a closer look. Skip the cards for variations of one direction, for small requests, and when the person said to just build. Do not list a plan in the chat and wait there: a chat list scrolls away, and the person should judge each direction where its result will appear.
 
 - Add one item for each direction, named after its bet. Its component is a ready-made card: `component: planned({ bet: "…", givesUp: "…", reference: "…", sketch: … })`, with `planned` and `Block` imported from `./canvas/Planned`. `bet` is what the direction bets on, `givesUp` is what it gives up or how it could fail, and `reference` names the product or pattern it borrows from, or differs from on purpose. Write one sentence for each. Leave `viewport` off until the item is built.
-- Always give the card a `sketch`: a rough layout made of nested `Block`s. The sketch is what lets the person see how the directions differ before they read anything. `<Block row>` lays the blocks inside it out in a row; otherwise they stack. `label` names a part, `size` sets its share of its parent (`"40%"`, or a number of px), `lines` draws that many placeholder lines of text, and `emphasis` marks the one or two parts that carry the bet.
+- Always give the card a `sketch`: a grey wireframe of the one screen that shows the bet, made of `Block`s. The sketch is what lets the person see how the directions differ before they read anything, so draw shapes they recognize, not boxes they must read.
+  - Boxes lay out the screen. `<Block row>` puts the blocks inside it in a row; otherwise they stack. `size` sets a block's share of its parent (`"40%"`, or a number of px). A box with a `label` is a named region and draws its outline; one without only arranges what is inside it.
+  - Inside the boxes, draw the parts with `kind`: `heading`, `text` (with `lines`), `button` (`primary` for the main action), `field`, `choice` (`checked` for the selected one), `toggle` (`options`, `selected`), `list` (`options`, or `rows`), `table` (`options` for the columns, `rows`), and `media` for a picture or chart.
+  - Put the screen's own short words in `label` and `options`, such as `Pay $60` or `Team · 8 members`, never between the tags.
+  - Mark the part that carries the bet, what differs from the product today, with `emphasis` on its box. It gets a "Key change" tag.
 
   ```tsx
   sketch: (
-    <Block row>
-      <Block size="40%" label="Requests" lines={6} />
-      <Block label="Open request" emphasis lines={4} />
+    <Block>
+      <Block kind="heading" label="Upgrade" />
+      <Block row>
+        <Block size="45%">
+          <Block kind="toggle" options={["Monthly", "Yearly"]} />
+          <Block kind="choice" label="Team" checked />
+          <Block kind="choice" label="Business" />
+        </Block>
+        <Block label="Payment" emphasis>
+          <Block kind="field" label="Card number" />
+          <Block kind="button" primary label="Pay $60" />
+        </Block>
+      </Block>
     </Block>
   ),
   ```
 
-  Use about ten blocks at most. Show structure only: no real components, data, colors, or icons. Put words in `label`, never between the tags. If two sketches look alike, the directions are not different enough: rework one.
+  Use about fifteen blocks at most. Show structure only: no real components, colors, or icons, and only a few words of data. If two sketches look alike, the directions are not different enough: rework one.
 - Give each card the position and size its built version will have. The built version takes the card's place and the items beside it do not move, so a card that is too small gets a built version that covers its neighbor.
 - Each card has two buttons. **Drop** moves the card to the trash. **Build this** sends you a note on that card, `Build this planned direction`, with no new-version line. The button sends only while you listen (see "Listen for annotations"); otherwise it copies the note for the person to paste. Tell the person in one or two lines that the directions are on the canvas as cards, that they build or drop each one from the card, and that they can annotate a card or rewrite its text to change it first. Give your source links in the chat: a link inside a preview does not open.
-- Build in place. For a `Build this planned direction` note, build that card. When the person tells you to go ahead, build every card that is not in the trash. Keep the card's `id`, `x`, `y`, `width`, `height`, and `name`, replace `component` with the real one, set `viewport` if the layout needs it, and put the bet and what it gives up in its `note`. Apply the person's annotations and rewritten text first. If the built version needs another size, change it and tell the person which items it now overlaps: they move those. Leave a trashed card as it is: the person can put it back and build it from its button.
-- Skip the cards for variations of one direction, for small requests, and when the person said to just build.
+- Build in place. For a `Build this planned direction` note, build that card as a one-screen draft. When the person tells you to go ahead, build every card that is not in the trash. Keep the card's `id`, `x`, `y`, `width`, `height`, and `name`, replace `component` with the real one, set `viewport` if the layout needs it, and put the bet and what it gives up in its `note`. Apply the person's annotations and rewritten text first. If the built version needs another size, change it and tell the person which items it now overlaps: they move those. Leave a trashed card as it is: the person can put it back and build it from its button.
 
 ### Real viewport
 
@@ -265,7 +279,7 @@ A ghost leaves on its own once the registry shows it: a new one when the registr
 A check beside an item's name picks that version. The canvas does the whole step itself, at once, and the person can undo it:
 
 - It writes `picked: true` on the item's entry. The item shows a ring around its preview and a "Picked" tab on the ring, under the card's bottom-right corner, where every state of an item shows. Both show in the shared file too.
-- It moves the versions the item was compared with into one section with the id `set-aside`, below everything else, and writes their new `x` and `y`. Those versions are the other items in the item's section, or, for an item in no section, the other items in no section.
+- It moves the versions the item was compared with into one section with the id `set-aside`, below everything else, and writes their new `x` and `y`. Those versions are the other items in the item's section, or, for an item in no section, the other items in no section. When sections sit inside a section, the outermost one is the comparison: the sections inside it, except the picked item's own, move into `set-aside` whole, with their items and notes and new `x` and `y`. A section dragged on the canvas also takes the sections inside it along.
 - A later pick sets the earlier one aside too, and removes its `picked`.
 
 You do nothing for the move. Read the result from `registry.tsx`:

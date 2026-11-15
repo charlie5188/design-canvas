@@ -13,7 +13,7 @@ Instead of asking the agent to build a canvas from scratch for every project, th
 - **Your real components.** Each item is your app's own component, with its styles and themes, and made-up data in place of a backend. Ask for a phone or desktop width, and breakpoints behave as on the device.
 - **Ask the agent where you are looking.** Press A, click an element, and write a change or a question. Send it, and the agent makes the change or answers on that pin, where you can reply. To ask about a whole item, use its Ask agent button. Quick requests fill in the note for you: show it at phone width, add its empty, loading, and error states, or show it in the other languages your app has.
 - **See the whole flow.** One item can hold all the screens of a flow and the states of each screen. Click the count next to its name to see every screen side by side, live, with arrows that name the control that leads there, such as `click "Pay"`. Switch a screen's state in place, and ask about one screen, one element on it, or the whole flow.
-- **Iterate fast, and the canvas keeps the process in order.** A change you ask for becomes a new version next to the original, so you compare both. Press Pick on the version you want, and the others move into a "Set aside" section, with your reasons kept as notes. When directions take real work to build, they start as cards with a rough sketch, and you build or drop each one before any code is written.
+- **Iterate fast, and the canvas keeps the process in order.** A change you ask for becomes a new version next to the original, so you compare both. Press Pick on the version you want, and the others move into a "Set aside" section, with your reasons kept as notes. New directions start as cards with a wireframe sketch, so you can look over several before any code is written, and build or drop each one from its card. A built direction is one screen at first; ask for the whole flow, states, or a phone version only on the ones you want to take further.
 - **The one you pick is already code.** The agent builds versions from your components' props first. Ask it to ship one, and it moves that version into the product and checks it in your running app.
 - **Share as one file.** Click Share to get one HTML file that opens with a double-click, and that you can put in Figma or Notion. With Claude, you can also share it as a link that people comment on. See [Share a canvas](#share-a-canvas).
 
@@ -51,7 +51,7 @@ Prices and limits are as of November 2026 and change often. Check each link for 
 npx skills add charlie5188/design-canvas --skill '*'
 ```
 
-This installs two skills. `design-canvas` builds the canvas. `design-directions` helps the agent make directions that are clearly different from each other, after it looks at how other products, and their help docs, solve the same job. The canvas works without it, but its directions are more likely to look alike.
+This installs two skills. `design-canvas` builds the canvas. `design-directions` helps the agent show the range of directions a designer would consider. It names the tradeoffs that matter for the screen, such as new user or expert, or AI or person, and makes each direction a different answer to one of them, after it looks at how other products, and their help docs, solve the same job. The canvas works without it, but its directions are more likely to look alike.
 
 Then ask your agent, for example:
 
@@ -83,7 +83,7 @@ The file is a snapshot, so share again after changes. It holds every item's data
 - `skills/design-canvas/scripts/remove.sh`: removes a canvas from the project.
 - `skills/design-canvas/scripts/check-version.sh`: when a canvas is installed or updated, reads the skill's version number from this repository on GitHub, and the agent tells you when a newer version is out. Set `DESIGN_CANVAS_NO_UPDATE_CHECK=1` to turn it off.
 - `skills/design-canvas/references/making-a-kit.md`: the checklist the agent follows to finish fitting your app, and how to save that fit as a private kit in `~/.agents/design-canvas-kits/` so the next install needs none.
-- `skills/design-directions/SKILL.md`: how the agent plans directions before it builds them. It looks at how a few real products solve the same job, keeps the product's design system fixed, gives each direction one bet in its structure, and reworks any two that look alike. Your own instructions about directions come first.
+- `skills/design-directions/SKILL.md`: how the agent plans directions before it builds them. It states the job and how to judge a result, chooses the tradeoffs that matter for the screen, and places each direction on one of them. It looks at how a few real products solve the same job, keeps the product's design system fixed, gives each direction one bet in its structure, and reworks any two that look alike. Your own instructions about directions come first.
 
 Canvases are prototypes. Commit one only when teammates need to change it; to let people try it, share it as a file.
 
@@ -118,7 +118,7 @@ React アプリの実際のコンポーネントを、パン・ズームでき�
 - **本物のコンポーネント。** アイテムはアプリ自身のコンポーネントで、スタイルとテーマもアプリのままです。バックエンドの代わりに架空のデータを使います。スマートフォンやデスクトップの幅を頼むと、ブレークポイントが実機と同じように動きます。
 - **見ている場所で、エージェントに頼む・聞く。** A キーを押して要素をクリックし、変更の依頼か質問を書いて送ります。エージェントは変更を加えるか、そのピンの上で答えます。同じピンで返信もできます。アイテム全体について聞くときは、そのアイテムの Ask agent ボタンを使います。クイックリクエストを押すと、スマートフォン幅での表示、空・読み込み中・エラーの状態の追加、アプリにあるほかの言語での表示を頼む文がノートに入ります。
 - **フロー全体を見る。** 1 つのアイテムに、フローのすべての画面と、各画面の状態を持たせられます。名前の横の数をクリックすると、すべての画面が実際に動く状態で横に並び、画面どうしは矢印でつながります。矢印には `click "Pay"` のように、その画面へ進むための操作が書かれます。画面の状態はその場で切り替えられ、1 つの画面、画面上の要素、フロー全体のどれについてもエージェントに聞けます。
-- **すばやく案を進められ、経過はキャンバスが整理する。** 変更を頼むと、元の案の隣に新しい案が追加され、2 つを見比べられます。採用したい案の Pick を押すと、ほかの案は「Set aside」セクションに移り、会話で伝えた理由はノートとして残ります。作るのに手間がかかる方向性は、まずラフなスケッチ付きのカードとしてキャンバスに並ぶので、コードを書く前に 1 つずつ作るか外すかを決められます。
+- **すばやく案を進められ、経過はキャンバスが整理する。** 変更を頼むと、元の案の隣に新しい案が追加され、2 つを見比べられます。採用したい案の Pick を押すと、ほかの案は「Set aside」セクションに移り、会話で伝えた理由はノートとして残ります。新しい方向性は、まずワイヤーフレームのスケッチ付きのカードとして並ぶので、コードを書く前にいくつもの案を見渡し、カードから 1 つずつ作るか外すかを決められます。作った方向性は最初は 1 画面だけです。フロー全体、状態、スマートフォン版は、先へ進めたい案にだけ頼みます。
 - **選んだ案は、すでにコード。** エージェントはまず既存コンポーネントの props で案を作ります。プロダクトに入れるよう頼むと、エージェントが組み込み、実際のアプリで確認します。
 - **1 つのファイルで共有。** Share をクリックすると、ダブルクリックで開ける 1 つの HTML ファイルができます。Figma や Notion にも置けます。Claude を使っている場合は、コメントできるリンクとしても共有できます。詳しくは[キャンバスを共有する](#キャンバスを共有する)を見てください。
 
@@ -156,7 +156,7 @@ design-canvas にはデザインファイルがありません。キャンバス
 npx skills add charlie5188/design-canvas --skill '*'
 ```
 
-2 つのスキルが入ります。`design-canvas` はキャンバスを作ります。`design-directions` は、他の製品やそのヘルプ記事が同じ課題をどう解いているかを調べたうえで、互いにはっきり違う方向性をエージェントが作れるようにします。キャンバスはこれがなくても動きますが、方向性が似たものになりやすくなります。
+2 つのスキルが入ります。`design-canvas` はキャンバスを作ります。`design-directions` は、デザイナーなら検討する方向性の幅を見せます。初心者か熟練者か、AI か人か、といったその画面で大事なトレードオフを挙げ、他の製品やそのヘルプ記事が同じ課題をどう解いているかを調べたうえで、それぞれのトレードオフに違う答えを出す方向性をエージェントが作れるようにします。キャンバスはこれがなくても動きますが、方向性が似たものになりやすくなります。
 
 あとはエージェントに、たとえばこう頼みます。
 
@@ -188,7 +188,7 @@ npx skills add charlie5188/design-canvas --skill '*'
 - `skills/design-canvas/scripts/remove.sh`：プロジェクトからキャンバスを取り除きます。
 - `skills/design-canvas/scripts/check-version.sh`：キャンバスのインストール時と更新時に、GitHub 上のこのリポジトリからスキルのバージョン番号を読み取ります。新しいバージョンが出ていれば、エージェントが知らせます。オフにするには `DESIGN_CANVAS_NO_UPDATE_CHECK=1` を設定します。
 - `skills/design-canvas/references/making-a-kit.md`：アプリへの設定を仕上げるためにエージェントが使うチェックリストです。仕上がった設定を `~/.agents/design-canvas-kits/` にプライベートキットとして保存し、次回からは設定なしでインストールする方法も書かれています。
-- `skills/design-directions/SKILL.md`：エージェントが方向性を作る前の進め方です。いくつかの実在する製品が同じ課題をどう解いているかを調べ、製品のデザインシステムは変えずに、各方向性に構造上の賭けを 1 つずつ持たせ、似すぎた 2 つは作り直します。方向性についてのユーザー自身の指示が優先されます。
+- `skills/design-directions/SKILL.md`：エージェントが方向性を作る前の進め方です。画面の目的と結果の判断基準をはっきりさせ、その画面で大事なトレードオフを選んで、各方向性をそのどこかに置きます。いくつかの実在する製品が同じ課題をどう解いているかを調べ、製品のデザインシステムは変えずに、各方向性に構造上の賭けを 1 つずつ持たせ、似すぎた 2 つは作り直します。方向性についてのユーザー自身の指示が優先されます。
 
 キャンバスはプロトタイプです。チームメンバーが変更する必要があるときだけコミットしてください。試してもらうだけなら、ファイルとして共有できます。
 
