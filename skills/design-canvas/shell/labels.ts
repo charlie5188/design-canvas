@@ -35,6 +35,7 @@ export const labels = {
         { what: "Keep a move straight", how: "`Shift` + drag" },
         { what: "Resize", how: "Drag the border" },
         { what: "An item's actions", how: "Hover the item" },
+        { what: "See every screen of a flow", how: "Click the screen count by its name" },
         { what: "Copy an element's reference", how: "`⌥/Alt` + click" },
         { what: "Undo a saved change", how: "`⌘/Ctrl` `Z`", local: true },
       ],
@@ -71,6 +72,7 @@ export const labels = {
   newTabBlocked: (target: string) => `Opens in a new tab: ${target}`,
   formBlocked: "Forms don't submit on the canvas",
   zoomIn: "Zoom in",
+  zoomGroup: "Zoom",
   zoomOut: "Zoom out",
   fitAll: "Fit all",
   resetCamera: "Reset view (actual size)",
@@ -105,6 +107,27 @@ export const labels = {
     { label: "Languages", text: "Show this in the other languages the app has." },
   ],
   quickAsksLabel: "Quick requests",
+  // The flow view (FlowView.tsx).
+  screens: (n: number) => `${n} screen${n === 1 ? "" : "s"}`,
+  showFlow: (name: string, n: number, states = 0) =>
+    `Show ${[n > 1 ? `the ${n} screens` : "", states ? `${states} state${states === 1 ? "" : "s"}` : ""].filter(Boolean).join(" and ")} of ${name}`,
+  states: (n: number) => `${n} state${n === 1 ? "" : "s"}`,
+  stateDefault: "Default",
+  statesOf: (path: string) => `States of ${path}`,
+  flowOf: (name: string) => `Screens of ${name}`,
+  openScreen: (path: string) => `Open ${path}`,
+  /** The name of an item's own screen when it names no path. */
+  firstScreen: "Start",
+  askFlow: (name: string) => `Ask agent about the whole flow of ${name}`,
+  askScreen: (path: string) => `Ask agent about ${path}`,
+  askScreenHint: "Ask agent about this screen",
+  askFlowHint: "Ask agent about the whole flow",
+  backToCanvas: "Back to the canvas (Esc)",
+  /** How a note about one screen, or the whole flow, names what it is about, for the agent. */
+  screenRef: (name: string, path: string, state?: string) => `${name} › screen ${path}${state ? ` (${state})` : ""}`,
+  flowRef: (name: string, paths: string[]) => `${name} › the whole flow (${paths.join(" → ")})`,
+  /** The words on an arrow: what makes that step. */
+  flowStep: (words: string) => `click "${words}"`,
   restart: (name: string) => `Restart ${name}`,
   restartHint: "Restart",
   moveToTrash: (name: string) => `Move ${name} to the trash`,

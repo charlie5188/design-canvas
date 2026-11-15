@@ -25,7 +25,7 @@ export const FRAME_PAGE = "frame.html";
  * Where a frame page runs: inside the canvas, nested in its own standalone
  * page, or (no context) opened directly in a tab.
  */
-export type FrameContext = "canvas" | "page";
+export type FrameContext = "canvas" | "page" | "flow";
 
 /**
  * Whether this page has an address of its own to reopen: on the dev server, a
@@ -36,11 +36,12 @@ export type FrameContext = "canvas" | "page";
 export const hasAddress = /^(https?|file):$/.test(window.location.protocol);
 
 /** A link that opens one item alone in a tab. Only for a page with an address (hasAddress). */
-export const frameUrl = (id: string, context?: FrameContext) =>
-  `${shared ? "" : FRAME_PAGE}?${frameQuery(id, context)}`;
+export const frameUrl = (id: string, context?: FrameContext, screen?: string, state?: string) =>
+  `${shared ? "" : FRAME_PAGE}?${frameQuery(id, context, screen, state)}`;
 
-const frameQuery = (id: string, context?: FrameContext) =>
-  `item=${encodeURIComponent(id)}${context ? `&in=${context}` : ""}`;
+/** `screen` and `state`: the screen the frame starts at, and which of its states, for the flow view. */
+const frameQuery = (id: string, context?: FrameContext, screen?: string, state?: string) =>
+  `item=${encodeURIComponent(id)}${context ? `&in=${context}` : ""}${screen ? `&screen=${encodeURIComponent(screen)}` : ""}${state ? `&state=${encodeURIComponent(state)}` : ""}`;
 
 /**
  * The shared file's own markup, read before anything renders. Item frames in a
@@ -53,8 +54,8 @@ const sharedPage = shared ? `<!doctype html>\n${document.documentElement.outerHT
 const FRAME_NAME = "design-canvas-frame?";
 
 /** Where an item frame's document comes from, as props for its iframe. */
-export const frameSource = (id: string, context: FrameContext): { src: string } | { srcDoc: string; name: string } =>
-  shared ? { srcDoc: sharedPage, name: FRAME_NAME + frameQuery(id, context) } : { src: frameUrl(id, context) };
+export const frameSource = (id: string, context: FrameContext, screen?: string, state?: string): { src: string } | { srcDoc: string; name: string } =>
+  shared ? { srcDoc: sharedPage, name: FRAME_NAME + frameQuery(id, context, screen, state) } : { src: frameUrl(id, context, screen, state) };
 
 /** This page's item and context: from its frame name in a shared file, otherwise from its address. */
 export const frameParams = () =>

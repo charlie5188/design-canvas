@@ -2464,3 +2464,300 @@ test('cursors say what a press or drag will do', async ({ page }) => {
   await page.locator('.canvas-viewport').evaluate((element) => element.setAttribute('data-zoom', 'out'))
   expect(await cursor('.canvas-preview h2')).toBe('zoom-out')
 })
+
+test('an item with screens opens its flow: every screen side by side, with arrows, and a press opens one', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  const example = readFileSync(EXAMPLE, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    writeFileSync(
+      EXAMPLE,
+      `import { NAVIGATE_EVENT } from "../canvas/bridge";
+const push = (href: string) => window.dispatchEvent(new CustomEvent(NAVIGATE_EVENT, { detail: href }));
+export const Example = () => (
+  <div style={{ padding: 16 }}>
+    <h2>Plans</h2>
+    <a href="/checkout">Continue</a> <a href="/help" target="_blank">Help tab</a>
+  </div>
+);
+export const Checkout = () => (
+  <div style={{ padding: 16 }}>
+    <h2>Checkout</h2>
+    <button type="button" onClick={() => push("/done")}>Pay</button> <a href="/plans">Back</a>
+  </div>
+);
+export const Done = () => (
+  <div style={{ padding: 16 }}>
+    <h2>Done</h2>
+    <a href="/plans">Start over</a>
+  </div>
+);
+`,
+    )
+    writeFileSync(
+      REGISTRY,
+      original
+        .replace('import { Example } from "./items/Example";', 'import { Checkout, Done, Example } from "./items/Example";')
+        .replace('component: Example,', 'component: Example,\n    path: "/plans",\n    screens: { "/checkout": Checkout, "/done": Done },')
+        .replace(
+          /\];\s*$/,
+          `  { id: "phone", name: "Phone", component: Example, path: "/plans", screens: { "/checkout": Checkout, "/done": Done }, x: 0, y: 260, width: 375, height: 200, viewport: true },
+  { id: "single", name: "Single", component: Done, x: 500, y: 260, width: 300, height: 160 },
+];
+`,
+        ),
+    )
+    await servesId(page, 'single')
+    await expect.poll(async () => (await (await page.request.get('/items/Example.tsx')).text()).includes('Pay'), { timeout: 15_000 }).toBe(true)
+    await page.goto('/')
+    const item = page.locator('.canvas-item[data-canvas-item="example"]')
+    await expect(item.locator('h2')).toHaveText('Plans')
+    // Only an item that holds more than one screen says so.
+    await expect(page.locator('.canvas-item[data-canvas-item="single"] .canvas-item-screens')).toHaveCount(0)
+    const show = page.getByRole('button', { name: 'Show the 3 screens of Example · replace me' })
+    await expect(show).toHaveText('3')
+
+    await show.click()
+    const view = page.getByRole('dialog', { name: 'Screens of Example · replace me' })
+    await expect(view.locator('.canvas-flow-path')).toHaveText(['/plans', '/checkout', '/done'])
+    await expect(view.locator('.canvas-flow-screen h2')).toHaveText(['Plans', 'Checkout', 'Done'])
+    // Arrows for the links: on to checkout, and back to plans twice. A new-tab link and a router call have none.
+    await expect(view.locator('.canvas-flow-arrows > g > path')).toHaveCount(3)
+    // Each arrow says what makes the step, in the link's words.
+    await expect(view.locator('.canvas-flow-arrows text')).toHaveText(['click "Continue"', 'click "Back"', 'click "Start over"'])
+    // The screens are pictures: a press on a link in one does not follow it.
+    await expect(view.locator('.canvas-flow-live').first()).toHaveJSProperty('inert', true)
+    // It pans and zooms like the canvas: buttons, keys, and Ctrl + wheel. Words on arrows scale with it, as names do.
+    const level = view.locator('.canvas-flow-zoom-level')
+    const percent = async () => Number((await level.textContent())!.replace('%', ''))
+    const fit = await percent()
+    const words = view.locator('.canvas-flow-arrows text').first()
+    const wordsHeight = (await words.boundingBox())!.height
+    await view.getByRole('button', { name: 'Zoom in' }).click()
+    await expect.poll(percent).toBeGreaterThan(fit)
+    await expect.poll(async () => (await words.boundingBox())!.height).toBeGreaterThan(wordsHeight * 1.15)
+    await page.keyboard.press('0')
+    await expect(level).toHaveText('100%')
+    await page.keyboard.press('1')
+    await expect.poll(percent).toBe(fit)
+    await page.mouse.move(400, 400)
+    await page.keyboard.down('Control')
+    await page.mouse.wheel(0, -200)
+    await page.keyboard.up('Control')
+    await expect.poll(percent).toBeGreaterThan(fit)
+    // A drag pans, also when it starts on a screen, and opens nothing.
+    const before = (await view.locator('.canvas-flow-screen').first().boundingBox())!.x
+    const second = (await view.locator('.canvas-flow-frame').nth(1).boundingBox())!
+    await page.mouse.move(second.x + 30, second.y + 30)
+    await page.mouse.down()
+    await page.mouse.move(second.x + 130, second.y + 30, { steps: 5 })
+    await page.mouse.up()
+    await expect(view).toBeVisible()
+    await page.mouse.move(600, 650)
+    await page.mouse.down()
+    await page.mouse.move(700, 650, { steps: 5 })
+    await page.mouse.up()
+    await expect(view).toBeVisible()
+    await expect.poll(async () => (await view.locator('.canvas-flow-screen').first().boundingBox())!.x).toBeGreaterThan(before + 150)
+    await page.keyboard.press('Escape')
+    await expect(view).toHaveCount(0)
+
+    // A step made by a router call gets its arrow once the person has made it.
+    await item.getByRole('link', { name: 'Continue' }).click()
+    await item.getByRole('button', { name: 'Pay' }).click()
+    await expect(item.locator('h2')).toHaveText('Done')
+    await show.click()
+    await expect(view.locator('.canvas-flow-arrows > g > path')).toHaveCount(4)
+    // A router call is named by the button pressed to make it.
+    await expect(view.locator('.canvas-flow-arrows text')).toContainText(['click "Pay"'])
+    await expect(view.locator('.canvas-flow-screen[data-current] h2')).toHaveText('Done')
+    // A press on a screen opens the item there, back on the canvas.
+    await view.getByRole('button', { name: 'Open /checkout' }).click()
+    await expect(view).toHaveCount(0)
+    await expect(item.locator('h2')).toHaveText('Checkout')
+
+    // Ask agent about one screen: the note opens there, on that screen, and nothing else moves.
+    await show.click()
+    await view.locator('.canvas-flow-screen').nth(2).hover()
+    await view.getByRole('button', { name: 'Ask agent about /done' }).click()
+    const screenNote = page.getByRole('dialog', { name: /Example · replace me › screen \/done/ })
+    await expect(view.locator('.canvas-flow-screen').nth(2).getByRole('dialog')).toBeVisible()
+    await expect(item.locator('h2')).toHaveText('Checkout')
+    await screenNote.getByRole('textbox').fill('Drop this step.')
+    await screenNote.getByRole('textbox').press('Enter')
+    await expect(screenNote).toHaveCount(0)
+    await expect(view.locator('.canvas-flow-screen').nth(2).locator('.canvas-pin')).toHaveCount(1)
+    // And about the whole flow, from the view's bar. Escape closes the note first, then the view.
+    await view.getByRole('button', { name: 'Ask agent about the whole flow of Example · replace me' }).click()
+    const flowNote = page.getByRole('dialog', { name: /Example · replace me › the whole flow \(\/plans → \/checkout → \/done\)/ })
+    await expect(flowNote).toBeVisible()
+    // Typing in it types: A, N, S, V, and the zoom keys are the canvas's only outside a field.
+    await page.keyboard.type('Are 3 steps - too many? 1 0')
+    await expect(flowNote.getByRole('textbox')).toHaveValue('Are 3 steps - too many? 1 0')
+    await flowNote.getByRole('textbox').fill('')
+    await page.keyboard.press('Escape')
+    await expect(view).toBeVisible()
+    // The Ask agent tool, as on the canvas: A, then a click on an element asks about it on its screen.
+    const askTool = view.getByRole('toolbar', { name: 'Tools' }).getByRole('button', { name: 'Ask agent' })
+    await page.keyboard.press('a')
+    await expect(askTool).toHaveAttribute('aria-pressed', 'true')
+    await view.locator('.canvas-flow-screen').nth(1).getByRole('button', { name: 'Pay' }).click()
+    const elementNote = page.getByRole('dialog', { name: /Example · replace me › screen \/checkout › button “Pay”/ })
+    await expect(elementNote).toBeVisible()
+    // The press asked; the screen's own button did nothing.
+    await expect(item.locator('h2')).toHaveText('Checkout')
+    await elementNote.getByRole('textbox').fill('Say the price on the button.')
+    await elementNote.getByRole('textbox').press('Enter')
+    await expect(view.locator('.canvas-flow-screen').nth(1).locator('.canvas-flow-pins[data-at="point"] .canvas-pin')).toHaveCount(1)
+    // Escape puts the tool down first, then closes the view.
+    await page.keyboard.press('Escape')
+    await expect(askTool).toHaveAttribute('aria-pressed', 'false')
+    await page.keyboard.press('Escape')
+    await expect(view).toHaveCount(0)
+    // The notes wait on the item, like any other.
+    await expect(item.locator('.canvas-pin')).toHaveCount(2)
+
+    // A frame item: its screens are frames, and their links give arrows too.
+    await page.getByRole('button', { name: 'Show the 3 screens of Phone' }).click()
+    const phone = page.getByRole('dialog', { name: 'Screens of Phone' })
+    await expect(phone.locator('iframe')).toHaveCount(3)
+    await expect(phone.frameLocator('iframe').nth(2).locator('h2')).toHaveText('Done')
+    await expect(phone.locator('.canvas-flow-arrows > g > path')).toHaveCount(3)
+    await phone.getByRole('button', { name: 'Open /done' }).click()
+    await expect(page.frameLocator('.canvas-item[data-canvas-item="phone"] iframe').locator('h2')).toHaveText('Done')
+    expect(errors).toEqual([])
+  } finally {
+    writeFileSync(EXAMPLE, example)
+    await restoreRegistry(page, original)
+  }
+})
+
+test('a flow with a branch lays the branch out in a row under the screen it leaves', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  const example = readFileSync(EXAMPLE, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    writeFileSync(
+      EXAMPLE,
+      `import { NAVIGATE_EVENT } from "../canvas/bridge";
+const push = (href: string) => window.dispatchEvent(new CustomEvent(NAVIGATE_EVENT, { detail: href }));
+const Screen = ({ title, children }: { title: string; children?: React.ReactNode }) => <div style={{ padding: 16 }}><h2>{title}</h2>{children}</div>;
+export const Example = () => <Screen title="Plans"><a href="/checkout">Continue</a></Screen>;
+export const Checkout = () => (
+  <Screen title="Checkout">
+    <button type="button" onClick={() => push("/done")}>Pay</button> <a href="/failed">Card declined</a> <a href="/plans">Back</a>
+  </Screen>
+);
+export const Done = () => <Screen title="Done" />;
+export const Failed = () => <Screen title="Failed"><a href="/checkout">Try again</a></Screen>;
+`,
+    )
+    writeFileSync(
+      REGISTRY,
+      original
+        .replace('import { Example } from "./items/Example";', 'import { Checkout, Done, Example, Failed } from "./items/Example";')
+        // Listed in the order a person goes through them: the main path, then the branch.
+        .replace('component: Example,', 'component: Example,\n    path: "/plans",\n    screens: { "/checkout": Checkout, "/done": Done, "/failed": Failed },'),
+    )
+    await expect.poll(async () => (await (await page.request.get('/registry.tsx')).text()).includes('"/failed"'), { timeout: 15_000 }).toBe(true)
+    await expect.poll(async () => (await (await page.request.get('/items/Example.tsx')).text()).includes('Failed'), { timeout: 15_000 }).toBe(true)
+    await page.goto('/')
+    await page.getByRole('button', { name: 'Show the 4 screens of Example · replace me' }).click()
+    const view = page.getByRole('dialog', { name: 'Screens of Example · replace me' })
+    const screen = (name: string) => view.locator('.canvas-flow-screen').filter({ has: page.getByRole('heading', { name, exact: true }) })
+    // Before anyone pressed Pay, nothing is known to lead to Done; it stays on the main path all the same.
+    await expect(screen('Done')).toHaveAttribute('data-row', '0')
+    await expect(screen('Failed')).toHaveAttribute('data-row', '1')
+    const checkoutBox = (await screen('Checkout').boundingBox())!
+    const failedBox = (await screen('Failed').boundingBox())!
+    expect(Math.abs(failedBox.x - checkoutBox.x)).toBeLessThan(2)
+    expect(failedBox.y).toBeGreaterThan(checkoutBox.y + checkoutBox.height)
+    // Down into the branch, and back up out of it, with their words.
+    await expect(view.locator('.canvas-flow-arrows text')).toContainText(['click "Card declined"', 'click "Try again"'])
+    await page.keyboard.press('Escape')
+    // Once Pay is pressed, Done gets its arrow, and the layout is the same.
+    const item = page.locator('.canvas-item[data-canvas-item="example"]')
+    await item.getByRole('link', { name: 'Continue' }).click()
+    await item.getByRole('button', { name: 'Pay' }).click()
+    await page.getByRole('button', { name: 'Show the 4 screens of Example · replace me' }).click()
+    await expect(view.locator('.canvas-flow-arrows text')).toContainText(['click "Pay"'])
+    await expect(screen('Done')).toHaveAttribute('data-row', '0')
+    await expect(screen('Failed')).toHaveAttribute('data-row', '1')
+    expect(errors).toEqual([])
+  } finally {
+    writeFileSync(EXAMPLE, example)
+    await restoreRegistry(page, original)
+  }
+})
+
+test('states belong to their screen: the flow view switches between them, and the canvas shows the first', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  const example = readFileSync(EXAMPLE, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    writeFileSync(
+      EXAMPLE,
+      `const Screen = ({ title, children }: { title: string; children?: React.ReactNode }) => <div style={{ padding: 16 }}><h2>{title}</h2>{children}</div>;
+export const Example = () => <Screen title="Plans"><a href="/checkout">Continue</a></Screen>;
+export const Checkout = () => <Screen title="Checkout"><button type="button">Pay</button></Screen>;
+export const CheckoutEmpty = () => <Screen title="Checkout · nothing to pay" />;
+export const CheckoutError = () => <Screen title="Checkout · card error"><button type="button">Retry</button></Screen>;
+export const List = () => <Screen title="List" />;
+export const ListEmpty = () => <Screen title="List · empty" />;
+`,
+    )
+    writeFileSync(
+      REGISTRY,
+      original
+        .replace('import { Example } from "./items/Example";', 'import { Checkout, CheckoutEmpty, CheckoutError, Example, List, ListEmpty } from "./items/Example";')
+        .replace(
+          'component: Example,',
+          'component: Example,\n    path: "/plans",\n    screens: { "/checkout": Checkout },\n    states: { "/checkout": { Empty: CheckoutEmpty, "Card error": CheckoutError } },',
+        )
+        .replace(
+          /\];\s*$/,
+          `  { id: "list", name: "List", component: List, states: { "": { Empty: ListEmpty } }, x: 500, y: 0, width: 300, height: 160 },
+];
+`,
+        ),
+    )
+    await servesId(page, 'list')
+    await expect.poll(async () => (await (await page.request.get('/items/Example.tsx')).text()).includes('ListEmpty'), { timeout: 15_000 }).toBe(true)
+    await page.goto('/')
+    // The canvas shows each item in its first state; the button says what the item holds.
+    const item = page.locator('.canvas-item[data-canvas-item="example"]')
+    await expect(item.locator('h2')).toHaveText('Plans')
+    await expect(page.getByRole('button', { name: 'Show the 2 screens and 2 states of Example · replace me' })).toBeVisible()
+    // One screen with states opens too.
+    await page.getByRole('button', { name: 'Show 1 state of List' }).click()
+    const list = page.getByRole('dialog', { name: 'Screens of List' })
+    await list.getByRole('combobox', { name: 'States of Start' }).selectOption('Empty')
+    await expect(list.locator('.canvas-flow-screen h2')).toHaveText('List · empty')
+    await page.keyboard.press('Escape')
+
+    await page.getByRole('button', { name: 'Show the 2 screens and 2 states of Example · replace me' }).click()
+    const view = page.getByRole('dialog', { name: 'Screens of Example · replace me' })
+    const checkout = view.locator('.canvas-flow-screen').nth(1)
+    const states = checkout.getByRole('combobox', { name: 'States of /checkout' })
+    await expect(states.locator('option')).toHaveText(['Default', 'Empty', 'Card error'])
+    await expect(states).toHaveValue('')
+    const arrows = await view.locator('.canvas-flow-arrows > g').count()
+    await states.selectOption('Card error')
+    await expect(checkout.locator('h2')).toHaveText('Checkout · card error')
+    // Another state moves nothing and takes no arrow away.
+    await page.waitForTimeout(700)
+    await expect(view.locator('.canvas-flow-arrows > g')).toHaveCount(arrows)
+    // A note asked on a state names it.
+    await checkout.hover()
+    await checkout.getByRole('button', { name: 'Ask agent about /checkout' }).click()
+    await expect(page.getByRole('dialog', { name: /Example · replace me › screen \/checkout \(Card error\)/ })).toBeVisible()
+    await page.keyboard.press('Escape')
+    await page.keyboard.press('Escape')
+    await expect(view).toHaveCount(0)
+    await expect(item.locator('h2')).toHaveText('Plans')
+    expect(errors).toEqual([])
+  } finally {
+    writeFileSync(EXAMPLE, example)
+    await restoreRegistry(page, original)
+  }
+})

@@ -66,12 +66,38 @@ function names(pattern: string, path: string, exact: boolean): boolean {
   return want.length === have.length && want.every((part, index) => part === have[index] || (!exact && (/^\[[^\]]+\]$/.test(part) || part.startsWith(":"))));
 }
 
+/** One screen of an item: the path it is listed under, what it renders, and its other states by name. */
+export type Screen = { path: string; component: ComponentType; states: [string, ComponentType][] };
+
+/**
+ * Every screen an item holds, in the order the registry lists them: its own first, then
+ * its `screens`. Agents list a flow's screens in the order a person goes through them, so
+ * this is the order the flow view lays them out in.
+ */
+export function screensOf(item: CanvasItem): Screen[] {
+  // An item with screens but no `path` still starts at its own component; it has no path to be reached by.
+  const states = (path: string) => Object.entries(item.states?.[path] ?? {});
+  return [
+    { path: item.path ?? "", component: item.component, states: states(item.path ?? "") },
+    ...Object.entries(item.screens ?? {}).map(([path, component]) => ({ path, component, states: states(path) })),
+  ];
+}
+
+/** Which of `screensOf(item)` shows `path`, or -1. A path written out wins over one with a `[param]` in it. */
+export function screenIndex(item: CanvasItem, path: string): number {
+  const all = screensOf(item);
+  const match = (exact: boolean) => all.findIndex((screen) => screen.path !== "" && names(screen.path, path, exact));
+  const exact = match(true);
+  return exact >= 0 ? exact : match(false);
+}
+
 /**
  * The component `item` shows at `path`: its own for its `path`, or one of its `screens`.
- * Undefined when the item does not show that path. A path written out wins over one with a
- * `[param]` in it.
+ * Undefined when the item does not show that path.
  */
 export function screenAt(item: CanvasItem, path: string): ComponentType | undefined {
-  const all: [string, ComponentType][] = [...(item.path ? ([[item.path, item.component]] as [string, ComponentType][]) : []), ...Object.entries(item.screens ?? {})];
-  return (all.find(([pattern]) => names(pattern, path, true)) ?? all.find(([pattern]) => names(pattern, path, false)))?.[1];
+  return screensOf(item)[screenIndex(item, path)]?.component;
 }
+
+/** How many states an item has beside its screens' first ones. */
+export const stateCount = (item: CanvasItem) => screensOf(item).reduce((n, screen) => n + screen.states.length, 0);

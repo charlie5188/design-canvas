@@ -1843,6 +1843,248 @@ html[data-canvas-alt] .canvas-frame-root * {
   user-select: text;
 }
 
+/* An item that holds a flow says so beside its name, with how many screens it has. */
+.canvas-item-screens {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border: 1px solid var(--canvas-border-color);
+  border-radius: 999px;
+  background: var(--canvas-surface-color);
+  color: var(--canvas-subtle-color);
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: color var(--canvas-fast) var(--canvas-ease), border-color var(--canvas-fast) var(--canvas-ease);
+}
+.canvas-item-screens:hover {
+  border-color: var(--canvas-subtle-color);
+  color: var(--canvas-text-color);
+}
+.canvas-item-screens:focus-visible {
+  outline: 2px solid var(--canvas-focus-color);
+  outline-offset: 1px;
+}
+
+/* The flow view (FlowView.tsx): over the whole canvas, in the canvas's own colors, so it
+   reads as the canvas looking inside one item, not as a new page. */
+.canvas-flow {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  background: var(--canvas-bg-color);
+  color: var(--canvas-text-color);
+  animation: canvas-fade-in var(--canvas-slow) var(--canvas-ease);
+}
+.canvas-toolbar[data-place="crumb"] {
+  inset-block: 16px auto;
+  inset-inline-start: 16px;
+  gap: 4px;
+  max-inline-size: calc(100% - 32px);
+}
+.canvas-flow-title {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-inline-start: 4px;
+  font-weight: 600;
+}
+.canvas-flow-count {
+  flex: none;
+  color: var(--canvas-subtle-color);
+}
+.canvas-toolbar[data-place="crumb"] [data-tip]::after {
+  inset-block: calc(100% + 8px) auto;
+}
+/* The stage pans and zooms like the canvas; the row is drawn through its camera. */
+.canvas-flow-stage {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+}
+.canvas-flow-stage:active {
+  cursor: grabbing;
+}
+/* With the Ask agent tool the screens take a crosshair, as previews do on the canvas. */
+.canvas-flow-stage[data-asking] .canvas-flow-live,
+.canvas-flow-stage[data-asking] .canvas-flow-live * {
+  cursor: crosshair !important;
+}
+/* The row holds the layout: screens are placed in it by FlowView (a main path and the rows of its branches). */
+.canvas-flow-row {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  transform-origin: 0 0;
+}
+/* A screen's name row, as an item's: its actions at the right show while it is hovered. */
+.canvas-flow-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+  gap: 4px;
+  block-size: 24px;
+}
+/* A screen's states, beside its name: a small menu with the state shown. */
+.canvas-flow-states {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  color: var(--canvas-subtle-color);
+}
+.canvas-flow-states svg {
+  position: absolute;
+  inset-inline-start: 7px;
+  pointer-events: none;
+}
+.canvas-flow-states select {
+  appearance: none;
+  max-inline-size: 160px;
+  padding: 2px 8px 2px 26px;
+  border: 1px solid var(--canvas-border-color);
+  border-radius: 999px;
+  background: var(--canvas-surface-color);
+  color: var(--canvas-text-color);
+  font: inherit;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.canvas-flow-states select:hover {
+  border-color: var(--canvas-subtle-color);
+}
+.canvas-flow-states select:focus-visible {
+  outline: 2px solid var(--canvas-focus-color);
+  outline-offset: 1px;
+}
+.canvas-flow-path {
+  flex: 0 1 auto;
+}
+.canvas-flow-screen:hover .canvas-item-actions {
+  position: static;
+  opacity: 1;
+}
+.canvas-flow-screen {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.canvas-flow-open {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+.canvas-flow-path {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 6px;
+  color: var(--canvas-text-color);
+  font-family: var(--canvas-font, system-ui, -apple-system, "Segoe UI", sans-serif);
+  font-size: 15px;
+  font-weight: 600;
+  -webkit-font-smoothing: antialiased;
+}
+.canvas-flow-frame {
+  position: relative;
+  display: block;
+}
+.canvas-flow-box {
+  position: absolute;
+  inset: 0;
+  display: block;
+  overflow: hidden;
+  border: calc(1px * var(--canvas-unzoom, 1)) solid var(--canvas-border-color);
+  border-radius: var(--canvas-radius-m);
+  background: var(--canvas-surface-color);
+  box-shadow: var(--canvas-shadow-raised);
+  transition: box-shadow var(--canvas-fast) var(--canvas-ease), border-color var(--canvas-fast) var(--canvas-ease);
+}
+.canvas-flow-screen:hover .canvas-flow-box {
+  border-color: var(--canvas-subtle-color);
+}
+.canvas-flow-screen:has(.canvas-flow-open:focus-visible) .canvas-flow-box,
+.canvas-flow-screen[data-current] .canvas-flow-box {
+  outline: calc(2px * var(--canvas-unzoom, 1)) solid var(--canvas-focus-color);
+  outline-offset: calc(2px * var(--canvas-unzoom, 1));
+}
+/* Pins in the flow view: a screen's inside its top left corner; the whole flow's under
+   its Ask button, at the top left. */
+.canvas-flow-pins {
+  z-index: 2;
+}
+.canvas-flow-ask-flow {
+  position: relative;
+  display: inline-flex;
+}
+.canvas-flow-ask-flow > .canvas-flow-pins {
+  inset: calc(100% + 40px) auto auto 4px;
+}
+/* Inside the screen's top left corner, so the pin's head does not cover the screen's name. */
+.canvas-flow-frame > .canvas-flow-pins {
+  inset: calc(30px * var(--canvas-unzoom, 1)) auto auto calc(6px * var(--canvas-unzoom, 1));
+}
+.canvas-flow-frame > .canvas-flow-pins[data-at="point"] {
+  inset: 0;
+}
+.canvas-flow-live {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  display: block;
+  overflow: hidden;
+  transform-origin: 0 0;
+}
+.canvas-flow-live .canvas-frame {
+  display: block;
+  border: 0;
+}
+.canvas-flow-arrows {
+  position: absolute;
+  inset: 0;
+  inline-size: 100%;
+  block-size: 100%;
+  overflow: visible;
+  pointer-events: none;
+  color: var(--canvas-subtle-color);
+}
+.canvas-flow-arrows text {
+  fill: var(--canvas-subtle-color);
+  font-size: calc(12px * var(--flow-label, 1));
+  text-anchor: middle;
+}
+/* A halo in the canvas color, so a loop's line does not run through its words. */
+.canvas-flow-arrows .canvas-flow-on-line {
+  paint-order: stroke;
+  stroke: var(--canvas-bg-color);
+  stroke-width: calc(6px * var(--flow-label, 1));
+  stroke-linejoin: round;
+}
+.canvas-flow-arrows path {
+  fill: none;
+  stroke: currentColor;
+  /* The row is scaled by a CSS transform, which non-scaling-stroke does not undo. */
+  stroke-width: calc(1.5px * var(--canvas-unzoom, 1));
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 /* Motion. The chrome moves in three ways, and in no other:
    1. A control answers the pointer. Its wash and color ease in, and a button gives a
       little under a press.
@@ -1985,7 +2227,12 @@ html[data-canvas-alt] .canvas-frame-root * {
   .canvas-toolbar[data-place="pending"],
   .canvas-ghost-tag,
   .canvas-area,
-  .canvas-pin-bubble {
+  .canvas-pin-bubble,
+  .canvas-flow {
     animation: none;
+  }
+  .canvas-item-screens,
+  .canvas-flow-box {
+    transition: none;
   }
 }

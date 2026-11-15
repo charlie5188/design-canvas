@@ -36,6 +36,14 @@ export type CanvasItem = {
    */
   screens?: Record<string, ComponentType>;
   /**
+   * More states of a screen, by the screen's path and then by name: empty, an error, loading,
+   * a long name. They are part of this item, not versions of it: the flow view shows them on
+   * their screen, to switch between, and the canvas shows only the first state. The item's own
+   * screen is listed by its `path`, or by "" when it names none: `{ "": { Empty: ListEmpty } }`.
+   * `{ "/checkout": { Empty: CheckoutEmpty, "Card error": CheckoutError } }`
+   */
+  states?: Record<string, Record<string, ComponentType>>;
+  /**
    * The id of the item this one is a new version of. The canvas places it
    * beside that item, and its arrival clears that item's sent "new version"
    * annotations.

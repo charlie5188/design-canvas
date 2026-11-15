@@ -97,7 +97,8 @@ import {
   wheelPixels,
 } from "./dom";
 import { Icon } from "./icons";
-import { opensNewTab, pathOf, RouteContext, screenAt } from "./routes";
+import { controlWords, type FlowStep, FlowView } from "./FlowView";
+import { opensNewTab, pathOf, RouteContext, screenAt, screenIndex, screensOf, stateCount } from "./routes";
 import { labels } from "./labels";
 import {
   type Bounds,
@@ -279,6 +280,9 @@ const CloseIcon = () => <Icon name="x" />;
 const HelpIcon = () => <Icon name="help" />;
 const RestartIcon = () => <Icon name="player-skip-back" />;
 const MoreIcon = () => <Icon name="dots" />;
+const RouteIcon = () => <Icon name="route" size={14} />;
+const StatesIcon = () => <Icon name="stack-2" size={14} />;
+const NO_STEPS: FlowStep[] = [];
 
 async function writeClipboard(text: string) {
   if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
@@ -420,7 +424,7 @@ function AnnotationCard({ annotation, handlers, done }: { annotation: Annotation
     const card = cardRef.current;
     const field = fieldRef.current;
     if (!card || !field) return;
-    const view = card.closest(".canvas-viewport")?.getBoundingClientRect();
+    const view = card.closest(".canvas-viewport, .canvas-flow")?.getBoundingClientRect();
     const box = card.getBoundingClientRect();
     if (view) {
       card.toggleAttribute("data-flip-x", box.right > view.right - FLIP_MARGIN);
@@ -611,7 +615,7 @@ function AnnotationPin({
     if (!bubble) return;
     bubble.removeAttribute("data-flip-x");
     if (!speaking) return;
-    const view = bubble.closest(".canvas-viewport")?.getBoundingClientRect();
+    const view = bubble.closest(".canvas-viewport, .canvas-flow")?.getBoundingClientRect();
     if (view && bubble.getBoundingClientRect().right > view.right - FLIP_MARGIN) bubble.setAttribute("data-flip-x", "");
   }, [speaking, reply]);
   return (
@@ -748,6 +752,7 @@ function CanvasItemView({
   onAsk,
   route,
   onRestart,
+  onFlow,
   onPickVersion,
   picked,
   move,
@@ -780,6 +785,8 @@ function CanvasItemView({
   route?: string;
   /** Restart: the item goes back to its first screen. */
   onRestart: (id: string) => void;
+  /** Opens the flow view of an item with more than one screen (FlowView.tsx). */
+  onFlow: (item: CanvasItem) => void;
   /** Absent where a pick cannot be saved or would mean nothing: a shared file, while annotating, an item already set aside. */
   onPickVersion?: (item: CanvasItem) => void;
   /** This is the version the person chose. */
@@ -899,6 +906,8 @@ function CanvasItemView({
   };
   // The screen shown: the item's own component, or the one a link inside it led to.
   const Shown = (route && screenAt(item, route)) || item.component;
+  const screenCount = screensOf(item).length;
+  const states = stateCount(item);
 
   return (
     <div
@@ -961,6 +970,31 @@ function CanvasItemView({
           <span className="canvas-name" title={item.name}>
             {item.name}
           </span>
+          {/* Says the item holds a flow, and opens it up. Beside the name, not with the actions
+              that show on hover: it tells what the item is, so it is always there. */}
+          {(screenCount > 1 || states > 0) && (
+            <button
+              type="button"
+              className="canvas-item-screens"
+              aria-label={labels.showFlow(item.name, screenCount, states)}
+              data-tip={[screenCount > 1 ? labels.screens(screenCount) : "", states ? labels.states(states) : ""].filter(Boolean).join(" · ")}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={() => onFlow(item)}
+            >
+              {screenCount > 1 && (
+                <>
+                  <RouteIcon />
+                  {screenCount}
+                </>
+              )}
+              {states > 0 && (
+                <>
+                  <StatesIcon />
+                  {states}
+                </>
+              )}
+            </button>
+          )}
           {/* The item's actions, at the frame's top right, where they do not move with the
               length of the name. At most three are fixed: Ask agent about the whole item, Pick
               (with its word: it is the decision the canvas is for), and More. Restart comes
@@ -1375,6 +1409,17 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
   // or an empty one, shows its first screen. A `viewport` item keeps its own, in its frame.
   const [routes, setRoutes] = useState<Record<string, string[]>>({});
   const restartRoute = useCallback((id: string) => setRoutes((was) => (was[id]?.length ? { ...was, [id]: [] } : was)), []);
+  const routesRef = useRef(routes);
+  routesRef.current = routes;
+  // The flow view (FlowView.tsx): the item it shows, and the steps the person made in each item,
+  // which give arrows that a screen's links cannot (a router call in a click handler).
+  const [flowId, setFlowId] = useState<string | null>(null);
+  const [steps, setSteps] = useState<Record<string, FlowStep[]>>({});
+  // The control last pressed in an item, so a step it makes can be named on its arrow: click "Pay".
+  // A router call does not say what started it; a press just before it did.
+  const lastPress = useRef<{ id: string; words?: string; at: number } | null>(null);
+  const openFlow = useCallback((item: CanvasItem) => setFlowId(item.id), []);
+  const closeFlow = useCallback(() => setFlowId(null), []);
   // Items the saved layout already knows. Anything else is new and gets
   // placed in free space and revealed once it has a measured size.
   const known = useRef<Set<string> | null>(null);
@@ -3844,7 +3889,21 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       if (!blank) {
         // The same tab: a screen of this item, in place. A frame shows its own screens itself,
         // so a path that reaches here from one is not its own.
-        if (from && !from.viewport && screenAt(from, path)) return push(from);
+        if (from && !from.viewport && screenAt(from, path)) {
+          const stack = routesRef.current[from.id] ?? [];
+          const was = Math.max(0, screenIndex(from, stack[stack.length - 1] ?? from.path ?? ""));
+          const to = screenIndex(from, path);
+          const press = lastPress.current;
+          const label = press && press.id === from.id && performance.now() - press.at < 1500 ? press.words : undefined;
+          if (to !== was)
+            setSteps((all) => {
+              const list = all[from.id] ?? [];
+              const known = list.find((s) => s.from === was && s.to === to);
+              if (known && (known.label || !label)) return all;
+              return { ...all, [from.id]: [...list.filter((s) => s !== known), { from: was, to, label }] };
+            });
+          return push(from);
+        }
         return notify(from && (from.path || from.screens) ? labels.screenMissing(named) : labels.linkBlocked(named));
       }
       // A new tab: another item that shows the path, the nearest one, since several versions
@@ -3867,6 +3926,110 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       if (frame?.contentWindow) postToFrame(frame.contentWindow, { type: "screen", path });
     },
     [arrive, notify, reveal, shown],
+  );
+
+  useEffect(() => {
+    const world = worldRef.current;
+    if (!world) return;
+    const onPress = (event: MouseEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const id = target?.closest<HTMLElement>("[data-canvas-item]")?.dataset.canvasItem;
+      if (id) lastPress.current = { id, words: controlWords(target), at: performance.now() };
+    };
+    // Capture: the press is noted before the control's own handler makes the step.
+    world.addEventListener("click", onPress, true);
+    return () => world.removeEventListener("click", onPress, true);
+  }, []);
+  /** How a note about one screen of an item (its index), or about its whole flow (null), is named. */
+  const flowRefOf = useCallback((item: CanvasItem, index: number | null, state?: string) => {
+    const screens = screensOf(item);
+    const named = (path: string) => path || labels.firstScreen;
+    return index === null ? labels.flowRef(item.name, screens.map((s) => named(s.path))) : labels.screenRef(item.name, named(screens[index]?.path ?? ""), state);
+  }, []);
+  /**
+   * Ask agent from the flow view, about one screen or the whole flow. The note opens there, on
+   * the screen asked about: the view stays, and the item behind it does not change screen, so
+   * nothing moves while the person writes. The note belongs to the item, so it waits and goes
+   * to the agent like any other, and shows on the item once the view closes. A note about the
+   * same screen that still waits opens again.
+   */
+  const askFlow = useCallback(
+    (item: CanvasItem, index: number | null, state?: string) => {
+      const ref = flowRefOf(item, index, state);
+      const waiting = annotationsRef.current.find((a) => a.itemId === item.id && a.ref === ref && !a.sent && !a.queued);
+      if (waiting) return openExisting(waiting.id);
+      const preview = worldRef.current?.querySelector<HTMLElement>(`[data-canvas-preview="${CSS.escape(item.id)}"]`);
+      if (preview) startAnnotation(item.id, 0, 0, ref, { w: preview.offsetWidth, h: preview.offsetHeight });
+    },
+    [flowRefOf, openExisting, startAnnotation],
+  );
+  /**
+   * Ask agent from the flow view about an element of one screen. The note opens on the element,
+   * there, and is named by the screen and the element: `Name › screen /checkout › button “Pay”`.
+   * On the canvas its pin keeps that point on the item, whichever screen the item shows.
+   */
+  const askFlowElement = useCallback(
+    (item: CanvasItem, index: number, described: string, x: number, y: number, state?: string) => {
+      const ref = `${flowRefOf(item, index, state)} › ${described}`;
+      const waiting = annotationsRef.current.find((a) => a.itemId === item.id && a.ref === ref && !a.sent && !a.queued);
+      if (waiting) return openExisting(waiting.id);
+      startAnnotation(item.id, x, y, ref);
+    },
+    [flowRefOf, openExisting, startAnnotation],
+  );
+  /**
+   * The notes about one screen, or the whole flow, drawn in the flow view as pins: a screen's
+   * own in its corner, and those on its elements at their point, at the screen's size there.
+   */
+  const flowPins = useCallback(
+    (item: CanvasItem, index: number | null, scale: number, state?: string) => {
+      const ref = flowRefOf(item, index, state);
+      const mine = visibleAnnotations.filter((a) => a.itemId === item.id);
+      const whole = mine.filter((a) => a.ref === ref);
+      const onElements = index === null ? [] : mine.filter((a) => a.ref.startsWith(`${ref} › `));
+      const pin = (annotation: Annotation, at?: { x: number; y: number }) => {
+        // Without its area: the outline is the item's size on the canvas, not the screen's here.
+        const { w: _w, h: _h, ...rest } = annotation;
+        return (
+          <AnnotationPin
+            key={annotation.id}
+            annotation={at ? { ...rest, ...at } : rest}
+            number={annotation.sent || annotation.queued ? undefined : pending.indexOf(annotation) + 1}
+            open={openAnnotation?.id === annotation.id}
+            handlers={annotationHandlers}
+          />
+        );
+      };
+      return (
+        <>
+          {whole.length > 0 && <div className="canvas-pins canvas-flow-pins">{whole.map((a) => pin(a))}</div>}
+          {onElements.length > 0 && (
+            <div className="canvas-pins canvas-flow-pins" data-at="point">
+              {onElements.map((a) => pin(a, { x: a.x * scale, y: a.y * scale }))}
+            </div>
+          )}
+        </>
+      );
+    },
+    [annotationHandlers, flowRefOf, openAnnotation, pending, visibleAnnotations],
+  );
+  const flowItem = flowId ? shown.find((item) => item.id === flowId) : undefined;
+  /** From the flow view: the item, on the canvas, at the screen pressed. */
+  const openScreen = useCallback(
+    (index: number) => {
+      const item = flowItem;
+      setFlowId(null);
+      if (!item) return;
+      const path = screensOf(item)[index]?.path ?? "";
+      setRoutes((was) => ({ ...was, [item.id]: index === 0 ? [] : [path] }));
+      if (item.viewport && path) {
+        const frame = worldRef.current?.querySelector<HTMLIFrameElement>(`iframe[data-canvas-frame="${CSS.escape(item.id)}"]`);
+        if (frame?.contentWindow) postToFrame(frame.contentWindow, { type: "screen", path });
+      }
+      setFrontId(item.id);
+      reveal([item], true);
+    },
+    [flowItem, reveal],
   );
 
   const resetCamera = useCallback(() => setCamera(DEFAULT_CAMERA), [setCamera]);
@@ -4593,13 +4756,17 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       }
       // A toggles annotate mode, Escape leaves it, as long as nothing editable has focus.
       const plain = !event.metaKey && !event.ctrlKey && !event.altKey;
-      // Previews keep their own keys; the canvas, its toolbar, and pins take these.
+      // Previews keep their own keys; the canvas, its toolbar, and pins take these. Not a field,
+      // even one in a toolbar (a note can open under a toolbar's button), and not while the
+      // flow view is open over the canvas: it has keys of its own (FlowView.tsx).
       const canvasFocus =
-        event.target === viewport ||
+        !(event.target instanceof Element && typingIn(event.target)) &&
+        !viewport.parentElement?.querySelector(".canvas-flow") &&
+        (event.target === viewport ||
         event.target === document.body ||
         (event.target instanceof Element && event.target.closest(".canvas-toolbar, .canvas-pin-bubble") !== null) ||
         // A focused note or section itself, not the field inside a ghost.
-        (event.target instanceof Element && event.target.matches(".canvas-note-card, .canvas-section-tab"));
+        (event.target instanceof Element && event.target.matches(".canvas-note-card, .canvas-section-tab")));
       // ⌘/Ctrl + Z undoes the last saved change, unless a field or a preview has the key (its own undo).
       if (
         !shared &&
@@ -5037,12 +5204,14 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
                   ? [{ annotation, number: annotation.sent || annotation.queued ? undefined : pending.indexOf(annotation) + 1 }]
                   : [],
               )}
-              openAnnotation={openAnnotation?.id ?? null}
+              // While the flow view shows this item, its open note is drawn there, not twice.
+              openAnnotation={flowId === item.id ? null : (openAnnotation?.id ?? null)}
               annotationHandlers={annotationHandlers}
               onTrash={moveToTrash}
               onAsk={shared ? undefined : askItem}
               route={routes[item.id]?.[routes[item.id]!.length - 1]}
               onRestart={restartRoute}
+              onFlow={openFlow}
               onPickVersion={!shared && !annotating && !setAsideIds.has(item.id) ? pickVersion : undefined}
               picked={picks[item.id] ?? !!item.picked}
               move={(() => {
@@ -5341,6 +5510,20 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
         </div>
       )}
       {sharedFile && <SharePanel file={sharedFile.name} missing={sharedFile.missing} onClose={closeSharePanel} />}
+      {flowItem && (
+        <FlowView
+          item={flowItem}
+          current={Math.max(0, screenIndex(flowItem, routes[flowItem.id]?.[routes[flowItem.id]!.length - 1] ?? ""))}
+          learned={steps[flowItem.id] ?? NO_STEPS}
+          onOpen={openScreen}
+          onAsk={shared ? undefined : (index, state) => askFlow(flowItem, index, state)}
+          onAskElement={shared ? undefined : (index, described, x, y, state) => askFlowElement(flowItem, index, described, x, y, state)}
+          pinsFor={(index, scale, state) => flowPins(flowItem, index, scale, state)}
+          noteOpen={!!openAnnotation && openAnnotation.original.itemId === flowItem.id}
+          onCloseNote={annotationHandlers.onSave}
+          onClose={closeFlow}
+        />
+      )}
       {trashOpen && (
         <TrashPopover
           items={trashedItems}
