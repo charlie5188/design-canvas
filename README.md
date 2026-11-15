@@ -10,22 +10,12 @@ Instead of asking the agent to build a canvas from scratch for every project, th
 
 ## What you get
 
-- **Real components, no backend.** Items render your app's own components with synthetic data, styles, and themes.
-- **Know what can ship.** The agent builds versions from your components' props first, so they are product code already. A version that needs a new component says so on the canvas. When you ask to ship one, the agent moves it into the product and checks it in your running app.
-- **Talk about what you see.** Click an item's name to copy it. Hold ⌥/Alt and click any element to copy a reference such as `Pricing card · compact › button “Upgrade”`, then paste it into the conversation.
-- **Ask the agent, where you are looking.** Press A or the Ask agent button, then click an element, drag across an area, or click an item's name for the whole item, and write a note on each: a change you want, or a question such as "why is this button secondary?". The agent answers a question on its pin. The pin grows to show the first line of the answer, and a click opens the rest under your words, as a comment thread. You can answer back on the same pin. A change the agent could not make gets its reason the same way. Click a section's title to write one note about everything in it, such as "make one flow from these screens"; the message lists its items in the order you laid them out. Double-click a text to rewrite it where it sits; the new words stay on screen, underlined, so you can judge several rewrites together, and the edit becomes a note that says the old and new words. Send them all to the agent as one numbered message, straight from the canvas; each item and section in the message shows an "Agent working" tag, with a beam running around its border, until the agent finishes, and each pin clears itself once the agent has changed its item. Agents that can't listen in the background, such as ones without background commands, get the same message by copy and paste.
-- **Explain it to whoever opens the file.** Add a sticker note anywhere on the canvas, or draw a folder-style section around the versions you set aside and give it a title. Move them, resize them, and edit their text like objects on any canvas. Each change is saved into your code as you make it, so it is part of the shared file. Moving an item works the same way, since the shared file uses the positions in your code.
-- **Pick one, and the rest step aside.** Hover a version's name and press the check. That version gets a Picked mark, and the versions it was compared with move into one "Set aside" section below, in one step. Undo takes all of it back.
-- **The reasons stay with the canvas.** When you make a decision in the conversation, such as picking a version or dropping one and saying why, the agent adds a short note beside that version, in your own words. A version you drop with a reason stays on the canvas inside a "Set aside" frame, next to its note; one you drop without a reason goes to the trash. Whoever opens the shared file sees what was chosen, what was not, and why. Edit or delete the note like any other.
-- **See the plan before it is built.** When directions take real work to build, the agent first puts a card for each one on the canvas: a rough sketch of the layout, what it bets on, what it gives up, and what it borrows from. Press Drop on the ones you don't want, rewrite a card's text if the idea is off, and press Build this on the ones worth seeing. Each card becomes the live version in the same place.
-- **New versions beside the original.** Each note asks for a new version by default, so the agent keeps the original and adds the change next to it, and you compare both. Uncheck it to change the item in place.
-- **A trash you can undo.** Move a version you don't want to the trash. The trash shows small live previews, and one click puts an item back where it was. Its code stays until you ask the agent to remove it.
-- **Real viewports.** Mark an item `viewport: true` and it renders in a frame of its own width, so breakpoints and media queries behave as on a real phone or desktop.
-- **Your themes.** Light and dark (or any themes the app has) switch from the top right, across every item.
-- **Stays on the canvas.** Links, form submits, and router calls inside previews never navigate away; they show where they would have gone.
-- **One item alone.** Open any item in its own tab at its real size, ready for a screenshot or a design-tool import.
-- **Share as one file.** Click Share at the top right, or ask the agent, to get one HTML file that anyone can open with a double-click, with no server or setup. Drag the file into Figma to get a code layer you can play full screen. Notes and sections come with it; annotations and sending to the agent stay out of the shared file.
-- **A quiet workspace.** Drag items by their name, and they snap into line with the others. Pan, zoom, fit all, and reload without losing the layout. Figma's zoom keys work too: hold Z and click or drag, Shift + 0, 1, and 2.
+- **Your real components.** Each item is your app's own component, with its styles and themes, and made-up data in place of a backend. Ask for a phone or desktop width, and breakpoints behave as on the device.
+- **Versions side by side.** Ask for a change, and the agent keeps the original and adds a new version next to it, so you compare both.
+- **Ask the agent where you are looking.** Press A, click an element, and write a change or a question. Send it, and the agent makes the change or answers on that pin.
+- **Pick one.** Hover a version's name and press the check. It gets a Picked mark, and the others move into a "Set aside" section. A reason you give in the conversation stays beside the version as a note.
+- **The one you pick is already code.** The agent builds versions from your components' props first. Ask it to ship one, and it moves that version into the product and checks it in your running app.
+- **Share as one file.** Click Share to get one HTML file that opens with a double-click, and that you can put in Figma or Notion. See [Share a canvas](#share-a-canvas).
 
 ## Compared with Claude Design, Paper, and Figma
 
@@ -45,7 +35,7 @@ design-canvas has no design file. The canvas renders your app's real components 
 
 Prices and limits are as of November 2026 and change often. Check each link for current terms.
 
-**Use design-canvas** to compare clearly different directions for a product you already have, side by side with real components, real data, real screen widths, and your themes. The one you choose is already code.
+**Use design-canvas** to compare clearly different directions for a product you already have, side by side with real components, real screen widths, and your themes. The one you choose is already code.
 
 **Use a design tool** to adjust details by hand, to start an idea that has no code yet, or to work in one file with your team.
 
@@ -79,7 +69,7 @@ Click Share (the share icon) at the top right of the canvas, or ask the agent to
 - **Put it in Notion.** Drag the file into a Notion page. It becomes an embedded web page that people can use right in the page.
 - **Get comments on a link (Claude).** If your agent is Claude, ask it to "publish the canvas as a link for comments". It publishes the same file as a private Claude Artifact. Share the link from the Artifact's Share menu, and reviewers comment on the page itself. Ask the agent to read the comments, or send a comment to Claude from its thread: the agent makes the change and updates the same link.
 
-The file is a snapshot, so share again after changes. It holds every item's data, so keep items on made-up data. Annotations and sending to the agent are not in the file.
+The file is a snapshot, so share again after changes. It holds every item's data, so keep items on made-up data. The Ask agent tool and its pins are not in the file.
 
 ## How it works
 
@@ -98,7 +88,7 @@ Canvases are prototypes. Commit one only when teammates need to change it; to le
 
 - The shell is React. For other frameworks, the agent ports it using `shell/TESTING.md` as the acceptance list.
 - Server components, server actions, and anything that needs a server secret cannot render on the canvas; preview the client component beneath them instead.
-- Inside `viewport` frames, middle-button pan and touch pinch do not reach the canvas.
+- Inside an item shown at a fixed screen width (a `viewport` item), middle-button pan and touch pinch do not reach the canvas.
 - A shared file is a snapshot of the canvas. Files loaded by a path built at runtime, such as `/avatars/${id}.png`, are not inside it; import them in the item instead.
 
 ## Credits
@@ -119,22 +109,12 @@ React アプリの実際のコンポーネントを、パン・ズームでき�
 
 ### できること
 
-- **本物のコンポーネント、バックエンドなし。** アイテムはアプリ自身のコンポーネントを、合成データとアプリのスタイル・テーマで表示します。
-- **そのままリリースできる案がわかる。** エージェントはまず既存コンポーネントの props で案を作るので、その案はそのままプロダクトのコードです。新しいコンポーネントが必要な案は、キャンバス上にそう表示されます。案をプロダクトに入れるよう頼むと、エージェントが組み込み、実際のアプリで確認します。
-- **見ているものをそのまま会話に。** アイテム名をクリックすると名前をコピーできます。⌥/Alt を押しながら要素をクリックすると、`Pricing card · compact › button “Upgrade”` のような参照をコピーでき、そのまま会話に貼り付けられます。
-- **見ている場所で、エージェントに頼む・聞く。** A キーか Ask agent ボタンを押し、要素をクリックするか、範囲をドラッグで囲むか、アイテム名をクリックしてアイテム全体を選び、それぞれにメモを書きます。メモは、変更の依頼でも、「このボタンはなぜセカンダリなのか」といった質問でもかまいません。質問には、エージェントがそのピンの上で答えます。ピンが横に伸びて答えの 1 行目を表示し、クリックすると、自分のメモの下に全文がコメントスレッドのように開きます。同じピンでそのまま返信もできます。依頼どおりに変更できなかった場合も、同じように理由が表示されます。セクションのタイトルをクリックすると、中のアイテムすべてについて 1 つのメモを書けます（例：「この画面をつないで 1 つのフローにして」）。メッセージには、中のアイテムが並べた順に入ります。テキストをダブルクリックすると、その場で文言を書き換えられます。新しい文言は下線付きで画面に残るので、複数の書き換えをまとめて確かめられます。書き換えは、元の文言と新しい文言を示すメモになります。すべてを番号付きの 1 つのメッセージとして、キャンバスから直接エージェントに送れます。エージェントが作業を終えるまで、メッセージに含まれるアイテムとセクションには「Agent working」のタグが付き、枠に沿って光のビームが回ります。エージェントがそのアイテムを変更すると、ピンは自動で消えます。バックグラウンドで待機できないエージェント（バックグラウンドコマンドがないものなど）には、同じメッセージをコピーして貼り付けます。
-- **開いた人に説明を添える。** 付箋のノートをキャンバスのどこにでも置いたり、見送った案をフォルダ型のセクションで囲んでタイトルを付けたりできます。移動、サイズ変更、文字の編集もできます。変更はその場でコードに保存され、共有ファイルにも反映されます。アイテムを動かした場合も同じです。共有ファイルはコード内の位置を使うためです。
-- **1 つ選ぶと、ほかの案は脇へ。** 案の名前にカーソルを合わせて、チェックを押します。その案に「Picked」の印が付き、比べていたほかの案は、下にある 1 つの「Set aside」セクションにまとめて移ります。操作は 1 回で、元に戻すとすべてが元の状態に戻ります。
-- **判断の理由がキャンバスに残る。** 会話の中で、ある案を選んだり、理由を添えて案を見送ったりすると、エージェントがその案のそばに短いノートを、あなたの言葉のまま追加します。理由を添えて見送った案は、「Set aside」の枠に入った状態でノートと一緒にキャンバスに残ります。理由なしで見送った案はゴミ箱に移ります。共有ファイルを開いた人は、何が選ばれ、何が選ばれず、なぜそうなったかがわかります。ノートは、ほかのノートと同じように編集・削除できます。
-- **作る前に計画を確認。** 作るのに手間がかかる方向性は、エージェントがまず 1 案ずつカードにしてキャンバスに置きます。カードには、レイアウトのラフなスケッチと、その案が何に賭けるか、何をあきらめるか、どの製品を参考にしたかが書かれています。いらない案は Drop を押し、内容が違うと思ったらカードの文言を書き換え、見てみたい案は Build this を押します。各カードは、同じ場所で実際に動く案に置き換わります。
-- **新しい案は元の案の隣に。** 注釈は初期設定で新しい案を求めます。エージェントは元の案を残したまま変更を隣に追加するので、2 つを見比べられます。チェックを外すと、そのアイテム自体を変更します。
-- **元に戻せるゴミ箱。** いらない案はゴミ箱に移せます。ゴミ箱では小さなライブプレビューが表示され、クリックすると元の位置に戻ります。コードは、エージェントに削除を頼むまで残ります。
-- **本物のビューポート。** アイテムに `viewport: true` を指定すると、そのアイテムの幅を持つフレーム内で表示されます。ブレークポイントやメディアクエリが、実際のスマートフォンやデスクトップと同じように動きます。
-- **アプリのテーマ。** ライト・ダーク（またはアプリが持つ任意のテーマ）を右上から切り替えられ、すべてのアイテムに反映されます。
-- **キャンバスから離れない。** プレビュー内のリンク、フォーム送信、ルーター呼び出しでページが遷移することはありません。遷移先は通知で表示されます。
-- **アイテム単体で開く。** どのアイテムも実寸のまま別タブで開けます。スクリーンショットやデザインツールへの取り込みにそのまま使えます。
-- **1 つのファイルで共有。** 右上の Share をクリックするか、エージェントに頼むと、1 つの HTML ファイルができます。サーバーや準備は不要で、誰でもダブルクリックで開けます。Figma にドラッグすると、フルスクリーンで操作できるコードレイヤーになります。ノートとセクションは共有ファイルに含まれます。注釈とエージェントへの送信は含まれません。
-- **静かな作業スペース。** 名前をドラッグしてアイテムを移動すると、ほかのアイテムと揃う位置に吸着します。パン、ズーム、全体表示もできます。再読み込みしてもレイアウトは保たれます。Figma と同じズーム操作も使えます（Z を押しながらクリックまたはドラッグ、Shift + 0・1・2）。
+- **本物のコンポーネント。** アイテムはアプリ自身のコンポーネントで、スタイルとテーマもアプリのままです。バックエンドの代わりに架空のデータを使います。スマートフォンやデスクトップの幅を頼むと、ブレークポイントが実機と同じように動きます。
+- **案を並べて比べる。** 変更を頼むと、エージェントは元の案を残して、新しい案を隣に追加します。2 つを見比べられます。
+- **見ている場所で、エージェントに頼む・聞く。** A キーを押して要素をクリックし、変更の依頼か質問を書いて送ります。エージェントは変更を加えるか、そのピンの上で答えます。
+- **1 つ選ぶ。** 案の名前にカーソルを合わせて、チェックを押します。その案に「Picked」の印が付き、ほかの案は「Set aside」セクションに移ります。会話で伝えた理由は、ノートとしてその案のそばに残ります。
+- **選んだ案は、すでにコード。** エージェントはまず既存コンポーネントの props で案を作ります。プロダクトに入れるよう頼むと、エージェントが組み込み、実際のアプリで確認します。
+- **1 つのファイルで共有。** Share をクリックすると、ダブルクリックで開ける 1 つの HTML ファイルができます。Figma や Notion にも置けます。詳しくは[キャンバスを共有する](#キャンバスを共有する)を見てください。
 
 ### Claude Design、Paper、Figma との違い
 
@@ -154,7 +134,7 @@ design-canvas にはデザインファイルがありません。キャンバス
 
 料金と制限は 2026 年 11 月時点のもので、よく変わります。最新の条件は各リンク先で確認してください。
 
-**design-canvas が向いているのは**、すでにあるプロダクトで、はっきり異なる方向性を比べるときです。実際のコンポーネント、実際のデータ、実際の画面幅、アプリのテーマで並べて比べられます。選んだものは、そのままコードとして残ります。
+**design-canvas が向いているのは**、すでにあるプロダクトで、はっきり異なる方向性を比べるときです。実際のコンポーネント、実際の画面幅、アプリのテーマで並べて比べられます。選んだものは、そのままコードとして残ります。
 
 **デザインツールが向いているのは**、細部を手で調整するとき、まだコードがないアイデアを始めるとき、チームで 1 つのファイルを使って作業するときです。
 
@@ -188,7 +168,7 @@ npx skills add charlie5188/design-canvas --skill '*'
 - **Notion に置く。** ファイルを Notion のページにドラッグすると、埋め込みのウェブページになり、ページの中でそのまま操作できます。
 - **リンクでコメントをもらう（Claude）。** エージェントが Claude の場合は、「キャンバスをコメント用のリンクとして公開して」と頼みます。同じファイルが非公開の Claude Artifact として公開されます。Artifact の共有メニューからリンクを共有すると、レビューする人がページ上に直接コメントできます。コメントを読むようエージェントに頼むか、コメントのスレッドから Claude に送ると、エージェントが変更を加えて同じリンクを更新します。
 
-ファイルはその時点のスナップショットなので、変更したらもう一度共有してください。すべてのアイテムのデータが含まれるので、アイテムには架空のデータを使ってください。注釈とエージェントへの送信は含まれません。
+ファイルはその時点のスナップショットなので、変更したらもう一度共有してください。すべてのアイテムのデータが含まれるので、アイテムには架空のデータを使ってください。Ask agent ツールとそのピンは含まれません。
 
 ### しくみ
 
@@ -207,7 +187,7 @@ npx skills add charlie5188/design-canvas --skill '*'
 
 - 本体は React です。ほかのフレームワークでは、エージェントが `shell/TESTING.md` を受け入れ基準として移植します。
 - サーバーコンポーネント、サーバーアクション、サーバー側の秘密情報が必要なものは、キャンバス上で表示できません。代わりに、その下にあるクライアントコンポーネントをプレビューしてください。
-- `viewport` フレームの上では、中ボタンでのパンとタッチのピンチ操作がキャンバスに届きません。
+- 画面幅を固定して表示するアイテム（`viewport` のアイテム）の上では、中ボタンでのパンとタッチのピンチ操作がキャンバスに届きません。
 - 共有ファイルは、その時点のキャンバスのスナップショットです。実行時に組み立てるパス（`/avatars/${id}.png` など）で読み込むファイルは含まれません。アイテム内で import してください。
 
 ### クレジット
