@@ -7,6 +7,8 @@ export const labels = {
   canvasBar: "Canvas",
   changesBar: "Not sent to the agent yet",
   theme: "Theme",
+  background: "Background",
+  backgrounds: { default: "Default", white: "White", dark: "Dark" },
   help: "Canvas controls",
   /**
    * Canvas controls, in groups. Words between backticks are keys and are drawn as key caps.
@@ -91,6 +93,9 @@ export const labels = {
   picked: "Picked",
   pickedToast: (name: string, others: number) =>
     others ? `Picked ${name}. Set ${others} other${others === 1 ? "" : "s"} aside.` : `Picked ${name}`,
+  unpick: (name: string) => `Unpick ${name}`,
+  unpickHint: "Unpick",
+  unpicked: (name: string) => `Unpicked ${name}`,
   pickFailed: "Couldn't save the pick. Is the canvas's dev server running?",
   /** The title of the section a pick makes for the versions that were not picked. */
   setAside: "Set aside",

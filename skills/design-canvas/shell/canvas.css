@@ -40,6 +40,91 @@ body,
   --canvas-slow: 200ms;
   color: var(--canvas-text-color);
 }
+/* A background the viewer chose for the board (BackgroundPicker in Canvas.tsx).
+   Each preset brings a whole set of chrome colors, so the words on the board and
+   the bars over it stay readable on it, whatever the project's theme is. */
+.canvas-root[data-background="white"] {
+  --canvas-bg-color: #ffffff;
+  --canvas-surface-color: #ffffff;
+  --canvas-border-color: #d5d9de;
+  --canvas-text-color: #1f2328;
+  --canvas-subtle-color: #5f6b76;
+  --canvas-hover-color: rgb(0 0 0 / 6%);
+}
+.canvas-root[data-background="dark"] {
+  --canvas-bg-color: #1b1d20;
+  --canvas-surface-color: #26292e;
+  --canvas-border-color: #3d424a;
+  --canvas-text-color: #e8eaed;
+  --canvas-subtle-color: #9ba5b0;
+  --canvas-hover-color: rgb(255 255 255 / 8%);
+  --canvas-shadow-raised: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 12px rgb(0 0 0 / 30%);
+  --canvas-shadow-overlay: 0 2px 6px rgb(0 0 0 / 30%), 0 12px 32px rgb(0 0 0 / 45%);
+}
+/* What a frame shows is the project's, never the board's: previews go back to the
+   project's own colors, so a component looks the same on any background. */
+.canvas-root[data-background] :is(.canvas-preview, .canvas-trash-real, .canvas-flow-box) {
+  --canvas-bg-color: var(--canvas-bg, #eef0f2);
+  --canvas-surface-color: var(--canvas-surface, #ffffff);
+  --canvas-border-color: var(--canvas-border, #d5d9de);
+  --canvas-text-color: var(--canvas-text, #1f2328);
+  --canvas-subtle-color: var(--canvas-text-subtle, #5f6b76);
+  --canvas-hover-color: var(--canvas-hover, rgb(0 0 0 / 6%));
+  color: var(--canvas-text-color);
+}
+/* A preset's color, on the background button and in its list. "Default" is the project's own. */
+.canvas-swatch {
+  display: block;
+  inline-size: 16px;
+  block-size: 16px;
+  box-sizing: border-box;
+  border: 1px solid rgb(127 127 127 / 45%);
+  border-radius: 50%;
+  background: var(--canvas-bg, #eef0f2);
+}
+.canvas-swatch[data-background="white"] {
+  background: #ffffff;
+}
+.canvas-swatch[data-background="dark"] {
+  background: #1b1d20;
+}
+.canvas-backgrounds {
+  position: absolute;
+  inset-block-start: calc(100% + 10px);
+  inset-inline-end: 0;
+  display: grid;
+  gap: 2px;
+  min-inline-size: 140px;
+  padding: 4px;
+  border: 1px solid var(--canvas-border-color);
+  border-radius: var(--canvas-radius-l);
+  background: var(--canvas-surface-color);
+  box-shadow: var(--canvas-shadow-overlay);
+  color: var(--canvas-text-color);
+  font-size: 13px;
+}
+.canvas-backgrounds[hidden] {
+  display: none;
+}
+.canvas-background-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--canvas-radius-m);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.canvas-background-option:hover {
+  background: var(--canvas-hover-color);
+}
+.canvas-background-option[aria-pressed="true"] {
+  font-weight: 600;
+}
 /* Chrome text uses the app font when a kit maps --canvas-font, else the system font. */
 .canvas-item-head,
 .canvas-toolbar,
@@ -1773,6 +1858,21 @@ html[data-canvas-alt] .canvas-frame-root * {
   padding: 2px 10px 3px 6px;
   border-radius: 0 0 8px 8px;
   background: var(--canvas-fill-color);
+}
+/* Unpick shows on the tab only while the item is hovered or the button has focus. */
+.canvas-unpick {
+  margin-inline: 2px -6px;
+  padding: 2px;
+  opacity: 0;
+}
+.canvas-item:hover .canvas-unpick,
+.canvas-unpick:focus-visible {
+  opacity: 1;
+}
+@media (hover: none) {
+  .canvas-unpick {
+    opacity: 1;
+  }
 }
 /* The ring matches its tab. */
 .canvas-item[data-picked] .canvas-preview {
