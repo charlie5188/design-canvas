@@ -2018,6 +2018,29 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     place(guideVRef.current, snap?.vertical, true);
     place(guideHRef.current, snap?.horizontal, false);
   });
+  // The size a resize is at, next to the pointer, so a frame can be dragged to an
+  // exact breakpoint without guessing. Like the guides, it is always in the page
+  // and only placed and filled here, on every pointer move.
+  const sizeTipRef = useRef<HTMLDivElement>(null);
+  const sizeTip = (e: PointerEvent | null, w = 0, h = 0, edge: BoardEdge = "se") => {
+    const element = sizeTipRef.current;
+    if (!element) return;
+    if (!e) {
+      element.hidden = true;
+      return;
+    }
+    // An edge changes one dimension, so only that one is shown; a corner shows both.
+    const both = edge.length === 2;
+    const vertical = edge === "n" || edge === "s";
+    element.textContent = both ? `${w} × ${h}` : vertical ? `H ${h}` : `W ${w}`;
+    // Below and to the right of the pointer, clear of the cursor, flipped near the window's edge.
+    const offset = 16;
+    const box = { w: element.offsetWidth || 80, h: element.offsetHeight || 22 };
+    const x = e.clientX + offset + box.w > window.innerWidth ? e.clientX - offset - box.w : e.clientX + offset;
+    const y = e.clientY + offset + box.h > window.innerHeight ? e.clientY - offset - box.h : e.clientY + offset;
+    element.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
+    element.hidden = false;
+  };
   const boardContext = useMemo<BoardContext>(
     () => ({
       entryOf: (kind, id) => {
@@ -3032,7 +3055,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
   const dragBoard = (
     event: ReactPointerEvent<HTMLElement>,
     first: () => void,
-    step: (dx: number, dy: number) => void,
+    step: (dx: number, dy: number, e: PointerEvent) => void,
     done: () => void,
     tap?: () => void,
   ) => {
@@ -3055,7 +3078,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
         first();
       }
       const z = camera.current.z;
-      step((e.clientX - start.x) / z, (e.clientY - start.y) / z);
+      step((e.clientX - start.x) / z, (e.clientY - start.y) / z, e);
     };
     const end = (e: PointerEvent) => {
       if (e.pointerId !== pointerId) return;
@@ -3173,7 +3196,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
           id = ensureMark(ref.kind, ref.id);
           select({ kind: ref.kind, id, ghost: true });
         },
-        (dx, dy) => {
+        (dx, dy, e) => {
           if (!id) return;
           const w = Math.max(least.w, east ? w0 + dx : west ? w0 - dx : w0);
           const h = Math.max(least.h, south ? h0 + dy : north ? h0 - dy : h0);
@@ -3184,8 +3207,13 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
             w: Math.round(w),
             h: Math.round(h),
           });
+          // A section is a frame with a size worth knowing; a note's size is only room for its text.
+          if (ref.kind === "section") sizeTip(e, Math.round(w), Math.round(h), edge);
         },
-        pruneUnchanged,
+        () => {
+          sizeTip(null);
+          pruneUnchanged();
+        },
         // A click on the border, like one inside, selects it.
         () => select(ref),
       );
@@ -3238,10 +3266,11 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     dragBoard(
       event,
       () => {},
-      (dx, dy) => {
+      (dx, dy, e) => {
         // An edge changes one dimension, a corner both.
         const w = Math.round(Math.max(least.w, east ? w0 + dx : west ? w0 - dx : w0));
         const h = Math.round(Math.max(least.h, south ? h0 + dy : north ? h0 - dy : h0));
+        sizeTip(e, w, h, edge);
         const raw = itemsRawRef.current.find((entry) => entry.id === item.id);
         if (!raw) return;
         setSizes((prev) => ({ ...prev, [item.id]: { w, h, bw: raw.width, bh: raw.height } }));
@@ -3251,7 +3280,10 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
           setPositions((prev) => ({ ...prev, [item.id]: { x, y } }));
         }
       },
-      queueSave,
+      () => {
+        sizeTip(null);
+        queueSave();
+      },
     );
   };
   const onResizeItem = useCallback(
@@ -5387,6 +5419,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       </div>
       <div ref={pickRef} className="canvas-pick" hidden aria-hidden="true" />
       <div ref={drawRef} className="canvas-draw" hidden aria-hidden="true" />
+      <div ref={sizeTipRef} className="canvas-size-tip" hidden aria-hidden="true" />
       {toast && (
         <div className="canvas-toast">
           {toast.kind === "copied" ? (

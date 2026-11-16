@@ -723,6 +723,24 @@ html[data-canvas-alt] .canvas-frame-root * {
 }
 /* Alignment guides while an item is dragged. Placed in canvas units by the
    canvas; the thickness counter-scales so a guide is 1px on screen at any zoom. */
+/* The size of a frame being resized, next to the pointer. Fixed to the window,
+   so it reads the same at any zoom. */
+.canvas-size-tip {
+  position: fixed;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  z-index: 2147483646;
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: var(--canvas-focus-color, #2f6fed);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
 .canvas-guide {
   position: absolute;
   inset-block-start: 0;
