@@ -570,18 +570,34 @@ function AnnotationCard({ annotation, handlers, done }: { annotation: Annotation
         >
           <TrashIcon />
         </button>
-        {/* Named in full for a screen reader ("Send 2 to agent"); the word on it is the start of that name. */}
-        <button
-          type="button"
-          className="canvas-button canvas-button-primary"
-          disabled={!value.trim()}
-          aria-label={send.name}
-          title={labels.sendHint}
-          onClick={sendAll}
-        >
-          {send.agentOn ? <SendIcon /> : <CopyIcon />}
-          {send.label}
-        </button>
+        {/* With a listening agent, sending is instant, so each note sends (named in full for a
+            screen reader, "Send 2 to agent"). Without one, the person writes several notes and
+            pastes them once: a Copy on every note read as "copy this one" and hid that it copies
+            all. So the note only keeps itself (Done), and the bar at the top, which appears and
+            counts up as notes are kept, is the one place to copy. ⌘/Ctrl + Enter still copies all. */}
+        {send.agentOn ? (
+          <button
+            type="button"
+            className="canvas-button canvas-button-primary"
+            disabled={!value.trim()}
+            aria-label={send.name}
+            title={labels.sendHint}
+            onClick={sendAll}
+          >
+            <SendIcon />
+            {send.label}
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="canvas-button canvas-button-primary"
+            disabled={!value.trim()}
+            title={labels.doneHint}
+            onClick={keep}
+          >
+            {labels.doneNote}
+          </button>
+        )}
       </span>
     </div>
   );
@@ -5245,8 +5261,9 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
   const sendWords = useMemo(() => {
     const n = Math.max(1, unsentCount);
     return {
-      label: agentOn ? labels.sendShort(n) : labels.copyShort(n),
-      name: agentOn ? labels.sendAnnotations(n) : labels.copyAnnotations(n),
+      // Only a listening agent's notes show these; without one a note says Done.
+      label: labels.sendShort(n),
+      name: labels.sendAnnotations(n),
       agentOn,
     };
   }, [agentOn, unsentCount]);

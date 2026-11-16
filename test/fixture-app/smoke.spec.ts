@@ -572,18 +572,25 @@ test('a note is a conversation: the agent answers on its pin, and the person ans
     await page.getByRole('button', { name: 'Ask agent', exact: true }).click()
     await page.locator('.canvas-preview h2').click()
     const note = page.getByRole('dialog', { name: /^Ask agent about/ })
-    // The field says both things it is for. The note has one way on, and its button says one word:
-    // what it sends, and to whom, is its name for a screen reader, the same as the bar's.
+    // The field says both things it is for. With no agent listening, the note has one way on:
+    // Done keeps it, and the bar at the top is the one place that copies, counting up as notes are kept.
     await expect(note.getByRole('textbox')).toHaveAttribute('placeholder', 'Ask for a change, or ask why')
     await expect(note.getByRole('button')).toHaveCount(2)
-    await expect(note.getByRole('button', { name: 'Copy 1 for agent' })).toHaveText('Copy')
-    await expect(note.getByRole('button', { name: 'Copy 1 for agent' })).toBeDisabled()
+    await expect(note.getByRole('button', { name: 'Done' })).toBeDisabled()
+    await expect(page.getByRole('button', { name: /^Copy \d+ for agent$/ })).toHaveCount(0)
     await note.getByRole('textbox').fill('Why is this title so large?')
+    // The bar counts the note while it is still being written.
+    await expect(page.getByRole('button', { name: 'Copy 1 for agent' })).toBeVisible()
     // In place: such a note clears when its item changes, unless it has an answer.
     await note.getByRole('checkbox').uncheck()
-    // Sent from the note itself, with no trip to the bar above.
-    await note.getByRole('button', { name: 'Copy 1 for agent' }).click()
+    await note.getByRole('button', { name: 'Done' }).click()
+    await expect(note).toHaveCount(0)
+    await page.getByRole('button', { name: 'Copy 1 for agent' }).click()
     await expect(page.locator('.canvas-toast')).toContainText('Copied 1 for the agent')
+    // Reopened, a sent note offers nothing to copy: Done only closes it.
+    await page.getByRole('button', { name: /^Sent to the agent: Why is this title/ }).click()
+    await expect(note.getByRole('button', { name: 'Done' })).toBeVisible()
+    await page.keyboard.press('Escape')
     await expect(note).toHaveCount(0)
     // Each entry ends with the id the agent answers to.
     const text = await clipboard()
@@ -650,7 +657,8 @@ test('a note is a conversation: the agent answers on its pin, and the person ans
     // The person answers back on the same pin. The message carries the conversation, so it reads whole on its own.
     await bubble.click()
     await note.getByRole('textbox').fill('Then make it one step smaller')
-    await note.getByRole('button', { name: 'Copy 1 for agent' }).click()
+    // ⌘/Ctrl + Enter copies everything from the note, without the trip to the bar.
+    await note.getByRole('textbox').press('ControlOrMeta+Enter')
     expect(await clipboard()).toContain(
       `   Earlier on this note:\n   - Person: Why is this title so large?\n   - Agent (you): It is the page heading, so it follows the type scale ("見出し").\n     Say if you want it one step smaller.\n   Now: Then make it one step smaller\n   (note ${id})`,
     )
