@@ -45,7 +45,7 @@ Common spectra. Find others in the product:
 - **Market and culture**, such as Japan ↔ US: density, formality, approval steps, and what makes people trust the screen.
 - **Roles**: the different people who use the same screen, such as the admin who pays and the member who hits a limit and asks the admin.
 - **Situation**: how people arrive, such as pushed by a limit ↔ comparing on purpose, or on a phone in a hurry ↔ at a desk with time.
-- **Target users**: the different people the product serves, such as a lawyer and a sales rep.
+- **Target users**: the different people the product serves. In a legal product, for example: lawyers (deep review, risk judgment, final sign-off), business users (requests and intake, working with legal, and "what do I do next?"), and legal ops (playbooks, templates, permissions, reporting). Most screens serve one or two of them; use only the ones who really use this screen.
 
 Rules:
 
