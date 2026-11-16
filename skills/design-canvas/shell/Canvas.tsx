@@ -772,6 +772,7 @@ function CanvasItemView({
   onRestart,
   onFlow,
   onPickVersion,
+  onUnpick,
   picked,
   move,
   onUndoMove,
@@ -807,6 +808,8 @@ function CanvasItemView({
   onFlow: (item: CanvasItem) => void;
   /** Absent where a pick cannot be saved or would mean nothing: a shared file, while annotating, an item already set aside. */
   onPickVersion?: (item: CanvasItem) => void;
+  /** Takes the pick back. Absent where nothing can be saved: a shared file, while annotating. */
+  onUnpick?: (item: CanvasItem) => void;
   /** This is the version the person chose. */
   picked: boolean;
   /** Set while the item sits somewhere the registry does not have it. */
@@ -953,6 +956,19 @@ function CanvasItemView({
         <span className="canvas-ghost-tag canvas-item-tag" data-state="picked">
           <PickIcon />
           {labels.picked}
+          {/* The way back from a pick once its toast is gone. On the tag, where the pick is
+              shown, and only while the item is hovered, so the lasting tag stays quiet. */}
+          {onUnpick && (
+            <button
+              type="button"
+              className="canvas-ghost-delete canvas-unpick"
+              aria-label={labels.unpick(item.name)}
+              data-tip={labels.unpickHint}
+              onClick={() => onUnpick(item)}
+            >
+              <Icon name="x" size={12} />
+            </button>
+          )}
         </span>
       ) : tag ? (
         <span className="canvas-ghost-tag canvas-item-tag" data-state={tag}>
@@ -3730,6 +3746,8 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
         .map((item) => item.id),
     );
   }, [positions, removed, sections, shown]);
+  /** Each pick's saved change, so Unpick can take all of it back while nothing came after it. */
+  const pickChanges = useRef(new Map<string, SavedChange>());
   const pickVersion = useCallback(
     async (item: CanvasItem) => {
       if (shared) return;
@@ -3897,6 +3915,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
         // seconds after an undo, so that the undo's own saves are not history. A pick is
         // the person's act, and one made right after an undo must be undoable too.
         savedHistory.current = [...savedHistory.current, entry].slice(-HISTORY_LIMIT);
+        pickChanges.current.set(item.id, entry);
         notify(labels.pickedToast(item.name, others.length), {
           label: labels.undo,
           run: async () => {
@@ -3914,6 +3933,45 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       await save;
     },
     [notify, queueSave],
+  );
+
+  // Unpick, on the Picked tag. Right after a pick (nothing saved since) it is the
+  // pick's own Undo: the mark goes and the set-aside versions come back to where
+  // they were. Later, the canvas may have changed around them, so putting them back
+  // could land them on top of newer work: only the mark goes, and the set-aside
+  // versions stay where the person can see them and drag back what they want.
+  const unpickVersion = useCallback(
+    async (item: CanvasItem) => {
+      if (shared) return;
+      await flushTrackedRef.current();
+      await Promise.all([...savesInFlight.current]);
+      const entry = pickChanges.current.get(item.id);
+      pickChanges.current.delete(item.id);
+      const history = savedHistory.current;
+      if (entry && history[history.length - 1] === entry) {
+        savedHistory.current = history.slice(0, -1);
+        await undoChangeRef.current(entry);
+        return;
+      }
+      setPicks((prev) => ({ ...prev, [item.id]: false }));
+      const result = await postRegistry({ edits: [{ kind: "item", id: item.id, set: { picked: false } }] });
+      if (!result || result.missing?.length || result.rejected?.length) {
+        setPicks((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => id !== item.id)));
+        notify(labels.pickFailed, undefined, true);
+        return;
+      }
+      const change: SavedChange = { edits: [{ kind: "item", id: item.id, set: { picked: true } }], removes: [], adds: [], positions: {} };
+      savedHistory.current = [...savedHistory.current, change].slice(-HISTORY_LIMIT);
+      notify(labels.unpicked(item.name), {
+        label: labels.undo,
+        run: async () => {
+          if (!savedHistory.current.includes(change)) return;
+          savedHistory.current = savedHistory.current.filter((c) => c !== change);
+          await undoChangeRef.current(change);
+        },
+      });
+    },
+    [notify],
   );
 
   // A trash an older shell kept only in this browser goes into the registry, once.
@@ -5352,6 +5410,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
               onRestart={restartRoute}
               onFlow={openFlow}
               onPickVersion={!shared && !annotating && !setAsideIds.has(item.id) ? pickVersion : undefined}
+              onUnpick={!shared && !annotating ? unpickVersion : undefined}
               picked={picks[item.id] ?? !!item.picked}
               move={(() => {
                 const moved = movedItems.find((m) => m.id === item.id);

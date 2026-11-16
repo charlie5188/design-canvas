@@ -1774,6 +1774,21 @@ html[data-canvas-alt] .canvas-frame-root * {
   border-radius: 0 0 8px 8px;
   background: var(--canvas-fill-color);
 }
+/* Unpick shows on the tab only while the item is hovered or the button has focus. */
+.canvas-unpick {
+  margin-inline: 2px -6px;
+  padding: 2px;
+  opacity: 0;
+}
+.canvas-item:hover .canvas-unpick,
+.canvas-unpick:focus-visible {
+  opacity: 1;
+}
+@media (hover: none) {
+  .canvas-unpick {
+    opacity: 1;
+  }
+}
 /* The ring matches its tab. */
 .canvas-item[data-picked] .canvas-preview {
   border-color: var(--canvas-fill-color);

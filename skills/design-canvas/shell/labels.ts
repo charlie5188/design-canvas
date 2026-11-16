@@ -91,6 +91,9 @@ export const labels = {
   picked: "Picked",
   pickedToast: (name: string, others: number) =>
     others ? `Picked ${name}. Set ${others} other${others === 1 ? "" : "s"} aside.` : `Picked ${name}`,
+  unpick: (name: string) => `Unpick ${name}`,
+  unpickHint: "Unpick",
+  unpicked: (name: string) => `Unpicked ${name}`,
   pickFailed: "Couldn't save the pick. Is the canvas's dev server running?",
   /** The title of the section a pick makes for the versions that were not picked. */
   setAside: "Set aside",
