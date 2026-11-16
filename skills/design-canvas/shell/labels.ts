@@ -176,8 +176,10 @@ export const labels = {
   // In a note: one button, and one word on it. It sends everything that waits, so it
   // says how many when that is more than this note. Enter keeps the note and closes it.
   sendShort: (n: number) => (n > 1 ? `Send ${n}` : "Send"),
-  copyShort: (n: number) => (n > 1 ? `Copy ${n}` : "Copy"),
   sendHint: "⌘/Ctrl + Enter. Enter keeps it for later",
+  // Without a listening agent: the note keeps itself, and the bar at the top copies everything.
+  doneNote: "Done",
+  doneHint: "Enter. ⌘/Ctrl + Enter copies all for the agent",
   replyPlaceholder: "Reply to the agent",
   threadLabel: "Conversation with the agent",
   threadYou: "You",
