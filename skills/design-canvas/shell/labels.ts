@@ -7,6 +7,8 @@ export const labels = {
   canvasBar: "Canvas",
   changesBar: "Not sent to the agent yet",
   theme: "Theme",
+  background: "Background",
+  backgrounds: { default: "Default", white: "White", dark: "Dark" },
   help: "Canvas controls",
   /**
    * Canvas controls, in groups. Words between backticks are keys and are drawn as key caps.

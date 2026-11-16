@@ -1312,6 +1312,88 @@ function Help() {
   );
 }
 
+/**
+ * The board's background: the gray behind the frames. A few presets rather than
+ * any color, because the board's own words (names, captions, section tabs) and the
+ * bars sit on it, and each preset comes with chrome colors that stay readable on
+ * it (canvas.css). The frames' contents never change with it: previews keep the
+ * project's own colors. It is a viewer's preference, kept in this browser per
+ * canvas, like the camera; "default" follows the project's theme.
+ */
+const BACKGROUNDS = ["default", "white", "dark"] as const;
+type Background = (typeof BACKGROUNDS)[number];
+const backgroundKey = (storageKey: string) => `${storageKey}:background`;
+function loadBackground(storageKey: string): Background {
+  try {
+    const value = window.localStorage.getItem(backgroundKey(storageKey));
+    return BACKGROUNDS.find((id) => id === value) ?? "default";
+  } catch {
+    return "default";
+  }
+}
+function saveBackground(storageKey: string, value: Background) {
+  try {
+    if (value === "default") window.localStorage.removeItem(backgroundKey(storageKey));
+    else window.localStorage.setItem(backgroundKey(storageKey), value);
+  } catch {
+    // Storage may be unavailable; the choice lasts until the page closes.
+  }
+}
+
+/** The background button: a swatch of the board's color, opening the presets under it. */
+function BackgroundPicker({ value, onChange }: { value: Background; onChange: (value: Background) => void }) {
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (event: PointerEvent) => {
+      if (event.target instanceof Node && !wrap.current?.contains(event.target)) setOpen(false);
+    };
+    const key = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("pointerdown", away, true);
+    window.addEventListener("keydown", key, true);
+    return () => {
+      window.removeEventListener("pointerdown", away, true);
+      window.removeEventListener("keydown", key, true);
+    };
+  }, [open]);
+  return (
+    <span className="canvas-help" ref={wrap}>
+      <button
+        type="button"
+        className="canvas-button canvas-icon-button"
+        aria-label={labels.background}
+        aria-expanded={open}
+        aria-controls="canvas-backgrounds"
+        aria-pressed={open}
+        data-tip={open ? undefined : labels.background}
+        onClick={() => setOpen((was) => !was)}
+      >
+        <span className="canvas-swatch" data-background={value} aria-hidden="true" />
+      </button>
+      <div id="canvas-backgrounds" role="dialog" aria-label={labels.background} className="canvas-backgrounds" hidden={!open}>
+        {BACKGROUNDS.map((id) => (
+          <button
+            key={id}
+            type="button"
+            className="canvas-background-option"
+            aria-pressed={id === value}
+            onClick={() => {
+              onChange(id);
+              setOpen(false);
+            }}
+          >
+            <span className="canvas-swatch" data-background={id} aria-hidden="true" />
+            {labels.backgrounds[id]}
+          </button>
+        ))}
+      </div>
+    </span>
+  );
+}
+
 const NO_NOTES: CanvasNote[] = [];
 const NO_SECTIONS: CanvasSection[] = [];
 
@@ -1398,6 +1480,11 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     if (theme && saved.theme) theme.set(saved.theme);
   }
   const themeId = useThemeId(theme);
+  const [background, setBackgroundState] = useState<Background>(() => loadBackground(storageKey));
+  const setBackground = (value: Background) => {
+    setBackgroundState(value);
+    saveBackground(storageKey, value);
+  };
   const camera = useRef<Camera>(saved.camera ?? DEFAULT_CAMERA);
   const [positions, setPositions] = useState<Record<string, Position>>(() =>
     Object.fromEntries(items.map((item) => [item.id, saved.positions[item.id] ?? { x: item.x, y: item.y }])),
@@ -5359,7 +5446,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
   }, [agentOn, unsentCount]);
   return (
     <SendContext.Provider value={sendWords}>
-    <div className="canvas-root">
+    <div className="canvas-root" data-background={background === "default" ? undefined : background}>
       <div
         ref={viewportRef}
         className="canvas-viewport"
@@ -5666,6 +5753,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
             <span className="canvas-separator" aria-hidden="true" />
           </>
         )}
+        <BackgroundPicker value={background} onChange={setBackground} />
         {!shared && (
           <>
             {/* While the file builds, the icon pulses and the button takes no second click. */}

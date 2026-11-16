@@ -64,7 +64,7 @@ a device or input you do not have.
 
 ## Toolbar
 
-- Controls sit in four places: tools (Select, Ask agent, Note, Section) at the bottom centre; zoom out, zoom level, zoom in, show all, and reset view at the bottom right; theme, share, and help at the top right; trash at the bottom left while it holds items. All are icon buttons with tooltips that open away from the screen edge and stay on screen. A bar at the top centre appears only while a change is waiting: Discard and, while any change is unsent, Copy (or Apply, while an agent listens). Nothing shifts under the pointer when it appears or goes. The help list opens on hover or keyboard focus, below the top bar, and describes the canvas region for screen readers.
+- Controls sit in four places: tools (Select, Ask agent, Note, Section) at the bottom centre; zoom out, zoom level, zoom in, show all, and reset view at the bottom right; theme, background, share, and help at the top right; trash at the bottom left while it holds items. All are icon buttons with tooltips that open away from the screen edge and stay on screen. A bar at the top centre appears only while a change is waiting: Discard and, while any change is unsent, Copy (or Apply, while an agent listens). Nothing shifts under the pointer when it appears or goes. The help list opens on hover or keyboard focus, below the top bar, and describes the canvas region for screen readers.
 - Narrow windows (375px): the view bar stacks above the tools bar, the changes bar drops under the top bar, notices clear both, and no bar covers another. Show all and revealed items stop short of the top bars and the bottom bars.
 - At narrow widths (375 px) the text labels and separators drop and every control stays on screen, with annotations and trashed items present.
 
@@ -85,6 +85,12 @@ a device or input you do not have.
 - With a theme store, the toolbar shows one pressed button per theme; without one, it shows none.
 - Switching applies the theme to the canvas, its chrome, and every `viewport` frame, and survives reload.
 - A frame page opened alone uses the saved theme.
+
+## Background
+
+- The background button at the top right shows a swatch of the board's color and opens a list: Default, White, Dark, with the current one in bold. A choice closes the list; Escape or a press outside closes it too. It is there in a shared file as well.
+- White and Dark change the board and all chrome on it (names, captions, section tabs, item tags, bars, popovers, notes) to colors that read on it, whatever the project's theme. What a preview shows (also in the trash and the flow view) keeps the project's colors. Default goes back to the project's theme.
+- The choice is kept per canvas in this browser and survives reload; Default keeps nothing. It is never written to the registry.
 
 ## References
 
