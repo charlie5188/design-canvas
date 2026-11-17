@@ -301,7 +301,15 @@ async function writeClipboard(text: string) {
  * press away, beside the controls used all the time. Opened by a press; Escape, a press
  * outside it, or a choice closes it.
  */
-function ItemMore({ item, onTrash }: { item: CanvasItem; onTrash?: (item: CanvasItem) => void }) {
+function ItemMore({
+  item,
+  onTrash,
+  onCopyName,
+}: {
+  item: CanvasItem;
+  onTrash?: (item: CanvasItem) => void;
+  onCopyName?: (name: string) => void;
+}) {
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLSpanElement>(null);
   useEffect(() => {
@@ -320,7 +328,7 @@ function ItemMore({ item, onTrash }: { item: CanvasItem; onTrash?: (item: Canvas
     };
   }, [open]);
   // A shared file is read-only: nothing to trash, so with no address to open either, there is no menu.
-  if (!onTrash && !hasAddress) return null;
+  if (!onTrash && !hasAddress && !onCopyName) return null;
   return (
     <span className="canvas-item-more" ref={wrap}>
       <button
@@ -349,6 +357,22 @@ function ItemMore({ item, onTrash }: { item: CanvasItem; onTrash?: (item: Canvas
               <OpenIcon />
               {labels.openAloneHint}
             </a>
+          )}
+          {/* The name is unique on the canvas, so pasting two or three names into the chat
+              ("merge the header of A with the list of B") is enough for the agent to find them. */}
+          {onCopyName && (
+            <button
+              type="button"
+              className="canvas-item-menu-entry"
+              aria-label={labels.copyName(item.name)}
+              onClick={() => {
+                setOpen(false);
+                onCopyName(item.name);
+              }}
+            >
+              <CopyIcon />
+              {labels.copyNameHint}
+            </button>
           )}
           {onTrash && (
             <button
@@ -775,6 +799,7 @@ function CanvasItemView({
   openAnnotation,
   annotationHandlers,
   onTrash,
+  onCopyName,
   onAsk,
   route,
   onRestart,
@@ -806,6 +831,7 @@ function CanvasItemView({
   openAnnotation: string | null;
   annotationHandlers: AnnotationHandlers;
   onTrash?: (item: CanvasItem) => void;
+  onCopyName?: (name: string) => void;
   /** Opens a note about the whole item. Absent in a shared file, which has no agent. */
   onAsk?: (item: CanvasItem) => void;
   /** The path of the screen a plain item shows now, when a link took it past its first one (routes.ts). */
@@ -1054,12 +1080,11 @@ function CanvasItemView({
               </button>
             )}
             {onPickVersion && !picked && (
-              <button type="button" className="canvas-item-action canvas-item-pick" aria-label={labels.pick(item.name)} onClick={() => onPickVersion(item)}>
+              <button type="button" className="canvas-item-action" aria-label={labels.pick(item.name)} data-tip={labels.pickShort} onClick={() => onPickVersion(item)}>
                 <PickIcon />
-                {labels.pickShort}
               </button>
             )}
-            <ItemMore item={item} onTrash={onTrash} />
+            <ItemMore item={item} onTrash={onTrash} onCopyName={onCopyName} />
           </span>
         </span>
         {caption && <ItemCaption text={caption} editable={editable} onSave={(text) => onCaption(item, text)} />}
@@ -5894,6 +5919,7 @@ function CanvasBoard({
               openAnnotation={flowId === item.id ? null : (openAnnotation?.id ?? null)}
               annotationHandlers={annotationHandlers}
               onTrash={shared ? undefined : moveToTrash}
+              onCopyName={shared ? undefined : copyReference}
               onAsk={shared ? undefined : askItem}
               route={routes[item.id]?.[routes[item.id]!.length - 1]}
               onRestart={restartRoute}

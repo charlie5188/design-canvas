@@ -273,15 +273,24 @@ body,
 .canvas-item-title {
   position: relative;
 }
+/* One small toolbar, drawn like the canvas's own toolbars (surface, border, raised shadow),
+   so the actions read as one group instead of loose icons beside the name. The negative
+   block margin keeps the row at the name's height: showing it never moves the preview. */
 .canvas-item-actions {
   position: absolute;
   inset-block-start: 0;
   inset-inline-end: 0;
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 1px;
   flex: none;
+  margin-block: -3px;
   margin-inline-start: auto;
+  padding: 2px;
+  border: 1px solid var(--canvas-border-color);
+  border-radius: var(--canvas-radius-m);
+  background: var(--canvas-surface-color);
+  box-shadow: var(--canvas-shadow-raised);
   opacity: 0;
   transition: opacity var(--canvas-fast) var(--canvas-ease);
 }
@@ -315,21 +324,6 @@ body,
 .canvas-item-action[aria-expanded="true"] {
   background: var(--canvas-hover-color);
   color: var(--canvas-text-color);
-}
-/* Pick is the decision the canvas is for, so it alone has a word and a surface. */
-.canvas-item-pick {
-  gap: 3px;
-  inline-size: auto;
-  padding: 0 8px 0 5px;
-  box-shadow: inset 0 0 0 1px var(--canvas-border-color);
-  background: var(--canvas-surface-color);
-  color: var(--canvas-text-color);
-  font-size: 13px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-.canvas-item-pick:hover {
-  background: color-mix(in srgb, var(--canvas-surface-color) 92%, var(--canvas-text-color));
 }
 /* More: the actions used seldom, under their button. */
 .canvas-item-more {

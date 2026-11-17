@@ -3,7 +3,7 @@ import { appendFileSync, cpSync, mkdtempSync, readdirSync, readFileSync, rmSync,
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { expect, type Page, test } from '@playwright/test'
+import { test as base, expect, type Page } from '@playwright/test'
 
 const LISTEN = fileURLToPath(new URL('../../skills/design-canvas/scripts/listen.sh', import.meta.url))
 const SHARE = fileURLToPath(new URL('../../skills/design-canvas/scripts/share.sh', import.meta.url))
@@ -20,6 +20,43 @@ function collectErrors(page: Page) {
 
 const REGISTRY = 'design-canvas/smoke/registry.tsx'
 const EXAMPLE = 'design-canvas/smoke/items/Example.tsx'
+// The registry as installed. Every test starts from it.
+const INSTALLED = readFileSync(REGISTRY, 'utf8')
+
+// After each test, its pages are closed, every registry write they sent is done, and
+// the registry is as installed. A canvas save still on its way when a test ended used
+// to land during the next one: that test lost what it had just written, or the tests
+// after it kept the items it had added.
+const test = base.extend<{ settledRegistry: void }>({
+  settledRegistry: [
+    async ({ context, request, baseURL }, use, testInfo) => {
+      const sent: Promise<unknown>[] = []
+      context.on('request', (r) => {
+        if (r.method() === 'POST' && r.url().includes('/__design-canvas/edit')) sent.push(r.response().catch(() => null))
+      })
+      await use()
+      for (const page of context.pages()) await page.close()
+      await Promise.race([Promise.all(sent), new Promise((resolve) => setTimeout(resolve, 5_000))])
+      // The dev server makes registry writes one at a time, so once this one is answered,
+      // every write sent before it is done. It names no item, so it writes nothing.
+      await request.post('/__design-canvas/edit', {
+        headers: { Origin: new URL(baseURL!).origin },
+        data: { edits: [{ kind: 'item', id: 'no-such-item', set: { x: 0 } }] },
+      })
+      if (readFileSync(REGISTRY, 'utf8') === INSTALLED) return
+      console.log(`"${testInfo.title}" left registry.tsx changed; it is back as installed.`)
+      const served = await (await request.get('/registry.tsx')).text()
+      writeFileSync(REGISTRY, INSTALLED)
+      // So the next test's page loads it, not the version before. A change only in comments
+      // can serve the same module, which is fine to load.
+      await expect
+        .poll(async () => (await (await request.get('/registry.tsx')).text()) !== served, { timeout: 5_000 })
+        .toBe(true)
+        .catch(() => {})
+    },
+    { auto: true },
+  ],
+})
 
 // The dev server writes moves and new notes into registry.tsx. Tests about the
 // agent path need the write refused, which is what makes a change fall back to
@@ -577,6 +614,18 @@ test('the registry holds the trash: a trash saved in a browser never undoes it',
   } finally {
     await restoreRegistry(page, original)
   }
+})
+
+test('the More menu copies the item name, so several versions can be named to the agent', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  const errors = collectErrors(page)
+  await page.goto('/')
+  await page.getByRole('button', { name: 'More actions for Example · replace me' }).click()
+  await page.getByRole('button', { name: 'Copy the name Example · replace me' }).click()
+  await expect(page.locator('.canvas-toast')).toContainText('Copied: Example · replace me')
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('Example · replace me')
+  await expect(page.getByRole('button', { name: 'Copy the name Example · replace me' })).toHaveCount(0)
+  expect(errors).toEqual([])
 })
 
 test('copied annotations ask for a new version by default', async ({ page, context }) => {
@@ -2069,14 +2118,18 @@ test("an item's actions sit at its top right: Ask with quick requests, Pick, and
     await expect(actions).toHaveCSS('opacity', '1')
     // Showing them moves nothing down: the preview stays where it was, under the pointer.
     expect(Math.abs((await item.locator('.canvas-preview').boundingBox())!.y - resting.y)).toBeLessThan(0.5)
-    // At the frame's right edge, in this order, and Pick says its word.
+    // At the frame's right edge, in this order; Pick is an icon like the others.
     const preview = (await item.locator('.canvas-preview').boundingBox())!
     const boxes = [(await ask.boundingBox())!, (await pick.boundingBox())!, (await more.boundingBox())!]
     expect(boxes[0]!.x).toBeLessThan(boxes[1]!.x)
     expect(boxes[1]!.x).toBeLessThan(boxes[2]!.x)
-    expect(Math.abs(boxes[2]!.x + boxes[2]!.width - (preview.x + preview.width))).toBeLessThan(3)
-    expect(boxes[2]!.y + boxes[2]!.height).toBeLessThanOrEqual(preview.y)
-    await expect(pick).toHaveText('Pick')
+    // They are one toolbar, whose outer edge meets the frame's right edge.
+    const bar = (await actions.boundingBox())!
+    expect(Math.abs(bar.x + bar.width - (preview.x + preview.width))).toBeLessThan(3)
+    expect(boxes[2]!.x + boxes[2]!.width).toBeLessThanOrEqual(bar.x + bar.width)
+    expect(bar.y + bar.height).toBeLessThanOrEqual(preview.y)
+    await expect(pick).toHaveText('')
+    await expect(pick).toHaveAttribute('data-tip', 'Pick')
     // The name is a title: a click on it copies nothing and shows nothing.
     await page.evaluate(() => navigator.clipboard.writeText('untouched'))
     await item.locator('.canvas-name').click()
@@ -2724,6 +2777,7 @@ test('a shared file works from disk, frames included, without the agent tools', 
     await page.getByRole('button', { name: /^More actions for / }).first().click()
     await expect(page.getByRole('link', { name: /in a new tab/ }).first()).toBeVisible()
     await expect(page.getByRole('button', { name: /to the trash$/ })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /^Copy the name / })).toHaveCount(0)
     await page.keyboard.press('Escape')
     await expect(page.getByRole('button', { name: 'Ask agent', exact: true })).toHaveCount(0)
     // The controls that need an agent, or save, are not in its help.
