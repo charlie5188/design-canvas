@@ -269,7 +269,9 @@ const THEME_ICONS: Partial<Record<string, () => ReactNode>> = { light: SunIcon, 
 const AnnotateIcon = () => <Icon name="message-circle" />;
 const SelectIcon = () => <Icon name="pointer" />;
 const HandIcon = () => <Icon name="hand" />;
-const InspectIcon = () => <Icon name="pointer-search" />;
+// Sliders: what the tool is for (adjusting an element's props and styles), unlike a pointer,
+// which Select already is.
+const InspectIcon = () => <Icon name="adjustments-horizontal" />;
 const NoteIcon = () => <Icon name="note" />;
 const SectionIcon = () => <Icon name="folder" />;
 const CopyIcon = () => <Icon name="copy" />;

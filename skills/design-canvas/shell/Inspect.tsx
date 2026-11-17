@@ -88,6 +88,9 @@ export function InspectPanel({
   useEffect(() => {
     if (!holding) setVersion((n) => n + 1);
   }, [holding]);
+  // After a change (or its reset), read again once React has drawn it: a prop such as `fill` on a
+  // Button outside a group changes nothing on the page, so no watcher would notice it.
+  useEffect(() => setVersion((n) => n + 1), [changed]);
   useEffect(() => {
     if (!selection) return;
     let timer = 0;
@@ -454,7 +457,7 @@ function Props({
                   {current ? labels.inspectOn : labels.inspectOff}
                 </label>
               )}
-              {/* An on/off switch has no list to hold "Reset to …"; its ↺ fits on its line. */}
+              {/* An on/off switch has no list to hold "Reset to …"; its reset button fits on its line. */}
               {!prop.options.length && changed.has(prop.name) && <Reset onClick={() => edit(prop, RESET)} />}
             </dd>
           </div>
@@ -583,11 +586,11 @@ function ValueChip({ value }: { value: Value }) {
   );
 }
 
-/** Puts back what the code had. */
+/** Puts back what the code had: the canvas's one icon for putting something back. */
 function Reset({ onClick }: { onClick: () => void }) {
   return (
-    <button type="button" className="canvas-inspect-reset" aria-label={labels.inspectReset} data-tip={labels.inspectReset} onClick={onClick}>
-      ↺
+    <button type="button" className="canvas-inspect-lock" aria-label={labels.inspectReset} data-tip={labels.inspectReset} onClick={onClick}>
+      <Icon name="arrow-back-up" />
     </button>
   );
 }

@@ -2504,7 +2504,7 @@ html[data-canvas-alt] .canvas-frame-root * {
   font-size: inherit;
 }
 /* Editing in the Inspect panel: a picker per value, chip-sized. A changed value carries a
-   dot in the focus color until its note goes; ↺ beside it puts back what the code had. */
+   dot in the focus color until its note goes; "Reset to …" in its list puts back what the code had. */
 .canvas-inspect-pick {
   display: inline-flex;
   align-items: center;
@@ -2621,19 +2621,6 @@ html[data-canvas-alt] .canvas-frame-root * {
   padding: 1px 6px 1px 2px;
   border-radius: var(--canvas-radius-s);
   cursor: pointer;
-}
-.canvas-inspect-reset {
-  padding: 0 4px;
-  border: 0;
-  border-radius: var(--canvas-radius-s);
-  background: none;
-  color: var(--canvas-subtle-color);
-  font: inherit;
-  cursor: pointer;
-}
-.canvas-inspect-reset:hover {
-  background: var(--canvas-hover-color);
-  color: var(--canvas-text-color);
 }
 .canvas-inspect-hint {
   margin-block-start: 8px !important;
