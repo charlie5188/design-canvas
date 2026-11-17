@@ -62,6 +62,41 @@ test('frame.html renders one item alone', async ({ page }) => {
   expect(errors).toEqual([])
 })
 
+// The fixture app sets `body { color }` (src/index.css), as many apps do. Text in a preview with
+// no color of its own must take it, as in the app, and not the canvas chrome's.
+const APP_TEXT = 'rgb(29, 53, 87)'
+const CHROME_TEXT = 'rgb(31, 35, 40)'
+const DARK_CHROME_TEXT = 'rgb(232, 234, 237)'
+
+test("text in a preview has the app's color, on any background and opened alone, and the chrome keeps its own", async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    writeFileSync(
+      REGISTRY,
+      original.replace(/\];\s*$/, '  { id: "phone", name: "Phone", component: Example, x: 0, y: 240, width: 375, height: 180, viewport: true },\n];\n'),
+    )
+    await servesId(page, 'phone')
+    await page.goto('/')
+    const item = page.locator('.canvas-item[data-canvas-item="example"]')
+    const phone = page.frameLocator('.canvas-item[data-canvas-item="phone"] iframe').locator('h2')
+    await expect(item.locator('h2')).toHaveCSS('color', APP_TEXT)
+    await expect(phone).toHaveCSS('color', APP_TEXT)
+    await expect(item.locator('.canvas-name')).toHaveCSS('color', CHROME_TEXT)
+    // A dark board turns the chrome light; the previews stay as the app draws them.
+    await page.getByRole('button', { name: 'Background' }).click()
+    await page.getByRole('button', { name: 'Dark', exact: true }).click()
+    await expect(item.locator('.canvas-name')).toHaveCSS('color', DARK_CHROME_TEXT)
+    await expect(item.locator('h2')).toHaveCSS('color', APP_TEXT)
+    await expect(phone).toHaveCSS('color', APP_TEXT)
+    await page.goto('/frame.html?item=example')
+    await expect(page.locator('.canvas-frame-root h2')).toHaveCSS('color', APP_TEXT)
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
 test('a planned direction shows as a card with a sketch, and its own buttons build or drop it', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   const original = readFileSync(REGISTRY, 'utf8')
@@ -484,6 +519,7 @@ test('an item moves to the trash and is put back', async ({ page }) => {
     await page.getByRole('button', { name: 'Trash, 1 item' }).click()
     const trash = page.getByRole('dialog', { name: 'Trash' })
     await expect(trash.locator('.canvas-trash-thumb')).toContainText('Canvas is ready')
+    await expect(trash.locator('.canvas-trash-thumb h2')).toHaveCSS('color', APP_TEXT)
     await trash.getByRole('button', { name: 'Put back Example · replace me' }).click()
     await expect(item).toContainText('Canvas is ready')
     await expect(page.getByRole('button', { name: /^Trash/ })).toHaveCount(0)
@@ -2681,6 +2717,7 @@ test('a shared file works from disk, frames included, without the agent tools', 
     await page.goto(url)
     const example = page.locator('.canvas-item[data-canvas-item="example"]')
     await expect(example).toContainText('Canvas is ready')
+    await expect(example.locator('h2')).toHaveCSS('color', APP_TEXT)
     await expect(page.locator('.canvas-item[data-canvas-item="old"]')).toHaveCount(0)
     // A shared file is read-only: no trash to open and nothing to move into it.
     await expect(page.getByRole('button', { name: /^Trash/ })).toHaveCount(0)
@@ -2711,6 +2748,7 @@ test('a shared file works from disk, frames included, without the agent tools', 
     // The same file shows one item alone.
     await page.goto(`${url}?item=example`)
     await expect(page.locator('.canvas-frame-root')).toContainText('Canvas is ready')
+    await expect(page.locator('.canvas-frame-root h2')).toHaveCSS('color', APP_TEXT)
     // Shown inside another page, as a preview pane or an embed shows it, the file
     // is loaded from memory and has no address to reopen; its frames still load,
     // and a wheel over one still pans the canvas.
@@ -2863,6 +2901,7 @@ export const Done = () => (
     const view = page.getByRole('dialog', { name: 'Screens of Example · replace me' })
     await expect(view.locator('.canvas-flow-path')).toHaveText(['/plans', '/checkout', '/done'])
     await expect(view.locator('.canvas-flow-screen h2')).toHaveText(['Plans', 'Checkout', 'Done'])
+    await expect(view.locator('.canvas-flow-screen h2').first()).toHaveCSS('color', APP_TEXT)
     // Arrows for the links: on to checkout, and back to plans twice. A new-tab link and a router call have none.
     await expect(view.locator('.canvas-flow-arrows > g > path')).toHaveCount(3)
     // Each arrow says what makes the step, in the link's words.

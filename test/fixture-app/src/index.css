@@ -1,4 +1,6 @@
 body {
   margin: 0;
   font-family: system-ui, sans-serif;
+  /* A base text color unlike the canvas chrome's, as many apps set one: previews must inherit it. */
+  color: #1d3557;
 }

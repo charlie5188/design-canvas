@@ -14,3 +14,10 @@
      --canvas-hover: var(--app-hover);
      --canvas-radius: var(--app-radius); */
 }
+
+/* Previews inherit the app's text color from <body>, not from --canvas-text.
+   When the app sets it outside its stylesheet, for example with a class on
+   <body> in its root layout or index.html, set it here:
+body {
+  color: var(--app-text);
+} */
