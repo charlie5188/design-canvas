@@ -57,6 +57,7 @@ export function InspectPanel({
   onEdit,
   onPreview,
   onHighlight,
+  onResetAll,
 }: {
   system: DesignSystem;
   selection: { element: Element; preview: Element } | null;
@@ -69,6 +70,8 @@ export function InspectPanel({
   onPreview: (edit: InspectEdit | null) => void;
   /** Outlines an element on the canvas while its breadcrumb level is hovered or focused; `null` takes it away. */
   onHighlight: (element: Element | null) => void;
+  /** Puts back every waiting change on the selected element. */
+  onResetAll: () => void;
 }) {
   // A hot update, a change shown on the element, or the agent's change re-renders the preview: read it again then.
   // Not while a picker is open: a value on show for a moment could change the rows under the pointer
@@ -171,6 +174,15 @@ export function InspectPanel({
               </span>
             ))}
           </nav>
+          {/* Only while the element has changes waiting: how many, and one button for all of them. */}
+          {changed.styles.size + changed.props.size > 0 && (
+            <div className="canvas-inspect-changes">
+              <span>{labels.inspectChangeCount(changed.styles.size + changed.props.size)}</span>
+              <button type="button" className="canvas-inspect-reset-all" onClick={onResetAll}>
+                {labels.inspectResetAll}
+              </button>
+            </div>
+          )}
           {read.placed && (
             <section className="canvas-inspect-section">
               <h3>

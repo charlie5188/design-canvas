@@ -2767,11 +2767,49 @@ function CanvasBoard({
   // What changed on the selected element, to mark those controls; read again after each edit.
   const [inspectEdits, setInspectEdits] = useState(0);
   const inspectChanged = useMemo<InspectChanged>(() => {
-    const record = inspected && [...inspectRecords.current.values()].find((r) => r.element === inspected.element);
+    // The changes still waiting: a note already sent is the agent's now, and Reset all leaves it.
+    const waiting = (id: string) => annotations.some((a) => a.id === id && !a.sent && !a.queued);
+    const record = inspected && [...inspectRecords.current].find(([id, r]) => r.element === inspected.element && waiting(id))?.[1];
     return { styles: new Set(record?.styles.keys()), props: new Set(record?.props.keys()) };
     // `inspectEdits` counts changes to the records, which are a ref.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inspected, inspectEdits, annotations]);
+  /**
+   * Every waiting change on the selected element at once: each put back to what the code
+   * had and its lines taken out of the note (the person's own words there stay; a note left
+   * empty goes). A notice offers Undo, which brings back both the changes and the note.
+   * A note already sent is the agent's now, and stays.
+   */
+  const inspectResetAll = useCallback(() => {
+    const current = inspectedRef.current;
+    if (!current || !designSystem) return;
+    const waiting = (id: string) => annotationsRef.current.some((a) => a.id === id && !a.sent && !a.queued);
+    const found = [...inspectRecords.current].find(([key, r]) => r.element === current.element && waiting(key));
+    if (!found) return;
+    const [id, record] = found;
+    previewing.current?.();
+    previewing.current = null;
+    const note = annotationsRef.current.find((a) => a.id === id)!;
+    const count = record.styles.size + record.props.size;
+    for (const [property, style] of record.styles) showStyle(record.element, property, style.before, designSystem);
+    for (const [name, prop] of record.props) showProp(prop.fiber, name, prop.had ? prop.original : undefined);
+    inspectRecords.current.delete(id);
+    const own = record.block ? note.text.replace(record.block, "").trim() : note.text.trim();
+    if (own) setAnnotations((prev) => prev.map((a) => (a.id === id ? { ...a, text: limitText(own) } : a)));
+    else setAnnotations((prev) => prev.filter((a) => a.id !== id));
+    setInspectEdits((n) => n + 1);
+    notify(labels.inspectResetDone(count), {
+      label: labels.undo,
+      run: () => {
+        if (!record.element.isConnected) return;
+        for (const [property, style] of record.styles) showStyle(record.element, property, style.value, designSystem);
+        for (const [name, prop] of record.props) showProp(prop.fiber, name, prop.value);
+        inspectRecords.current.set(id, record);
+        setAnnotations((prev) => [...prev.filter((a) => a.id !== id), note]);
+        setInspectEdits((n) => n + 1);
+      },
+    });
+  }, [designSystem, notify]);
   /**
    * A change from the Inspect panel: shown on the element at once, and written into the
    * element's one note for the agent, which waits with the other changes. Picking what the
@@ -6173,6 +6211,7 @@ function CanvasBoard({
           onEdit={inspectEdit}
           onPreview={inspectPreview}
           onHighlight={inspectHighlight}
+          onResetAll={inspectResetAll}
         />
       )}
       {!shared && trashOpen && (

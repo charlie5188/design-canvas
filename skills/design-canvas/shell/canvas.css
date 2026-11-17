@@ -2735,3 +2735,30 @@ html[data-canvas-alt] .canvas-frame-root * {
 :root[data-canvas-inspecting] .canvas-toast {
   inset-inline-start: calc((100% - var(--canvas-inspect-width, 272px) - 32px) / 2);
 }
+/* The selected element's waiting changes: a count, and Reset all. */
+.canvas-inspect-changes {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px 6px 12px;
+  border-block-end: 1px solid var(--canvas-border-color);
+  background: color-mix(in srgb, var(--canvas-focus-color) 6%, transparent);
+  color: var(--canvas-subtle-color);
+}
+.canvas-inspect-reset-all {
+  padding: 2px 8px;
+  border: 1px solid var(--canvas-border-color);
+  border-radius: var(--canvas-radius-s);
+  background: var(--canvas-surface-color);
+  color: var(--canvas-text-color);
+  font: inherit;
+  cursor: pointer;
+}
+.canvas-inspect-reset-all:hover {
+  background: var(--canvas-hover-color);
+}
+.canvas-inspect-reset-all:focus-visible {
+  outline: 2px solid var(--canvas-focus-color);
+  outline-offset: 1px;
+}
