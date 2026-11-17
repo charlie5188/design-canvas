@@ -616,6 +616,18 @@ test('the registry holds the trash: a trash saved in a browser never undoes it',
   }
 })
 
+test('the More menu copies the item name, so several versions can be named to the agent', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  const errors = collectErrors(page)
+  await page.goto('/')
+  await page.getByRole('button', { name: 'More actions for Example · replace me' }).click()
+  await page.getByRole('button', { name: 'Copy the name Example · replace me' }).click()
+  await expect(page.locator('.canvas-toast')).toContainText('Copied: Example · replace me')
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('Example · replace me')
+  await expect(page.getByRole('button', { name: 'Copy the name Example · replace me' })).toHaveCount(0)
+  expect(errors).toEqual([])
+})
+
 test('copied annotations ask for a new version by default', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   const errors = collectErrors(page)
@@ -2106,14 +2118,18 @@ test("an item's actions sit at its top right: Ask with quick requests, Pick, and
     await expect(actions).toHaveCSS('opacity', '1')
     // Showing them moves nothing down: the preview stays where it was, under the pointer.
     expect(Math.abs((await item.locator('.canvas-preview').boundingBox())!.y - resting.y)).toBeLessThan(0.5)
-    // At the frame's right edge, in this order, and Pick says its word.
+    // At the frame's right edge, in this order; Pick is an icon like the others.
     const preview = (await item.locator('.canvas-preview').boundingBox())!
     const boxes = [(await ask.boundingBox())!, (await pick.boundingBox())!, (await more.boundingBox())!]
     expect(boxes[0]!.x).toBeLessThan(boxes[1]!.x)
     expect(boxes[1]!.x).toBeLessThan(boxes[2]!.x)
-    expect(Math.abs(boxes[2]!.x + boxes[2]!.width - (preview.x + preview.width))).toBeLessThan(3)
-    expect(boxes[2]!.y + boxes[2]!.height).toBeLessThanOrEqual(preview.y)
-    await expect(pick).toHaveText('Pick')
+    // They are one toolbar, whose outer edge meets the frame's right edge.
+    const bar = (await actions.boundingBox())!
+    expect(Math.abs(bar.x + bar.width - (preview.x + preview.width))).toBeLessThan(3)
+    expect(boxes[2]!.x + boxes[2]!.width).toBeLessThanOrEqual(bar.x + bar.width)
+    expect(bar.y + bar.height).toBeLessThanOrEqual(preview.y)
+    await expect(pick).toHaveText('')
+    await expect(pick).toHaveAttribute('data-tip', 'Pick')
     // The name is a title: a click on it copies nothing and shows nothing.
     await page.evaluate(() => navigator.clipboard.writeText('untouched'))
     await item.locator('.canvas-name').click()
@@ -2761,6 +2777,7 @@ test('a shared file works from disk, frames included, without the agent tools', 
     await page.getByRole('button', { name: /^More actions for / }).first().click()
     await expect(page.getByRole('link', { name: /in a new tab/ }).first()).toBeVisible()
     await expect(page.getByRole('button', { name: /to the trash$/ })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /^Copy the name / })).toHaveCount(0)
     await page.keyboard.press('Escape')
     await expect(page.getByRole('button', { name: 'Ask agent', exact: true })).toHaveCount(0)
     // The controls that need an agent, or save, are not in its help.

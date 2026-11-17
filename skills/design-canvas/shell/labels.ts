@@ -135,6 +135,8 @@ export const labels = {
   flowStep: (words: string) => `click "${words}"`,
   restart: (name: string) => `Restart ${name}`,
   restartHint: "Restart",
+  copyName: (name: string) => `Copy the name ${name}`,
+  copyNameHint: "Copy name",
   moveToTrash: (name: string) => `Move ${name} to the trash`,
   moveToTrashHint: "Move to trash",
   movedToTrash: (name: string) => `Moved ${name} to the trash`,
