@@ -5058,7 +5058,13 @@ function CanvasBoard({
       if (pickRef.current) pickRef.current.hidden = true;
     };
     /** With the Inspect tool, what a press on `target` would select: a whole component, or the element itself. */
+    let lastTarget: { target: EventTarget | null; found: ReturnType<typeof findInspectTarget> } | null = null;
+    // A move over the same element as the last one has the same answer: the outline follows the pointer cheaply.
     const inspectTarget = (target: EventTarget | null) => {
+      if (lastTarget?.target !== target || !(lastTarget.found?.element.isConnected ?? true)) lastTarget = { target, found: findInspectTarget(target) };
+      return lastTarget.found;
+    };
+    const findInspectTarget = (target: EventTarget | null) => {
       if (!designSystem || !(target instanceof Element) || target instanceof HTMLIFrameElement) return null;
       const preview = target.closest<HTMLElement>("[data-canvas-preview]");
       if (!preview || preview === target || !world.contains(preview)) return null;

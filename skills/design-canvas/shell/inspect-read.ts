@@ -199,6 +199,10 @@ export function designProps(props: Record<string, unknown>) {
 // --- Tokens -----------------------------------------------------------------------------
 
 /** `rules`: the style rules that use a token, to tell which of several equal tokens the code chose. */
+/** Each typography style's font, per place in the page (a scale set by an ancestor changes them). */
+const typeFonts = new WeakMap<Element, { key: string; font: Map<string, string> }>();
+/** Raw token values already measured: a length in px, a color as computed. */
+const measured = { px: new Map<string, number>(), color: new Map<string, string>() };
 type TokenSet = { names: string[]; typography: string[]; rules: CSSStyleRule[] };
 let tokenCache: { key: string; set: TokenSet } | null = null;
 
@@ -235,6 +239,8 @@ function tokens(system: DesignSystem): TokenSet {
   }
   const set = { names: [...names].sort(), typography: [...typography].sort(), rules };
   tokenCache = { key, set };
+  measured.px.clear();
+  measured.color.clear();
   return set;
 }
 
@@ -266,28 +272,44 @@ export type Row = { label: string; category: Category; values: Value[] };
  */
 export function styleRows(element: Element, preview: Element, system: DesignSystem, all = false): Row[] {
   const { names, typography, rules } = tokens(system);
-  const declared = (properties: string[], inherited = false) => declaredTokens(element, properties, rules, system.tokenPrefix, inherited);
+  // Which rules match an element is asked again and again (each property, each ancestor, each alias): once per read.
+  const matched = new Map<Element, CSSStyleRule[]>();
+  const declared = (properties: string[], inherited = false) =>
+    declaredTokens(element, properties, rules, system.tokenPrefix, inherited, matched);
   const style = getComputedStyle(element);
-  // Probes measure token values as the element would see them: inside the preview,
-  // where the app's providers set scale and color scheme. Added and removed in one
-  // go, so React never sees them.
+  // Probes measure token values as the element would see them: under the app's providers,
+  // which set scale and color scheme. Beside the preview, not in it: the panel watches the
+  // preview for changes, and its own probes must not count as one (each read would start the
+  // next, for as long as an element is selected). Added and removed in one go, so React never sees them.
   const probes = document.createElement("div");
+  probes.setAttribute(PROBE, "");
   probes.style.cssText = "position:absolute;visibility:hidden;pointer-events:none;inset:0 auto auto 0;contain:strict;width:0;height:0";
-  preview.append(probes);
+  (preview.parentElement ?? preview).append(probes);
   try {
     const probe = document.createElement("div");
     probes.append(probe);
+    // Each needs a style pass on the probe, and a design system has hundreds of colors: a raw
+    // value is measured once and remembered (cleared with the token set, on a stylesheet change).
     const px = (raw: string) => {
       if (/^-?[\d.]+px$/.test(raw)) return parseFloat(raw);
-      probe.style.paddingLeft = raw;
-      const value = parseFloat(getComputedStyle(probe).paddingLeft);
-      probe.style.paddingLeft = "";
+      let value = measured.px.get(raw);
+      if (value === undefined) {
+        probe.style.paddingLeft = raw;
+        value = parseFloat(getComputedStyle(probe).paddingLeft);
+        probe.style.paddingLeft = "";
+        measured.px.set(raw, value);
+      }
       return value;
     };
     const color = (raw: string) => {
-      probe.style.color = "";
-      probe.style.color = raw;
-      return probe.style.color ? getComputedStyle(probe).color : "";
+      let value = measured.color.get(raw);
+      if (value === undefined) {
+        probe.style.color = "";
+        probe.style.color = raw;
+        value = probe.style.color ? getComputedStyle(probe).color : "";
+        measured.color.set(raw, value);
+      }
+      return value;
     };
     // Each token's value as the selected element resolves it.
     const resolved = (filter: (name: string) => boolean) =>
@@ -404,15 +426,21 @@ function typeStyle(element: Element, style: CSSStyleDeclaration, typography: str
   const font = (s: CSSStyleDeclaration) => `${s.fontSize}/${s.lineHeight}/${s.fontWeight}`;
   const mine = font(style);
   const shown = `${round(parseFloat(style.fontSize))}px · ${style.fontWeight}`;
-  const matches = typography.filter((name) => {
-    const probe = document.createElement("span");
-    probe.setAttribute(attribute, name);
-    probe.textContent = "x";
-    probes.append(probe);
-    const same = font(getComputedStyle(probe)) === mine;
-    probe.remove();
-    return same;
-  });
+  // Every style's font in one style pass (all probes in, then read), remembered for this place in the page.
+  let fonts = typeFonts.get(probes.parentElement!);
+  if (!fonts || fonts.key !== typography.join()) {
+    const spans = typography.map((name) => {
+      const probe = document.createElement("span");
+      probe.setAttribute(attribute, name);
+      probe.textContent = "x";
+      return probe;
+    });
+    probes.append(...spans);
+    fonts = { key: typography.join(), font: new Map(typography.map((name, i) => [name, font(getComputedStyle(spans[i]!))])) };
+    for (const span of spans) span.remove();
+    typeFonts.set(probes.parentElement!, fonts);
+  }
+  const matches = typography.filter((name) => fonts!.font.get(name) === mine);
   if (!matches.length) return { kind: "off", value: shown, nearest: [], property: "typography" };
   const declared = element.closest(`[${attribute}]`)?.getAttribute(attribute);
   const ordered = declared && matches.includes(declared) ? [declared, ...matches.filter((m) => m !== declared)] : matches;
@@ -420,6 +448,8 @@ function typeStyle(element: Element, style: CSSStyleDeclaration, typography: str
 }
 
 const round = (value: number) => Math.round(value * 10) / 10;
+/** Marks the probes, so a watcher of the preview can tell their changes from the app's. */
+export const PROBE = "data-canvas-probe";
 const SIDES = ["Top", "Right", "Bottom", "Left"];
 const CORNERS = ["Top left", "Top right", "Bottom right", "Bottom left"];
 const STATES = /hover|press|active|focus|disabled|selected|visited|checked/;
@@ -432,17 +462,30 @@ const MARGIN = PADDING.map((name) => name.replace("padding", "margin"));
  * ancestor that declares it. Only to rank tokens of equal value; the computed value
  * decides whether a token applies at all.
  */
-function declaredTokens(element: Element, properties: string[], rules: CSSStyleRule[], prefix: string, inherited: boolean) {
+function declaredTokens(
+  element: Element,
+  properties: string[],
+  rules: CSSStyleRule[],
+  prefix: string,
+  inherited: boolean,
+  matched: Map<Element, CSSStyleRule[]>,
+) {
   const pattern = /var\((--[\w-]+)/g;
-  const matching = (at: Element) =>
-    rules.filter((rule) => {
-      try {
-        return at.matches(rule.selectorText);
-      } catch {
-        // A selector this browser cannot match, such as a vendor pseudo-class.
-        return false;
-      }
-    });
+  const matching = (at: Element) => {
+    let list = matched.get(at);
+    if (!list) {
+      list = rules.filter((rule) => {
+        try {
+          return at.matches(rule.selectorText);
+        } catch {
+          // A selector this browser cannot match, such as a vendor pseudo-class.
+          return false;
+        }
+      });
+      matched.set(at, list);
+    }
+    return list;
+  };
   /** What a declaration names. A component's own variable (`--aegis-internal-…`) is followed to the tokens it is set to. */
   const named = (value: string, at: Element, depth: number): string[] =>
     [...value.matchAll(pattern)].flatMap((match) => {

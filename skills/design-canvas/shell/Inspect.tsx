@@ -1,3 +1,4 @@
+import type React from "react";
 import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { PROPS_PATH } from "./channel.ts";
 import {
@@ -6,6 +7,7 @@ import {
   type DesignSystem,
   pathOf,
   placedComponent,
+  PROBE,
   type Row,
   styleRows,
   type Value,
@@ -86,8 +88,11 @@ export function InspectPanel({
   useEffect(() => {
     if (!selection) return;
     let timer = 0;
-    const observer = new MutationObserver(() => {
+    const observer = new MutationObserver((records) => {
       if (holdingRef.current) return;
+      // The panel's own probes (inspect-read.ts) change nothing in the app.
+      const ours = (node: Node) => node instanceof Element && !!node.closest(`[${PROBE}]`);
+      if (records.every((r) => ours(r.target) || [...r.addedNodes, ...r.removedNodes].every(ours))) return;
       window.clearTimeout(timer);
       timer = window.setTimeout(() => setVersion((n) => n + 1), 120);
     });
@@ -124,9 +129,25 @@ export function InspectPanel({
   }, [selection, system, stop, version, unlocked]);
 
   const types = usePropTypes(system, read?.placed?.name);
+  const [width, startResize, resizeKey] = usePanelWidth();
 
   return (
     <aside className="canvas-inspect" aria-label={labels.inspectPanel}>
+      {/* The left edge resizes the panel, as a docked panel in a design tool does. */}
+      <div
+        className="canvas-inspect-edge"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label={labels.inspectResize}
+        aria-valuenow={width}
+        aria-valuemin={PANEL_MIN}
+        aria-valuemax={PANEL_MAX}
+        tabIndex={0}
+        onPointerDown={startResize}
+        onKeyDown={resizeKey}
+      />
+      {/* The panel scrolls inside, so the edge above stays the panel's full height. */}
+      <div className="canvas-inspect-body">
       {!read ? (
         <p className="canvas-inspect-empty">{labels.inspectEmpty}</p>
       ) : (
@@ -254,8 +275,72 @@ export function InspectPanel({
           )}
         </>
       )}
+      </div>
     </aside>
   );
+}
+
+const PANEL_MIN = 240;
+const PANEL_MAX = 560;
+const PANEL_WIDTH_KEY = "design-canvas:inspect-width";
+/**
+ * The panel's width: dragged at its left edge or set with the arrow keys there, kept for
+ * the next time in this browser. It sits on the page root as a custom property, so the
+ * view controls can stay clear of the panel (canvas.css), and goes when the panel does.
+ */
+function usePanelWidth() {
+  const [width, setWidth] = useState(() => {
+    try {
+      const saved = Number(localStorage.getItem(PANEL_WIDTH_KEY));
+      return saved >= PANEL_MIN && saved <= PANEL_MAX ? saved : 272;
+    } catch {
+      return 272;
+    }
+  });
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty("--canvas-inspect-width", `${width}px`);
+    root.setAttribute("data-canvas-inspecting", "");
+    try {
+      localStorage.setItem(PANEL_WIDTH_KEY, String(width));
+    } catch {
+      // Storage off: the width lasts until the page closes.
+    }
+  }, [width]);
+  useEffect(
+    () => () => {
+      document.documentElement.style.removeProperty("--canvas-inspect-width");
+      document.documentElement.removeAttribute("data-canvas-inspecting");
+    },
+    [],
+  );
+  const clamp = (value: number) => Math.round(Math.max(PANEL_MIN, Math.min(PANEL_MAX, value, window.innerWidth - 120)));
+  const start = (event: React.PointerEvent<HTMLElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const edge = event.currentTarget;
+    edge.setPointerCapture(event.pointerId);
+    const from = event.clientX;
+    const was = width;
+    const move = (e: PointerEvent) => setWidth(clamp(was + from - e.clientX));
+    const end = () => {
+      edge.removeEventListener("pointermove", move);
+      edge.removeEventListener("pointerup", end);
+      edge.removeEventListener("pointercancel", end);
+    };
+    edge.addEventListener("pointermove", move);
+    edge.addEventListener("pointerup", end);
+    edge.addEventListener("pointercancel", end);
+  };
+  const key = (event: React.KeyboardEvent) => {
+    const step = event.shiftKey ? 64 : 16;
+    const next = { ArrowLeft: width + step, ArrowRight: width - step, Home: PANEL_MAX, End: PANEL_MIN }[event.key];
+    if (next === undefined) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setWidth(clamp(next));
+  };
+  return [width, start, key] as const;
 }
 
 // One request per component for the canvas's life: the types do not change while it runs.

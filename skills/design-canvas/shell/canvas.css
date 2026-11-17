@@ -2397,14 +2397,15 @@ html[data-canvas-alt] .canvas-frame-root * {
 .canvas-inspect {
   position: fixed;
   z-index: 5;
-  /* As tall as its content, down to just above the view controls. */
+  display: flex;
+  flex-direction: column;
+  /* As tall as its content, down to the window's bottom margin; as wide as its left edge was dragged. */
   inset-block-start: 64px;
   inset-inline-end: 16px;
-  inline-size: 272px;
-  max-block-size: calc(100% - 64px - 68px);
+  inline-size: var(--canvas-inspect-width, 272px);
+  max-block-size: calc(100% - 64px - 16px);
   box-sizing: border-box;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  overflow: hidden;
   border: 1px solid var(--canvas-border-color);
   border-radius: var(--canvas-radius-l);
   background: var(--canvas-surface-color);
@@ -2701,4 +2702,36 @@ html[data-canvas-alt] .canvas-frame-root * {
   .canvas-inspect-fold svg {
     transition: none;
   }
+}
+/* The panel's left edge: a strip to drag, outlined while hovered, dragged, or focused. */
+.canvas-inspect-edge {
+  position: absolute;
+  z-index: 1;
+  inset-block: 0;
+  inset-inline-start: 0;
+  inline-size: 6px;
+  cursor: ew-resize;
+  touch-action: none;
+}
+.canvas-inspect-body {
+  min-block-size: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.canvas-inspect-edge:hover,
+.canvas-inspect-edge:active,
+.canvas-inspect-edge:focus-visible {
+  box-shadow: inset 2px 0 0 var(--canvas-focus-color);
+  outline: none;
+}
+/* With the panel open, the canvas is the area to its left: the view controls sit beside the
+   panel rather than under it, and the centred bars and notices centre in that area, so a wide
+   panel never pushes one bar into another. */
+:root[data-canvas-inspecting] .canvas-toolbar[data-place="view"] {
+  inset-inline-end: calc(var(--canvas-inspect-width, 272px) + 24px);
+}
+:root[data-canvas-inspecting] .canvas-toolbar[data-place="tools"],
+:root[data-canvas-inspecting] .canvas-toolbar[data-place="pending"],
+:root[data-canvas-inspecting] .canvas-toast {
+  inset-inline-start: calc((100% - var(--canvas-inspect-width, 272px) - 32px) / 2);
 }

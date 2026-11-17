@@ -293,6 +293,7 @@ export const labels = {
   inspectTool: "Inspect",
   inspectToolHint: "Inspect (I)",
   inspectPanel: "Inspect",
+  inspectResize: "Panel width",
   inspectPath: "Where it sits",
   inspectEmpty: "Select an element in a preview",
   inspectPartOf: (system: string) => `${system} · inner part`,
