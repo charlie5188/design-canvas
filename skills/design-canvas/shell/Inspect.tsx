@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { PROPS_PATH } from "./channel.ts";
 import {
   choices,
@@ -50,6 +50,7 @@ export function InspectPanel({
   changed,
   onSelect,
   onEdit,
+  onPreview,
 }: {
   system: DesignSystem;
   selection: { element: Element; preview: Element } | null;
@@ -58,20 +59,31 @@ export function InspectPanel({
   changed: InspectChanged;
   onSelect: (element: Element) => void;
   onEdit: (edit: InspectEdit) => void;
+  /** Shows a value on the element while the pointer is over it in a picker; `null` puts back what was there. */
+  onPreview: (edit: InspectEdit | null) => void;
 }) {
   // A hot update, a change shown on the element, or the agent's change re-renders the preview: read it again then.
+  // Not while a picker is open: a value on show for a moment could change the rows under the pointer
+  // (padding ↕ and ↔ that come out equal become one row), so the panel reads again once it closes.
   const [version, setVersion] = useState(0);
+  const [holding, setHolding] = useState(false);
+  const holdingRef = useRef(false);
+  holdingRef.current = holding;
+  useEffect(() => {
+    if (!holding) setVersion((n) => n + 1);
+  }, [holding]);
   useEffect(() => {
     if (!selection) return;
     let timer = 0;
     const observer = new MutationObserver(() => {
+      if (holdingRef.current) return;
       window.clearTimeout(timer);
       timer = window.setTimeout(() => setVersion((n) => n + 1), 120);
     });
     observer.observe(selection.preview, { subtree: true, childList: true, attributes: true, characterData: true, attributeFilter: ["class", "style"] });
     // The click that selects leaves the pointer on the element, so the first read can show its hover
     // colors. Read again once the pointer leaves and the element's transitions settle.
-    const again = () => setVersion((n) => n + 1);
+    const again = () => !holdingRef.current && setVersion((n) => n + 1);
     const { element } = selection;
     element.addEventListener("pointerleave", again);
     element.addEventListener("transitionend", again);
@@ -128,7 +140,14 @@ export function InspectPanel({
                 {read.placed.name}
                 <span className="canvas-subtle">{read.part ? labels.inspectPartOf(system.name) : system.name}</span>
               </h3>
-              <Props placed={read.placed} types={types} changed={changed.props} onEdit={onEdit} />
+              <Props
+                placed={read.placed}
+                types={types}
+                changed={changed.props}
+                onEdit={onEdit}
+                onPreview={onPreview}
+                onHold={setHolding}
+              />
             </section>
           )}
           <section className="canvas-inspect-section">
@@ -148,6 +167,8 @@ export function InspectPanel({
                     editable={!read.placed}
                     changed={changed.styles}
                     onEdit={onEdit}
+                    onPreview={onPreview}
+                    onHold={setHolding}
                   />
                 ))}
               </dl>
@@ -199,11 +220,15 @@ function Props({
   types,
   changed,
   onEdit,
+  onPreview,
+  onHold,
 }: {
   placed: NonNullable<ReturnType<typeof placedComponent>>;
   types: PropType[] | null | undefined;
   changed: ReadonlySet<string>;
   onEdit: (edit: InspectEdit) => void;
+  onPreview: (edit: InspectEdit | null) => void;
+  onHold: (open: boolean) => void;
 }) {
   const set = placed.props;
   const editable = (types ?? []).filter((p) => !PLUMBING.test(p.name) && (p.options.length > 0 || p.boolean));
@@ -224,9 +249,9 @@ function Props({
       <p className="canvas-subtle">{labels.inspectDefaults}</p>
     );
   }
-  const edit = (prop: PropType, value: unknown) => {
+  const edit = (prop: PropType, value: unknown, preview = false) => {
     const current = set[prop.name] ?? prop.default;
-    onEdit({
+    (preview ? onPreview : onEdit)({
       kind: "prop",
       component: placed.name,
       name: prop.name,
@@ -246,20 +271,16 @@ function Props({
             <dt>{prop.name}</dt>
             <dd>
               {prop.options.length ? (
-                <select
-                  className="canvas-inspect-select"
-                  aria-label={prop.name}
-                  data-changed={changed.has(prop.name) ? "" : undefined}
-                  value={current === undefined ? "" : String(current)}
-                  onChange={(event) => edit(prop, event.currentTarget.value)}
-                >
-                  {current === undefined && <option value="">{labels.inspectUnset}</option>}
-                  {prop.options.map((option) => (
-                    <option key={option} value={option}>
-                      {option === prop.default ? labels.inspectDefault(option) : option}
-                    </option>
-                  ))}
-                </select>
+                <Picker
+                  label={prop.name}
+                  current={current === undefined ? labels.inspectUnset : String(current)}
+                  selected={current === undefined ? undefined : String(current)}
+                  changed={changed.has(prop.name)}
+                  options={prop.options.map((option) => ({ value: option, label: option, detail: option === prop.default ? labels.inspectDefaultMark : undefined }))}
+                  onPreview={(value) => (value === null ? onPreview(null) : edit(prop, value, true))}
+                  onChoose={(value) => edit(prop, value)}
+                  onOpen={onHold}
+                />
               ) : (
                 <label className="canvas-inspect-switch" data-changed={changed.has(prop.name) ? "" : undefined}>
                   <input type="checkbox" checked={!!current} onChange={(event) => edit(prop, event.currentTarget.checked)} />
@@ -286,6 +307,8 @@ function StyleRow({
   editable,
   changed,
   onEdit,
+  onPreview,
+  onHold,
 }: {
   row: Row;
   system: DesignSystem;
@@ -293,12 +316,25 @@ function StyleRow({
   editable: boolean;
   changed: ReadonlySet<string>;
   onEdit: (edit: InspectEdit) => void;
+  onPreview: (edit: InspectEdit | null) => void;
+  onHold: (open: boolean) => void;
 }) {
   // One line under the row for its values outside the system: what it is not, and what it is closest to.
   const off = editable ? row.values.filter((value) => value.kind === "off") : [];
   const nearest = off.flatMap((value) => (value.kind === "off" ? value.nearest : []));
   const options = useMemo(() => (editable ? choices(element, system, row.category) : []), [editable, element, system, row.category]);
-  const none = row.category === "space" || row.category === "radius" ? "0" : labels.inspectNone;
+  const lengths = row.category === "space" || row.category === "radius";
+  const paints = row.category === "text" || row.category === "fill" || row.category === "border";
+  const none = lengths ? "0" : labels.inspectNone;
+  // A pick as a change: 0 and none are values too, since without the inline style the stylesheet's would show again.
+  const styleEdit = (value: Value, chosen: string): InspectEdit => ({
+    kind: "style",
+    property: value.property,
+    what: [row.label, value.side].filter(Boolean).join(" "),
+    from: value.kind === "token" ? value.token : value.kind === "off" ? value.value : none,
+    to: chosen === RESET ? "" : chosen ? (options.find((o) => o.value === chosen)?.label ?? chosen) : none,
+    value: chosen === RESET ? RESET : chosen || (lengths ? "0" : "transparent"),
+  });
   return (
     <div>
       <dt>{row.label}</dt>
@@ -307,35 +343,26 @@ function StyleRow({
           editable ? (
             <span key={index} className="canvas-inspect-pick">
               {value.side && <span className="canvas-subtle">{value.side}</span>}
-              <select
-                className="canvas-inspect-select"
-                aria-label={[row.label, value.side].filter(Boolean).join(" ")}
-                data-off={value.kind === "off" ? "" : undefined}
-                data-changed={changed.has(value.property) ? "" : undefined}
-                value={value.kind === "token" ? value.name : value.kind === "off" ? "current" : ""}
-                onChange={(event) => {
-                  const chosen = event.currentTarget.value;
-                  // The value outside the system again: as if nothing was picked.
-                  if (chosen === "current") return onEdit({ kind: "style", property: value.property, what: "", from: "", to: "", value: RESET });
-                  onEdit({
-                    kind: "style",
-                    property: value.property,
-                    what: [row.label, value.side].filter(Boolean).join(" "),
-                    from: value.kind === "token" ? value.token : value.kind === "off" ? value.value : none,
-                    to: chosen ? (options.find((o) => o.value === chosen)?.label.split(" · ")[0] ?? chosen) : none,
-                    // 0 and none are values too: without the inline style the stylesheet's would show again.
-                    value: chosen || (row.category === "space" || row.category === "radius" ? "0" : "transparent"),
-                  });
+              <Picker
+                label={[row.label, value.side].filter(Boolean).join(" ")}
+                current={value.kind === "token" ? value.token : value.kind === "off" ? value.value : none}
+                swatch={paints ? (value.kind === "token" ? options.find((o) => o.value === value.name)?.swatch : value.kind === "off" ? value.value : undefined) : undefined}
+                selected={value.kind === "token" ? value.name : value.kind === "off" ? "current" : ""}
+                off={value.kind === "off"}
+                changed={changed.has(value.property)}
+                options={[
+                  ...(value.kind === "off" ? [{ value: "current", label: value.value, detail: labels.inspectNotToken(system.name), swatch: paints ? value.value : undefined }] : []),
+                  ...(row.category !== "typography" ? [{ value: "", label: none }] : []),
+                  ...options,
+                ]}
+                onPreview={(chosen) => {
+                  // The value outside the system is what the element shows without a preview.
+                  if (chosen === null || chosen === "current") return onPreview(null);
+                  onPreview(styleEdit(value, chosen));
                 }}
-              >
-                {value.kind === "off" && <option value="current">{value.value}</option>}
-                {row.category !== "typography" && <option value="">{none}</option>}
-                {options.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
+                onChoose={(chosen) => onEdit(chosen === "current" ? styleEdit(value, RESET) : styleEdit(value, chosen))}
+                onOpen={onHold}
+              />
               {changed.has(value.property) && (
                 <Reset onClick={() => onEdit({ kind: "style", property: value.property, what: "", from: "", to: "", value: RESET })} />
               )}
@@ -384,5 +411,208 @@ function Reset({ onClick }: { onClick: () => void }) {
     <button type="button" className="canvas-inspect-reset" aria-label={labels.inspectReset} data-tip={labels.inspectReset} onClick={onClick}>
       ↺
     </button>
+  );
+}
+
+/** `short`: the name shown in the list, when it differs from `label`, which is what the note says. */
+type PickerOption = { value: string; label: string; short?: string; detail?: string; swatch?: string };
+
+/**
+ * A value picker that shows each option on the element before it is picked, which a native
+ * select cannot: its options give the page no hover. Pointer over an option, or Arrow Up and
+ * Down, shows it; leaving the list, Escape, or a press outside puts back what was there; a
+ * click or Enter picks it. A long list (the colors) gets a search field.
+ */
+function Picker({
+  label,
+  current,
+  swatch,
+  selected,
+  options,
+  off,
+  changed,
+  onPreview,
+  onChoose,
+  onOpen,
+}: {
+  label: string;
+  current: ReactNode;
+  swatch?: string;
+  selected: string | undefined;
+  options: PickerOption[];
+  off?: boolean;
+  changed?: boolean;
+  onPreview: (value: string | null) => void;
+  onChoose: (value: string) => void;
+  onOpen: (open: boolean) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [active, setActive] = useState(-1);
+  const [place, setPlace] = useState<{ left: number; width: number; top?: number; bottom?: number; height: number } | null>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const popover = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLUListElement>(null);
+  const searchable = options.length > 12;
+  const shown = useMemo(() => {
+    const words = query.trim().toLowerCase();
+    return words ? options.filter((o) => o.label.toLowerCase().includes(words)) : options;
+  }, [options, query]);
+  const id = useMemo(() => `canvas-pick-${Math.random().toString(36).slice(2, 8)}`, []);
+
+  const close = (focus = true) => {
+    onPreview(null);
+    setOpen(false);
+    setQuery("");
+    onOpen(false);
+    if (focus) trigger.current?.focus({ preventScroll: true });
+  };
+  const choose = (value: string) => {
+    setOpen(false);
+    setQuery("");
+    onOpen(false);
+    onChoose(value);
+    trigger.current?.focus({ preventScroll: true });
+  };
+  // Only a key moves the list to the option: scrolling under a still pointer would put it over the next one.
+  const byKey = useRef(false);
+  const show = (index: number, key = false) => {
+    byKey.current = key;
+    setActive(index);
+    const option = shown[index];
+    if (option) onPreview(option.value);
+  };
+
+  // Below the trigger, or above it when the room is below is short; never past the window's edge.
+  useLayoutEffect(() => {
+    if (!open || !trigger.current) return;
+    const box = trigger.current.getBoundingClientRect();
+    const width = Math.max(box.width, 260);
+    const left = Math.max(8, Math.min(box.left, window.innerWidth - width - 8));
+    const below = window.innerHeight - box.bottom - 12;
+    const above = box.top - 12;
+    const height = Math.min(320, Math.max(below, above));
+    setPlace(below >= Math.min(240, above) ? { left, width, top: box.bottom + 4, height } : { left, width, bottom: window.innerHeight - box.top + 4, height });
+    const at = options.findIndex((o) => o.value === selected);
+    setActive(at);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The search field, or else the list, takes the keys once it opens.
+  useEffect(() => {
+    if (!open || !place) return;
+    (popover.current?.querySelector<HTMLElement>("input") ?? list.current)?.focus({ preventScroll: true });
+  }, [open, place]);
+  useEffect(() => {
+    if (byKey.current) list.current?.querySelector<HTMLElement>(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [active]);
+  useEffect(() => {
+    if (!open) return;
+    const away = (event: PointerEvent) => {
+      if (event.target instanceof Node && (popover.current?.contains(event.target) || trigger.current?.contains(event.target))) return;
+      close(false);
+    };
+    window.addEventListener("pointerdown", away, true);
+    return () => window.removeEventListener("pointerdown", away, true);
+  }); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <>
+      <button
+        ref={trigger}
+        type="button"
+        className="canvas-inspect-select"
+        aria-label={label}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={open ? id : undefined}
+        data-off={off ? "" : undefined}
+        data-changed={changed ? "" : undefined}
+        onClick={() => {
+          if (open) return close();
+          setOpen(true);
+          onOpen(true);
+        }}
+        onKeyDown={(event) => {
+          if (open || (event.key !== "ArrowDown" && event.key !== "ArrowUp")) return;
+          event.preventDefault();
+          setOpen(true);
+          onOpen(true);
+        }}
+      >
+        {swatch && <span className="canvas-inspect-swatch" style={{ background: swatch }} aria-hidden="true" />}
+        <span className="canvas-inspect-select-text">{current}</span>
+        <span className="canvas-inspect-caret" aria-hidden="true">▾</span>
+      </button>
+      {open && place && (
+        <div
+          ref={popover}
+          className="canvas-inspect-popover"
+          style={{ left: place.left, width: place.width, top: place.top, bottom: place.bottom, maxHeight: place.height }}
+          onKeyDown={(event) => {
+            // The canvas's keys (Escape lets go of the element, arrows pan) stay out while the list has them.
+            event.stopPropagation();
+            if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+              event.preventDefault();
+              const step = event.key === "ArrowDown" ? 1 : -1;
+              show(Math.max(0, Math.min(shown.length - 1, (active < 0 ? (step > 0 ? -1 : shown.length) : active) + step)), true);
+            } else if (event.key === "Enter") {
+              event.preventDefault();
+              const option = shown[active];
+              if (option) choose(option.value);
+            } else if (event.key === "Escape" || event.key === "Tab") {
+              if (event.key === "Escape") event.preventDefault();
+              close();
+            }
+          }}
+        >
+          {searchable && (
+            <input
+              className="canvas-inspect-search"
+              type="search"
+              placeholder={labels.inspectSearch}
+              aria-label={labels.inspectSearch}
+              aria-controls={id}
+              aria-activedescendant={active >= 0 ? `${id}-${active}` : undefined}
+              value={query}
+              onChange={(event) => {
+                setQuery(event.currentTarget.value);
+                setActive(-1);
+                onPreview(null);
+              }}
+            />
+          )}
+          <ul
+            ref={list}
+            id={id}
+            role="listbox"
+            aria-label={label}
+            tabIndex={-1}
+            aria-activedescendant={active >= 0 ? `${id}-${active}` : undefined}
+            onPointerLeave={() => {
+              setActive(-1);
+              onPreview(null);
+            }}
+          >
+            {shown.map((option, index) => (
+              <li
+                key={option.value}
+                id={`${id}-${index}`}
+                data-index={index}
+                role="option"
+                aria-selected={option.value === selected}
+                data-active={index === active ? "" : undefined}
+                onPointerEnter={() => show(index)}
+                onClick={() => choose(option.value)}
+              >
+                {option.swatch !== undefined && <span className="canvas-inspect-swatch" style={{ background: option.swatch }} aria-hidden="true" />}
+                <span className="canvas-inspect-option-text">{option.short ?? option.label}</span>
+                {option.detail && <span className="canvas-subtle">{option.detail}</span>}
+              </li>
+            ))}
+            {!shown.length && <li className="canvas-subtle">{labels.inspectNoMatch}</li>}
+          </ul>
+        </div>
+      )}
+    </>
   );
 }

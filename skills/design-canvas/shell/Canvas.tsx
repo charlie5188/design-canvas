@@ -2757,6 +2757,13 @@ function CanvasBoard({
   useEffect(() => {
     if (!inspectTool) setInspected(null);
   }, [inspectTool]);
+  useEffect(
+    () => () => {
+      previewing.current?.();
+      previewing.current = null;
+    },
+    [inspected],
+  );
   // What changed on the selected element, to mark those controls; read again after each edit.
   const [inspectEdits, setInspectEdits] = useState(0);
   const inspectChanged = useMemo<InspectChanged>(() => {
@@ -2770,8 +2777,36 @@ function CanvasBoard({
    * element's one note for the agent, which waits with the other changes. Picking what the
    * code had (or Undo) takes the line out; a note left with no line and no words goes.
    */
+  /**
+   * A value shown for a moment, while the pointer is over it in a picker (Inspect.tsx). It
+   * changes nothing that is saved: `null`, or the next one, puts back what was there.
+   */
+  const previewing = useRef<(() => void) | null>(null);
+  const inspectPreview = useCallback(
+    (edit: InspectEdit | null) => {
+      previewing.current?.();
+      previewing.current = null;
+      const current = inspectedRef.current;
+      if (!edit || !current || !designSystem || edit.value === RESET) return;
+      const { element } = current;
+      if (edit.kind === "style") {
+        const before = showStyle(element, edit.property, edit.value, designSystem);
+        previewing.current = () => showStyle(element, edit.property, before, designSystem);
+      } else {
+        const props = (edit.fiber as { memoizedProps?: Record<string, unknown> }).memoizedProps ?? {};
+        const had = edit.name in props;
+        const was = props[edit.name];
+        showProp(edit.fiber, edit.name, edit.value);
+        previewing.current = () => showProp(edit.fiber, edit.name, had ? was : undefined);
+      }
+    },
+    [designSystem],
+  );
   const inspectEdit = useCallback(
     (edit: InspectEdit) => {
+      // A value on show for a moment goes first, so what the change replaces is what the code had.
+      previewing.current?.();
+      previewing.current = null;
       const current = inspectedRef.current;
       if (!current || !designSystem) return;
       const { element, preview, itemId } = current;
@@ -6109,6 +6144,7 @@ function CanvasBoard({
           changed={inspectChanged}
           onSelect={(element: Element) => setInspected((current) => (current ? { ...current, element } : current))}
           onEdit={inspectEdit}
+          onPreview={inspectPreview}
         />
       )}
       {!shared && trashOpen && (

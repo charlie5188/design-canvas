@@ -494,7 +494,8 @@ function textLooksLike(element: Element, style: CSSStyleDeclaration) {
 
 // --- Editing ----------------------------------------------------------------------------
 
-export type Choice = { value: string; label: string };
+/** `detail`: a length's value. `swatch`: a color as the element resolves it. */
+export type Choice = { value: string; label: string; short?: string; detail?: string; swatch?: string };
 
 /**
  * What a row can be set to: the tokens of its kind, as the element resolves them, with
@@ -514,9 +515,14 @@ export function choices(element: Element, system: DesignSystem, category: Catego
     return list
       .map((t) => ({ ...t, px: parseFloat(t.raw) * (t.raw.endsWith("rem") ? 16 : 1) }))
       .sort((a, b) => a.px - b.px)
-      .map((t) => ({ value: t.name, label: `${tokenLabel(t.name, system)} · ${round(t.px)}px` }));
+      .map((t) => ({ value: t.name, label: tokenLabel(t.name, system), detail: `${round(t.px)}px` }));
   }
-  return list.map((t) => ({ value: t.name, label: tokenLabel(t.name, system) }));
+  // In the list, a color goes by what follows its kind (`accent.blue.subtle`): the row already says which kind.
+  const kind = tokenLabel(`${system.tokenPrefix}${word.slice(1)}`, system);
+  return list.map((t) => {
+    const label = tokenLabel(t.name, system);
+    return { value: t.name, label, short: label.startsWith(kind) ? label.slice(kind.length) : label, swatch: t.raw };
+  });
 }
 
 /**

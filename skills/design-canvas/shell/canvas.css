@@ -2522,22 +2522,98 @@ html[data-canvas-alt] .canvas-frame-root * {
   min-inline-size: 0;
 }
 .canvas-inspect-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   min-inline-size: 0;
   max-inline-size: 100%;
-  padding: 2px 4px;
+  padding: 2px 6px;
   border: 1px solid transparent;
   border-radius: var(--canvas-radius-s);
   background: var(--canvas-hover-color);
   color: inherit;
   font: inherit;
+  text-align: start;
   cursor: pointer;
 }
-.canvas-inspect-select:hover {
+.canvas-inspect-select:hover,
+.canvas-inspect-select[aria-expanded="true"] {
   border-color: var(--canvas-border-color);
 }
 .canvas-inspect-select:focus-visible {
   outline: 2px solid var(--canvas-focus-color);
   outline-offset: 1px;
+}
+.canvas-inspect-select-text {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+.canvas-inspect-caret {
+  color: var(--canvas-subtle-color);
+  font-size: 10px;
+}
+.canvas-inspect-swatch {
+  flex: none;
+  inline-size: 12px;
+  block-size: 12px;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 15%);
+}
+/* The list a picker opens: over everything, fixed to the window so the panel's scroll never clips it. */
+.canvas-inspect-popover {
+  position: fixed;
+  z-index: 7;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--canvas-border-color);
+  border-radius: var(--canvas-radius-m);
+  background: var(--canvas-surface-color);
+  box-shadow: var(--canvas-shadow-overlay);
+  font: 12px/1.4 var(--canvas-font, system-ui, -apple-system, "Segoe UI", sans-serif);
+}
+.canvas-inspect-search {
+  margin: 6px 6px 2px;
+  padding: 4px 8px;
+  border: 1px solid var(--canvas-border-color);
+  border-radius: var(--canvas-radius-s);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.canvas-inspect-search:focus-visible {
+  outline: 2px solid var(--canvas-focus-color);
+  outline-offset: -1px;
+}
+.canvas-inspect-popover ul {
+  flex: 1;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+}
+.canvas-inspect-popover ul:focus-visible {
+  outline: none;
+}
+.canvas-inspect-popover li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: var(--canvas-radius-s);
+  cursor: pointer;
+}
+.canvas-inspect-popover li[data-active] {
+  background: var(--canvas-hover-color);
+}
+.canvas-inspect-popover li[aria-selected="true"] {
+  font-weight: 600;
+}
+.canvas-inspect-option-text {
+  flex: 1;
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
 }
 .canvas-inspect-select[data-off] {
   background: color-mix(in srgb, #b87c00 14%, transparent);
