@@ -288,6 +288,8 @@ export const labels = {
   boardMoveLabel: (what: string) => `Move ${what}`,
   selectTool: "Select",
   selectToolHint: "Select (V)",
+  handTool: "Move canvas",
+  handToolHint: "Move canvas (H)",
   // One name for the button on every pending change: a note, a section, a moved item.
   discardChange: "Discard this change",
   boardNoteLabel: "Note",
