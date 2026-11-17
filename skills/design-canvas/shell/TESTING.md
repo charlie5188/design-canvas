@@ -90,6 +90,7 @@ a device or input you do not have.
 
 - The background button at the top right shows a swatch of the board's color and opens a list: Default, White, Dark, with the current one in bold. A choice closes the list; Escape or a press outside closes it too. It is there in a shared file as well.
 - White and Dark change the board and all chrome on it (names, captions, section tabs, item tags, bars, popovers, notes) to colors that read on it, whatever the project's theme. What a preview shows (also in the trash and the flow view) keeps the project's colors. Default goes back to the project's theme.
+- On any background, text in a preview with no color of its own has the app's `body` color, not the chrome's: on the canvas, in the trash, in the flow view, in a `viewport` frame, opened alone, and in a shared file. It follows a theme switch.
 - The choice is kept per canvas in this browser and survives reload; Default keeps nothing. It is never written to the registry.
 
 ## References

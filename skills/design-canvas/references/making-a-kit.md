@@ -6,6 +6,8 @@ Goal: one real app component renders on the canvas exactly as it does in the app
 
 The installer imports the first global stylesheet it finds. Apps often have more: a reset, font faces, a theme file. Import each in `providers.tsx`, in the same order as the app's entry or root layout. CSS Modules and component-level imports work as they are.
 
+Previews inherit the app's base text color and font from `<body>`, as they do in the app; the canvas chrome sets its own. The canvas does not use the app's root layout or `index.html`, so styles those put on `<body>`, such as a class that sets the text color, are missing. Set them on `body` in `theme.css`.
+
 ## 2. Tailwind
 
 - **PostCSS setup** (a `postcss.config.*` file): works as is; the canvas loads the app's PostCSS config.

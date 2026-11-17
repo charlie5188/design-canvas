@@ -38,7 +38,6 @@ body,
   --canvas-ease: cubic-bezier(0.2, 0, 0, 1);
   --canvas-fast: 120ms;
   --canvas-slow: 200ms;
-  color: var(--canvas-text-color);
 }
 /* A background the viewer chose for the board (BackgroundPicker in Canvas.tsx).
    Each preset brings a whole set of chrome colors, so the words on the board and
@@ -70,6 +69,30 @@ body,
   --canvas-text-color: var(--canvas-text, #1f2328);
   --canvas-subtle-color: var(--canvas-text-subtle, #5f6b76);
   --canvas-hover-color: var(--canvas-hover, rgb(0 0 0 / 6%));
+}
+/* The chrome's words in the chrome's color, and a preview's in the app's. No element
+   on the way from <body> down to a preview sets a color, so a component with no color
+   of its own inherits the app's body color, as it does in the app, in every theme.
+   Each line colors what sits beside that way, never the way itself; a wrapper added
+   on it needs its own line, or previews turn the chrome's color again. */
+:where(
+    .canvas-root > :not(.canvas-viewport, .canvas-trash-popover, .canvas-flow),
+    .canvas-viewport > :not(.canvas-world),
+    .canvas-world > :not(.canvas-item),
+    .canvas-item > :not(.canvas-preview-wrap),
+    .canvas-preview-wrap > :not(.canvas-preview),
+    .canvas-trash-popover > :not(.canvas-trash-list),
+    .canvas-trash-entry > :not(.canvas-trash-thumb),
+    .canvas-flow > :not(.canvas-flow-stage),
+    .canvas-flow-stage > :not(.canvas-flow-row),
+    .canvas-flow-row > :not(.canvas-flow-screen),
+    .canvas-flow-screen > :not(.canvas-flow-frame),
+    .canvas-flow-frame > :not(.canvas-flow-box),
+    .canvas-flow-box > :not(.canvas-flow-live),
+    .canvas-frame-page > :not(.canvas-frame-root),
+    .canvas-frame-missing,
+    .canvas-draw
+  ) {
   color: var(--canvas-text-color);
 }
 /* A preset's color, on the background button and in its list. "Default" is the project's own. */
@@ -1108,7 +1131,7 @@ html[data-canvas-alt] .canvas-frame-root * {
   border-radius: var(--canvas-radius-l);
   background: var(--canvas-surface-color);
   box-shadow: var(--canvas-shadow-overlay);
-  color: var(--canvas-text-color);
+  /* No color: its thumbnails keep the app's (see "The chrome's words" at the top). */
   font-size: 13px;
 }
 .canvas-trash-head {
@@ -2010,7 +2033,7 @@ html[data-canvas-alt] .canvas-frame-root * {
   display: flex;
   flex-direction: column;
   background: var(--canvas-bg-color);
-  color: var(--canvas-text-color);
+  /* No color: its screens keep the app's (see "The chrome's words" at the top). */
   animation: canvas-fade-in var(--canvas-slow) var(--canvas-ease);
 }
 .canvas-toolbar[data-place="crumb"] {
