@@ -32,7 +32,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { access, chmod, constants, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import type { Plugin } from "vite";
-import { AGENT_EVENT, AGENT_PATH, type AgentReply, EDIT_PATH, MAX_REPLY, NOTE_ID, REPLY_EVENT, SHARE_PATH, VERSION_PATH } from "./channel.ts";
+import { AGENT_EVENT, AGENT_PATH, type AgentReply, EDIT_PATH, MAX_REPLY, NOTE_ID, PROPS_PATH, REPLY_EVENT, SHARE_PATH, VERSION_PATH } from "./channel.ts";
+import { componentProps } from "./props-types.ts";
 import { addEntry, applyEdits, type DirectAdd, type DirectEdit, type DirectRemove, placeableItems, removeEntry, validAdd, validEdit, validRemove } from "./registry-edit.ts";
 
 export type AgentState = "off" | "listening" | "working";
@@ -181,6 +182,15 @@ function renderInPlace(code: string, id: string, root: string): { code: string; 
   return { code: `${next}\nif (import.meta.hot) {\n  import.meta.hot.accept();\n}\n`, map: null };
 }
 
+const DEVTOOLS_HOOK = `if (!window.__REACT_DEVTOOLS_GLOBAL_HOOK__) {
+  const renderers = new Map();
+  window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
+    renderers, supportsFiber: true, isDisabled: false,
+    inject(internals) { const id = renderers.size + 1; renderers.set(id, internals); return id; },
+    onCommitFiberRoot() {}, onCommitFiberUnmount() {}, onPostCommitFiberRoot() {}, onScheduleFiberRoot() {}, checkDCE() {}, setStrictMode() {},
+  };
+}`;
+
 export function agentChannel(): Plugin {
   let root = "";
   return {
@@ -193,6 +203,12 @@ export function agentChannel(): Plugin {
     },
     transform(code, id) {
       return renderInPlace(code, id, root);
+    },
+    // Inspect previews a prop change live through the hook React's dev build reports to (as React
+    // DevTools does). React looks for it once, as it loads, so it must exist before any module runs.
+    // An installed DevTools extension brings its own, which works the same.
+    transformIndexHtml() {
+      return [{ tag: "script", injectTo: "head-prepend", children: DEVTOOLS_HOOK }];
     },
     // Vite 6 and later call hotUpdate; Vite 5 calls handleHotUpdate. Typed loosely, as Vite 5's types lack hotUpdate.
     ...({
@@ -419,6 +435,21 @@ export function agentChannel(): Plugin {
         latest = { at: Date.now(), value };
         return value;
       };
+      // Inspect: a component's props and the values each allows. It reads only type declarations
+      // inside the named package, found from this folder as Node would.
+      server.middlewares.use(PROPS_PATH, (request, response, next) => {
+        if (request.method !== "GET") return next();
+        if (!localHost(request)) return send(response, 403, "Not allowed");
+        const query = new URL(request.url ?? "/", "http://canvas").searchParams;
+        const pkg = query.get("package") ?? "";
+        const component = query.get("component") ?? "";
+        if (!/^(@[\w.-]+\/)?[\w.-]+$/.test(pkg)) return send(response, 400, "Bad package");
+        try {
+          sendJson(response, { props: componentProps(server.config.root, pkg, component) });
+        } catch (error) {
+          send(response, 500, error instanceof Error ? error.message : String(error));
+        }
+      });
       server.middlewares.use(VERSION_PATH, (request, response, next) => {
         if (request.method !== "GET" || (request.url ?? "/") !== "/") return next();
         // A same-origin GET carries no Origin header, so the Host check alone applies; it reads only version numbers and this folder's path.

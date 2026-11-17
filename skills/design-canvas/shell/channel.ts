@@ -16,3 +16,5 @@ export const VERSION_PATH = "/__design-canvas/version";
 export const SHARE_PATH = "/__design-canvas/share";
 /** Moves, resizes, and text changes of registry entries, written into registry.tsx. */
 export const EDIT_PATH = "/__design-canvas/edit";
+/** Inspect: the props a design-system component takes, read from its type declarations (props-types.ts). */
+export const PROPS_PATH = "/__design-canvas/props";
