@@ -1415,6 +1415,9 @@ test('Fit all takes in items far apart, below the old 10% limit', async ({ page 
   const original = readFileSync(REGISTRY, 'utf8')
   try {
     const errors = collectErrors(page)
+    // Load first, then add the item, as the agent does: the canvas picks up the change.
+    await page.goto('/')
+    await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toBeVisible()
     // 30,000 px apart: at 10% a 1280 px wide view covers only 12,800 px.
     writeFileSync(
       REGISTRY,
@@ -1423,7 +1426,6 @@ test('Fit all takes in items far apart, below the old 10% limit', async ({ page 
         '  { id: "far", name: "Far", component: Example, x: 30000, y: 0, width: 360, height: 180 },\n];\n',
       ),
     )
-    await page.goto('/')
     const far = page.locator('.canvas-item[data-canvas-item="far"]')
     await expect(far).toHaveCount(1, { timeout: 15_000 })
     await page.getByRole('button', { name: 'Fit all' }).click()
