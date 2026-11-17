@@ -63,7 +63,7 @@ export const labels = {
         { what: "Add a section", how: "`S`, then drag" },
         { what: "Edit a caption or a note", how: "Double-click it" },
         { what: "Remove the selected one", how: "`Delete`" },
-        { what: "Back to Select", how: "`V` or `Esc`" },
+        { what: "Back to Interact", how: "`V` or `Esc`" },
       ],
     },
   ] as { title: string; local?: boolean; rows: { what: string; how: string; local?: boolean }[] }[],
@@ -288,8 +288,10 @@ export const labels = {
   boardEditHint: "Double-click to edit",
   boardResize: "Resize",
   boardMoveLabel: (what: string) => `Move ${what}`,
-  selectTool: "Select",
-  selectToolHint: "Select (V)",
+  // The default tool: clicks reach the prototypes, as in the product. Named for that, not for
+  // selecting, which it does only for notes and sections. V, as in design tools.
+  interactTool: "Interact",
+  interactToolHint: "Interact (V)",
   handTool: "Move canvas",
   handToolHint: "Move canvas (H)",
   inspectTool: "Inspect",

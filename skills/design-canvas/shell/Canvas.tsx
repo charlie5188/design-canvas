@@ -2762,8 +2762,9 @@ function CanvasBoard({
     [announce, closeAnnotation, closeMark, notify, setBoardTool, targetIds],
   );
   /**
-   * The toolbar's tools: Select (the default, nothing armed), Annotate, and the
-   * one-shot Note and Section. Only one is on at a time, and Escape returns to Select.
+   * The toolbar's tools: Interact (the default, nothing armed: the prototypes respond to clicks),
+   * Move canvas, Inspect, Annotate, and the one-shot Note and Section. Only one is on at a time,
+   * and Escape returns to Interact.
    */
   const [handTool, setHandTool] = useState(false);
   // Inspect (prototype): a click in a preview selects an element and the panel at the right reads it
@@ -3008,7 +3009,7 @@ function CanvasBoard({
   const handToolRef = useRef(false);
   handToolRef.current = handTool;
   const chooseTool = useCallback(
-    (tool: "select" | "hand" | "inspect" | "annotate" | BoardKind) => {
+    (tool: "interact" | "hand" | "inspect" | "annotate" | BoardKind) => {
       // Hand is Space held, kept on: a drag anywhere moves the canvas. For touch and mouse-only
       // use, where holding a key down is not possible. Any other tool ends it.
       setHandTool(tool === "hand");
@@ -3018,7 +3019,7 @@ function CanvasBoard({
         if (annotatingRef.current) setAnnotateMode(false);
         return;
       }
-      if (tool === "select") {
+      if (tool === "interact") {
         setBoardTool(null);
         if (annotatingRef.current) setAnnotateMode(false);
         return;
@@ -5469,10 +5470,10 @@ function CanvasBoard({
       const toolKey =
         !plain || !canvasFocus || event.repeat
           ? undefined
-          : { v: "select", h: "hand", i: inspectable ? "inspect" : undefined, n: "note", s: "section" }[event.key.toLowerCase()];
-      if (toolKey && (!shared || toolKey === "select" || toolKey === "hand")) {
+          : { v: "interact", h: "hand", i: inspectable ? "inspect" : undefined, n: "note", s: "section" }[event.key.toLowerCase()];
+      if (toolKey && (!shared || toolKey === "interact" || toolKey === "hand")) {
         event.preventDefault();
-        chooseTool(toolKey as "select" | "hand" | "inspect" | BoardKind);
+        chooseTool(toolKey as "interact" | "hand" | "inspect" | BoardKind);
         return;
       }
       // Delete or Backspace removes the selected note or section, unless a field has the keys.
@@ -6050,14 +6051,14 @@ function CanvasBoard({
           file's own controls top right, and the changes waiting for the agent, only when there are any, top
           centre. The tools bar comes first: item reveals measure the first bar for the bottom margin. */}
       <div className="canvas-toolbar" data-place="tools" role="toolbar" aria-label={labels.toolsBar}>
-          {/* One tool at a time. Select is the default; Escape or V returns to it. */}
+          {/* One tool at a time. Interact is the default; Escape or V returns to it. */}
           <button
             type="button"
             className="canvas-button canvas-icon-button"
             aria-pressed={!annotating && !boardTool && !handTool && !inspectTool}
-            aria-label={labels.selectTool}
-            data-tip={labels.selectToolHint}
-            onClick={() => chooseTool("select")}
+            aria-label={labels.interactTool}
+            data-tip={labels.interactToolHint}
+            onClick={() => chooseTool("interact")}
           >
             <SelectIcon />
           </button>

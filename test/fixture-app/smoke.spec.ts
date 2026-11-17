@@ -1638,23 +1638,23 @@ test('holding Z zooms as in Figma, and Shift + 0 and 1 set the view', async ({ p
   expect(errors).toEqual([])
 })
 
-test('Select is the default tool and Escape returns to it', async ({ page }) => {
+test('Interact is the default tool and Escape returns to it', async ({ page }) => {
   await page.goto('/')
   const tool = (name: string) => page.getByRole('button', { name, exact: true })
-  await expect(tool('Select')).toHaveAttribute('aria-pressed', 'true')
+  await expect(tool('Interact')).toHaveAttribute('aria-pressed', 'true')
   // A hovered button's tooltip joins its accessible name, so the mouse leaves between steps.
   await tool('Note').click()
   await page.mouse.move(400, 300)
   await expect(tool('Note')).toHaveAttribute('aria-pressed', 'true')
-  await expect(tool('Select')).toHaveAttribute('aria-pressed', 'false')
+  await expect(tool('Interact')).toHaveAttribute('aria-pressed', 'false')
   await page.keyboard.press('Escape')
-  await expect(tool('Select')).toHaveAttribute('aria-pressed', 'true')
+  await expect(tool('Interact')).toHaveAttribute('aria-pressed', 'true')
   await tool('Ask agent').click()
   await page.mouse.move(400, 300)
   await expect(tool('Ask agent')).toHaveAttribute('aria-pressed', 'true')
-  await tool('Select').click()
+  await tool('Interact').click()
   await page.mouse.move(400, 300)
-  await expect(tool('Select')).toHaveAttribute('aria-pressed', 'true')
+  await expect(tool('Interact')).toHaveAttribute('aria-pressed', 'true')
   await expect(tool('Ask agent')).toHaveAttribute('aria-pressed', 'false')
 })
 
@@ -1666,7 +1666,7 @@ test('the Hand tool moves the canvas with a drag, with no key held, and Escape e
   await tool('Move canvas').click()
   await page.mouse.move(400, 300)
   await expect(tool('Move canvas')).toHaveAttribute('aria-pressed', 'true')
-  await expect(tool('Select')).toHaveAttribute('aria-pressed', 'false')
+  await expect(tool('Interact')).toHaveAttribute('aria-pressed', 'false')
   // A drag that starts on an item moves the canvas, not the item.
   const item = await page.locator('.canvas-item[data-canvas-item="example"] .canvas-preview').boundingBox()
   const before = await transform()
@@ -1677,11 +1677,11 @@ test('the Hand tool moves the canvas with a drag, with no key held, and Escape e
   expect(await transform()).not.toBe(before)
   await expect(tool('Move canvas')).toHaveAttribute('aria-pressed', 'true')
   await page.keyboard.press('Escape')
-  await expect(tool('Select')).toHaveAttribute('aria-pressed', 'true')
+  await expect(tool('Interact')).toHaveAttribute('aria-pressed', 'true')
   await page.keyboard.press('h')
   await expect(tool('Move canvas')).toHaveAttribute('aria-pressed', 'true')
   await page.keyboard.press('v')
-  await expect(tool('Select')).toHaveAttribute('aria-pressed', 'true')
+  await expect(tool('Interact')).toHaveAttribute('aria-pressed', 'true')
 })
 
 // Before the agent tests: they leave the agent busy for a while, and then the button sends instead of copying.
