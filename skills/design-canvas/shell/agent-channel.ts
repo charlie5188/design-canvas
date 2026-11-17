@@ -45,6 +45,8 @@ export type SharedFile = { name: string; html: string; missing: string[] };
 const DEFAULT_WAIT_S = 3600;
 const BUSY_MS = 15 * 60_000;
 const MAX_BODY = 256 * 1024;
+/** How often a canvas edit starts again when registry.tsx changes under it before it gives up. */
+const EDIT_ATTEMPTS = 5;
 const LOCAL_HOST = /^(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/;
 
 type Timer = ReturnType<typeof setTimeout>;
@@ -67,20 +69,37 @@ const fromBrowser = (request: IncomingMessage) => !!(request.headers.origin || r
  * A file the person made read-only is still refused, as a plain write refuses it
  * (a rename would not). Where a rename over the file is not possible, for example
  * while another program holds it open on Windows, the plain write is used.
+ *
+ * The file is replaced only while it still holds `expected`, the text the change was
+ * made from. Someone else may have written it since, such as the agent adding an item
+ * while the canvas saves a move; writing over that would undo their change without a
+ * word. Then nothing is written, and the result is false. The check runs just before
+ * the swap. Without a lock, which the agent's edits do not take, a write that opens the
+ * file between the two can still be lost: in a test that aimed writes at that moment,
+ * about one in seven that collided with a save, where every one was lost before.
  */
-async function replaceFile(path: string, text: string) {
+async function replaceFile(path: string, text: string, expected: string): Promise<boolean> {
   await access(path, constants.W_OK);
   // The file itself, so a link to it stays a link.
   const target = await realpath(path);
   const beside = join(dirname(target), `.${basename(target)}.saving`);
+  const unchanged = async () => (await readFile(target, "utf8")) === expected;
+  let swapped = false;
   try {
     await writeFile(beside, text);
     await chmod(beside, (await stat(target)).mode);
-    await rename(beside, target);
+    if (await unchanged()) {
+      await rename(beside, target);
+      swapped = true;
+    }
   } catch {
-    await rm(beside, { force: true }).catch(() => {});
-    await writeFile(target, text);
+    // Falls back to the plain write below.
   }
+  if (swapped) return true;
+  await rm(beside, { force: true }).catch(() => {});
+  if (!(await unchanged())) return false;
+  await writeFile(target, text);
+  return true;
 }
 
 function send(response: ServerResponse, status: number, body: string, type = "text/plain") {
@@ -365,31 +384,37 @@ export function agentChannel(): Plugin {
             if (edits.some((edit) => !edit) || adds.some((add) => !add) || removes.some((remove) => !remove)) return send(response, 400, "Invalid edit");
             const path = join(server.config.root, "registry.tsx");
             const job = writing.then(async () => {
-              const original = await readFile(path, "utf8");
-              const result = applyEdits(original, edits as DirectEdit[]);
-              let next = result.source;
-              // Removals first, so an entry that is removed and added back in one request ends up present.
-              const unremoved: string[] = [];
-              for (const remove of removes as DirectRemove[]) {
-                const removed = removeEntry(next, remove.kind, remove.id);
-                if (removed === undefined) unremoved.push(remove.id);
-                else next = removed;
-              }
-              // New entries go in order, so their place in the array matches their place in the request.
-              const rejected: number[] = [];
-              const ids: (string | null)[] = [];
-              (adds as DirectAdd[]).forEach((add, index) => {
-                const added = addEntry(next, add);
-                if (added) {
-                  next = added.source;
-                  ids[index] = added.id;
-                } else {
-                  rejected.push(index);
-                  ids[index] = null;
+              // When the file changes while an edit is made (replaceFile), the edit starts again from
+              // the new text, so it lands on top of that change instead of undoing it.
+              for (let attempt = 1; ; attempt++) {
+                const original = await readFile(path, "utf8");
+                const result = applyEdits(original, edits as DirectEdit[]);
+                let next = result.source;
+                // Removals first, so an entry that is removed and added back in one request ends up present.
+                const unremoved: string[] = [];
+                for (const remove of removes as DirectRemove[]) {
+                  const removed = removeEntry(next, remove.kind, remove.id);
+                  if (removed === undefined) unremoved.push(remove.id);
+                  else next = removed;
                 }
-              });
-              if (next !== original) await replaceFile(path, next);
-              return { applied: result.applied, missing: result.missing, rejected, unremoved, ids };
+                // New entries go in order, so their place in the array matches their place in the request.
+                const rejected: number[] = [];
+                const ids: (string | null)[] = [];
+                (adds as DirectAdd[]).forEach((add, index) => {
+                  const added = addEntry(next, add);
+                  if (added) {
+                    next = added.source;
+                    ids[index] = added.id;
+                  } else {
+                    rejected.push(index);
+                    ids[index] = null;
+                  }
+                });
+                if (next === original || (await replaceFile(path, next, original))) {
+                  return { applied: result.applied, missing: result.missing, rejected, unremoved, ids };
+                }
+                if (attempt === EDIT_ATTEMPTS) throw new Error("registry.tsx kept changing while the canvas saved; try again");
+              }
             });
             writing = job.catch(() => {});
             job.then(
