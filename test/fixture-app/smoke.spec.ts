@@ -821,14 +821,29 @@ test('an open note card is drawn above a note lying over its item', async ({ pag
   await page.goto('/')
   const preview = page.locator('.canvas-item[data-canvas-item="example"] .canvas-preview')
   await expect(preview).toBeVisible()
-  await page.waitForTimeout(600)
-  const box = (await preview.boundingBox())!
+  // The first paint fits the canvas to the window once fonts load, later on a slow machine:
+  // measure only once the item has stopped moving, and again before each press.
+  const settled = async () => {
+    let last = ''
+    await expect
+      .poll(async () => {
+        const now = JSON.stringify(await preview.boundingBox())
+        const same = now === last
+        last = now
+        return same
+      })
+      .toBe(true)
+    return (await preview.boundingBox())!
+  }
+  let box = await settled()
   await page.getByRole('button', { name: 'Note', exact: true }).click()
   await page.mouse.click(box.x + 40, box.y + 40)
+  await expect(page.locator('[data-board-ghost] textarea')).toBeFocused()
   await page.keyboard.type('Underneath')
   await page.keyboard.press('Escape')
   const ghost = (await page.locator('[data-board-ghost]').boundingBox())!
   await page.getByRole('button', { name: 'Ask agent', exact: true }).click()
+  box = await settled()
   await page.mouse.click(box.x + 20, box.y + 110)
   const card = page.locator('.canvas-annotation-card')
   await expect(card).toBeVisible()

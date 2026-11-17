@@ -269,9 +269,8 @@ const THEME_ICONS: Partial<Record<string, () => ReactNode>> = { light: SunIcon, 
 const AnnotateIcon = () => <Icon name="message-circle" />;
 const SelectIcon = () => <Icon name="pointer" />;
 const HandIcon = () => <Icon name="hand" />;
-// Sliders: what the tool is for (adjusting an element's props and styles), unlike a pointer,
-// which Select already is.
-const InspectIcon = () => <Icon name="adjustments-horizontal" />;
+// A pointer with code brackets: picking an element to see and change what it is made of in code.
+const InspectIcon = () => <Icon name="pointer-code" />;
 const NoteIcon = () => <Icon name="note" />;
 const SectionIcon = () => <Icon name="folder" />;
 const CopyIcon = () => <Icon name="copy" />;
