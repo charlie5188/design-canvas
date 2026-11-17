@@ -423,8 +423,8 @@ export function FlowView({
             type="button"
             className="canvas-button canvas-icon-button"
             aria-pressed={!asking}
-            aria-label={labels.selectTool}
-            data-tip={labels.selectToolHint}
+            aria-label={labels.interactTool}
+            data-tip={labels.interactToolHint}
             onClick={() => setAsking(false)}
           >
             <Icon name="pointer" />

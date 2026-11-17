@@ -54,6 +54,17 @@ The installer adds a light and dark switch when the app's stylesheet defines `.d
 
 Map the `--canvas-*` tokens in `theme.css` to the app's tokens so the canvas chrome follows each theme. If the app has a single theme, leave `theme` undefined; the toolbar then shows no switch.
 
+## 7a. Design system (Inspect)
+
+The Inspect tool appears only when `design-system.ts` describes the app's design system. Fill it in when the app uses one:
+
+- `components`: the package's React exports (`import * as Aegis from "@legalforce/aegis-react"`).
+- `package`: the package name. The dev server reads its type declarations to list each prop's values.
+- `tokenPrefix`: the prefix of its token custom properties (`--aegis-`), and `privateTokens` for names that are not public (`-internal-`).
+- `typographyAttribute`: the attribute its typography styles use, if it has one (`data-aegis-typography`).
+
+Leave `designSystem` undefined when the app has no design system.
+
 ## 8. Fonts
 
 The canvas does not render the app's root layout, so fonts loaded there are missing. For `next/font`, the installer gives each font variable a system fallback. When typography matters, load the real fonts in `theme.css` from the app's font files or the same web font source.

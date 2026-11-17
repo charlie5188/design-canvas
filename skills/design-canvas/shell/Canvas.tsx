@@ -97,6 +97,8 @@ import {
   wheelPixels,
 } from "./dom";
 import { Icon } from "./icons";
+import { type InspectChanged, type InspectEdit, InspectPanel, RESET } from "./Inspect";
+import { type DesignSystem, pathOf as inspectPath, selectable, showProp, showStyle } from "./inspect-read";
 import { controlWords, type FlowStep, FlowView } from "./FlowView";
 import { linkName, opensNewTab, pathOf, RouteContext, screenAt, screenIndex, screensOf, stateCount } from "./routes";
 import { labels } from "./labels";
@@ -267,6 +269,8 @@ const THEME_ICONS: Partial<Record<string, () => ReactNode>> = { light: SunIcon, 
 const AnnotateIcon = () => <Icon name="message-circle" />;
 const SelectIcon = () => <Icon name="pointer" />;
 const HandIcon = () => <Icon name="hand" />;
+// A pointer with code brackets: picking an element to see and change what it is made of in code.
+const InspectIcon = () => <Icon name="pointer-code" />;
 const NoteIcon = () => <Icon name="note" />;
 const SectionIcon = () => <Icon name="folder" />;
 const CopyIcon = () => <Icon name="copy" />;
@@ -1446,6 +1450,26 @@ function useStableList<T extends object>(list: T[]): T[] {
   return kept.current;
 }
 
+/** An element the Inspect panel changed, named for the agent: its path, then its own label when it has one. */
+function inspectRef(item: CanvasItem | undefined, element: Element, preview: Element, system?: DesignSystem) {
+  const path = system ? inspectPath(element, preview, system, item?.component).map((entry) => entry.name) : [];
+  const label = describeElement(element, preview);
+  return [item?.name, ...path].filter(Boolean).join(" › ") + (path.length && /^text /.test(label) ? "" : ` (${label})`);
+}
+
+/**
+ * An element changed from the Inspect panel, under the id of the note it became. The
+ * changes are on show on the element (inspect-read.ts showStyle, showProp) until the note
+ * goes; `before` and `original` put back what the code had. `block`: the lines it wrote
+ * into the note, swapped when they change so the person's own words there stay.
+ */
+type InspectRecord = {
+  element: Element;
+  styles: Map<string, { what: string; from: string; to: string; value: string; before: string; override?: string }>;
+  props: Map<string, { component: string; from: string; to: string; value: unknown; had: boolean; original: unknown; fiber: unknown }>;
+  block: string;
+};
+
 type CanvasProps = {
   items: CanvasItem[];
   /** Notes that explain the canvas to whoever opens it; see CanvasNote. */
@@ -1455,6 +1479,8 @@ type CanvasProps = {
   storageKey: string;
   /** The project's themes. Leave out when the project has a single theme. */
   theme?: ThemeStore;
+  /** The project's design system, for the Inspect tool. Leave out to have no Inspect tool. */
+  designSystem?: DesignSystem;
 };
 
 /**
@@ -1467,7 +1493,14 @@ export function Canvas(props: CanvasProps) {
   return <CanvasBoard {...props} storageKey={storageKey} />;
 }
 
-function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: sectionsProp = NO_SECTIONS, storageKey, theme }: CanvasProps) {
+function CanvasBoard({
+  items: itemsProp,
+  notes: notesProp = NO_NOTES,
+  sections: sectionsProp = NO_SECTIONS,
+  storageKey,
+  theme,
+  designSystem,
+}: CanvasProps) {
   const itemsRaw = useStableList(itemsProp);
   // A resize shows at once and is written to registry.tsx once the person pauses.
   // `bw`/`bh` are the registry's size when the override began: when the registry
@@ -1830,6 +1863,9 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     shared ? [] : loadAnnotations(storageKey, new Set([...ids, ...sections.map((s) => sectionKey(s.id))])),
   );
   const annotationsRef = useRef(annotations);
+  const inspectRecords = useRef(new Map<string, InspectRecord>());
+  // Notes discarded or deleted: an Undo that brings one back shows its changes again.
+  const inspectGone = useRef(new Map<string, InspectRecord>());
   annotationsRef.current = annotations;
   const [openAnnotation, setOpenAnnotation] = useState<OpenAnnotation | null>(null);
   const openRef = useRef(openAnnotation);
@@ -2050,10 +2086,29 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     for (const gone of shownBefore.current) {
       if (now.has(gone.id)) continue;
       clearPending(gone.id);
+      // A change from the Inspect panel stops showing with its note. A prop shown on a component
+      // goes back only if the note was never sent: once the agent applied it, the code has it.
+      const record = inspectRecords.current.get(gone.id);
+      if (record && designSystem) {
+        for (const [property, style] of record.styles) showStyle(record.element, property, style.before, designSystem);
+        if (!gone.sent) for (const [name, prop] of record.props) showProp(prop.fiber, name, prop.had ? prop.original : undefined);
+        inspectRecords.current.delete(gone.id);
+        if (!gone.sent) inspectGone.current.set(gone.id, record);
+      }
       const frame = worldRef.current?.querySelector<HTMLIFrameElement>(
         `[data-canvas-preview="${CSS.escape(gone.itemId)}"] iframe[data-canvas-frame]`,
       );
       if (frame?.contentWindow) postToFrame(frame.contentWindow, { type: "text-revert", id: gone.id });
+    }
+    // Back by Undo: its changes show again, on the element if it is still there.
+    for (const back of annotations) {
+      const record = inspectGone.current.get(back.id);
+      if (!record || !designSystem) continue;
+      inspectGone.current.delete(back.id);
+      if (!record.element.isConnected) continue;
+      for (const [property, style] of record.styles) showStyle(record.element, property, style.value, designSystem);
+      for (const [name, prop] of record.props) showProp(prop.fiber, name, prop.value);
+      inspectRecords.current.set(back.id, record);
     }
     shownBefore.current = annotations;
   }, [annotations]);
@@ -2707,23 +2762,264 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     [announce, closeAnnotation, closeMark, notify, setBoardTool, targetIds],
   );
   /**
-   * The toolbar's tools: Select (the default, nothing armed), Annotate, and the
-   * one-shot Note and Section. Only one is on at a time, and Escape returns to Select.
+   * The toolbar's tools: Interact (the default, nothing armed: the prototypes respond to clicks),
+   * Move canvas, Inspect, Annotate, and the one-shot Note and Section. Only one is on at a time,
+   * and Escape returns to Interact.
    */
   const [handTool, setHandTool] = useState(false);
+  // Inspect (prototype): a click in a preview selects an element and the panel at the right reads it
+  // (Inspect.tsx). The element itself carries the selection outline, so it follows every camera move.
+  const inspectable = !!designSystem && !shared;
+  const [inspectTool, setInspectTool] = useState(false);
+  const inspectToolRef = useRef(false);
+  inspectToolRef.current = inspectTool;
+  const [inspected, setInspected] = useState<{ element: Element; preview: Element; itemId: string } | null>(null);
+  const inspectedRef = useRef(inspected);
+  inspectedRef.current = inspected;
+  useEffect(() => {
+    if (!inspected) return;
+    inspected.element.setAttribute("data-canvas-inspected", "");
+    return () => inspected.element.removeAttribute("data-canvas-inspected");
+  }, [inspected]);
+  useEffect(() => {
+    if (!inspectTool) setInspected(null);
+  }, [inspectTool]);
+  useEffect(
+    () => () => {
+      previewing.current?.();
+      previewing.current = null;
+    },
+    [inspected],
+  );
+  // What changed on the selected element, to mark those controls; read again after each edit.
+  const [inspectEdits, setInspectEdits] = useState(0);
+  const inspectChanged = useMemo<InspectChanged>(() => {
+    // The changes still waiting: a note already sent is the agent's now, and Reset all leaves it.
+    const waiting = (id: string) => annotations.some((a) => a.id === id && !a.sent && !a.queued);
+    const record = inspected && [...inspectRecords.current].find(([id, r]) => r.element === inspected.element && waiting(id))?.[1];
+    return {
+      styles: new Map([...(record?.styles ?? [])].map(([property, style]) => [property, style.from])),
+      props: new Map([...(record?.props ?? [])].map(([name, prop]) => [name, prop.from])),
+    };
+    // `inspectEdits` counts changes to the records, which are a ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inspected, inspectEdits, annotations]);
+  // A breadcrumb level hovered in the panel: outlined with the pick box, as a press would select it.
+  const inspectHighlight = useCallback((element: Element | null) => {
+    const box = pickRef.current;
+    if (!box) return;
+    if (!element || !element.isConnected) {
+      box.hidden = true;
+      return;
+    }
+    const rect = element.getBoundingClientRect();
+    Object.assign(box.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
+    box.hidden = false;
+  }, []);
+  /**
+   * A value shown for a moment, while the pointer is over it in a picker (Inspect.tsx). It
+   * changes nothing that is saved: `null`, or the next one, puts back what was there.
+   */
+  const previewing = useRef<(() => void) | null>(null);
+  const inspectPreview = useCallback(
+    (edit: InspectEdit | null) => {
+      previewing.current?.();
+      previewing.current = null;
+      const current = inspectedRef.current;
+      if (!edit || !current || !designSystem) return;
+      const { element } = current;
+      // "Reset to …" in a picker: what the code had, shown until the pointer moves on.
+      if (edit.value === RESET) {
+        const record = [...inspectRecords.current.values()].find((r) => r.element === element);
+        if (edit.kind === "style") {
+          const entry = record?.styles.get(edit.property);
+          if (!entry) return;
+          const now = showStyle(element, edit.property, entry.before, designSystem);
+          previewing.current = () => showStyle(element, edit.property, now, designSystem);
+        } else {
+          const entry = record?.props.get(edit.name);
+          if (!entry) return;
+          showProp(entry.fiber, edit.name, entry.had ? entry.original : undefined);
+          previewing.current = () => showProp(entry.fiber, edit.name, entry.value);
+        }
+        return;
+      }
+      if (edit.kind === "style") {
+        const before = showStyle(element, edit.property, edit.value, designSystem);
+        previewing.current = () => showStyle(element, edit.property, before, designSystem);
+      } else {
+        const props = (edit.fiber as { memoizedProps?: Record<string, unknown> }).memoizedProps ?? {};
+        const had = edit.name in props;
+        const was = props[edit.name];
+        showProp(edit.fiber, edit.name, edit.value);
+        previewing.current = () => showProp(edit.fiber, edit.name, had ? was : undefined);
+      }
+    },
+    [designSystem],
+  );
+  /**
+   * Writes an Inspect record's lines into its note: the lines it wrote before are swapped,
+   * the person's own words there stay. A note left with neither goes; a first line makes it.
+   */
+  const writeInspectNote = useCallback(
+    (id: string, record: InspectRecord, current: { element: Element; preview: Element; itemId: string }) => {
+      if (!designSystem) return;
+      const { element, preview, itemId } = current;
+      const lines = [
+        ...[...record.styles.values()].map(
+          (style) => labels.inspectStyleLine(style.what, style.from, style.to) + (style.override ? labels.inspectOverrideMark(style.override) : ""),
+        ),
+        ...[...record.props].map(([name, prop]) => labels.inspectPropLine(prop.component, name, prop.from, prop.to)),
+      ];
+      const overrides = [...record.styles.values()].some((style) => style.override);
+      const block = lines.length
+        ? [...lines, ...(overrides ? [labels.inspectOverrideScope(designSystem.name)] : []), labels.inspectScope(designSystem.name)].join("\n")
+        : "";
+      const existing = annotationsRef.current.find((a) => a.id === id);
+      const own = existing && record.block ? existing.text.replace(record.block, "").trim() : (existing?.text.trim() ?? "");
+      const text = [block, own].filter(Boolean).join("\n");
+      record.block = block;
+      if (!text) {
+        inspectRecords.current.delete(id);
+        if (existing) setAnnotations((prev) => prev.filter((a) => a.id !== id));
+      } else if (existing) {
+        inspectRecords.current.set(id, record);
+        setAnnotations((prev) => prev.map((a) => (a.id === id ? { ...a, text: limitText(text) } : a)));
+      } else {
+        inspectRecords.current.set(id, record);
+        // Pinned at the element's top-left corner, in unscaled preview units, as an annotation is.
+        const box = element.getBoundingClientRect();
+        const area = preview.getBoundingClientRect();
+        const scale = area.width / Math.max(1, (preview as HTMLElement).offsetWidth);
+        const item = itemsRef.current.find((entry) => entry.id === itemId);
+        // A tweak changes the item in place, unless its other waiting notes already ask for a new version.
+        const others = annotationsRef.current.filter((a) => a.itemId === itemId && !a.sent && !a.queued && a.text.trim());
+        const annotation: Annotation = {
+          id,
+          itemId,
+          x: Math.round((box.left - area.left) / scale),
+          y: Math.round((box.top - area.top) / scale),
+          // Where it sits, in component and class names the agent can find in code, and its words when it has some.
+          ref: inspectRef(item, element, preview, designSystem),
+          text: limitText(text),
+          version: others.length ? !!others[others.length - 1]!.version : false,
+        };
+        setAnnotations((prev) => [...prev, annotation]);
+      }
+    },
+    [designSystem],
+  );
+  /**
+   * Every waiting change in one section of the panel (the component's props, or the styles)
+   * on the selected element: each put back to what the code had and its lines taken out of
+   * the note. A notice offers Undo, which brings back the changes and the note as they were.
+   * A note already sent is the agent's now, and stays.
+   */
+  const inspectResetAll = useCallback(
+    (section: "props" | "styles") => {
+      const current = inspectedRef.current;
+      if (!current || !designSystem) return;
+      const waiting = (id: string) => annotationsRef.current.some((a) => a.id === id && !a.sent && !a.queued);
+      const found = [...inspectRecords.current].find(([key, r]) => r.element === current.element && waiting(key));
+      if (!found) return;
+      const [id, record] = found;
+      const count = section === "props" ? record.props.size : record.styles.size;
+      if (!count) return;
+      previewing.current?.();
+      previewing.current = null;
+      const before = { styles: new Map(record.styles), props: new Map(record.props), block: record.block };
+      const note = annotationsRef.current.find((a) => a.id === id);
+      if (section === "styles") {
+        for (const [property, style] of record.styles) showStyle(record.element, property, style.before, designSystem);
+        record.styles = new Map();
+      } else {
+        for (const [name, prop] of record.props) showProp(prop.fiber, name, prop.had ? prop.original : undefined);
+        record.props = new Map();
+      }
+      writeInspectNote(id, record, current);
+      setInspectEdits((n) => n + 1);
+      notify(labels.inspectResetDone(count), {
+        label: labels.undo,
+        run: () => {
+          if (!record.element.isConnected) return;
+          for (const [property, style] of before.styles) showStyle(record.element, property, style.value, designSystem);
+          for (const [name, prop] of before.props) showProp(prop.fiber, name, prop.value);
+          Object.assign(record, before);
+          inspectRecords.current.set(id, record);
+          if (note) setAnnotations((prev) => [...prev.filter((a) => a.id !== id), note]);
+          setInspectEdits((n) => n + 1);
+        },
+      });
+    },
+    [designSystem, notify, writeInspectNote],
+  );
+  const inspectEdit = useCallback(
+    (edit: InspectEdit) => {
+      // A value on show for a moment goes first, so what the change replaces is what the code had.
+      previewing.current?.();
+      previewing.current = null;
+      const current = inspectedRef.current;
+      if (!current || !designSystem) return;
+      const { element } = current;
+      const waiting = (id: string) => annotationsRef.current.some((a) => a.id === id && !a.sent && !a.queued);
+      // A note already sent keeps its changes; a further change starts a new note.
+      let id = [...inspectRecords.current].find(([key, r]) => r.element === element && waiting(key))?.[0];
+      const record: InspectRecord = (id && inspectRecords.current.get(id)) || { element, styles: new Map(), props: new Map(), block: "" };
+      id ??= newAnnotationId();
+      if (edit.kind === "style") {
+        const entry = record.styles.get(edit.property);
+        if (edit.value === RESET || (entry && edit.to === entry.from)) {
+          if (entry) showStyle(element, edit.property, entry.before, designSystem);
+          record.styles.delete(edit.property);
+        } else {
+          const before = showStyle(element, edit.property, edit.value, designSystem);
+          record.styles.set(
+            edit.property,
+            entry
+              ? { ...entry, to: edit.to, value: edit.value }
+              : { what: edit.what, from: edit.from, to: edit.to, value: edit.value, before, ...(edit.override ? { override: edit.override } : {}) },
+          );
+        }
+      } else {
+        const entry = record.props.get(edit.name);
+        if (edit.value === RESET || (entry && edit.to === entry.from)) {
+          if (entry) showProp(entry.fiber, edit.name, entry.had ? entry.original : undefined);
+          record.props.delete(edit.name);
+        } else {
+          const props = (edit.fiber as { memoizedProps?: Record<string, unknown> }).memoizedProps ?? {};
+          const had = entry ? entry.had : edit.name in props;
+          const original = entry ? entry.original : props[edit.name];
+          showProp(edit.fiber, edit.name, edit.value);
+          record.props.set(edit.name, {
+            component: edit.component,
+            from: entry?.from ?? edit.from,
+            to: edit.to,
+            value: edit.value,
+            had,
+            original,
+            fiber: edit.fiber,
+          });
+        }
+      }
+      writeInspectNote(id, record, current);
+      setInspectEdits((n) => n + 1);
+    },
+    [designSystem, writeInspectNote],
+  );
   const handToolRef = useRef(false);
   handToolRef.current = handTool;
   const chooseTool = useCallback(
-    (tool: "select" | "hand" | "annotate" | BoardKind) => {
+    (tool: "interact" | "hand" | "inspect" | "annotate" | BoardKind) => {
       // Hand is Space held, kept on: a drag anywhere moves the canvas. For touch and mouse-only
       // use, where holding a key down is not possible. Any other tool ends it.
       setHandTool(tool === "hand");
-      if (tool === "hand") {
+      setInspectTool(tool === "inspect");
+      if (tool === "hand" || tool === "inspect") {
         setBoardTool(null);
         if (annotatingRef.current) setAnnotateMode(false);
         return;
       }
-      if (tool === "select") {
+      if (tool === "interact") {
         setBoardTool(null);
         if (annotatingRef.current) setAnnotateMode(false);
         return;
@@ -4860,6 +5156,21 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     const hidePick = () => {
       if (pickRef.current) pickRef.current.hidden = true;
     };
+    /** With the Inspect tool, what a press on `target` would select: a whole component, or the element itself. */
+    let lastTarget: { target: EventTarget | null; found: ReturnType<typeof findInspectTarget> } | null = null;
+    // A move over the same element as the last one has the same answer: the outline follows the pointer cheaply.
+    const inspectTarget = (target: EventTarget | null) => {
+      if (lastTarget?.target !== target || !(lastTarget.found?.element.isConnected ?? true)) lastTarget = { target, found: findInspectTarget(target) };
+      return lastTarget.found;
+    };
+    const findInspectTarget = (target: EventTarget | null) => {
+      if (!designSystem || !(target instanceof Element) || target instanceof HTMLIFrameElement) return null;
+      const preview = target.closest<HTMLElement>("[data-canvas-preview]");
+      if (!preview || preview === target || !world.contains(preview)) return null;
+      const item = items.find((entry) => entry.id === preview.dataset.canvasPreview);
+      if (!item) return null;
+      return { element: selectable(target, preview, designSystem, item.component), preview, item };
+    };
     const placeBox = (box: HTMLElement | null, rect: { left: number; top: number; right: number; bottom: number }) => {
       if (!box) return;
       Object.assign(box.style, {
@@ -4971,6 +5282,14 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       }
       if (inTextEdit(event.target)) return hidePick();
       if (moveDraw(event)) return;
+      if (inspectToolRef.current) {
+        // Over the panel, its breadcrumb owns the box (inspectHighlight).
+        if (event.target instanceof Element && event.target.closest(".canvas-inspect, .canvas-inspect-popover")) return;
+        const target = gesture.current ? null : inspectTarget(event.target);
+        if (target) placeBox(pickRef.current, target.element.getBoundingClientRect());
+        else hidePick();
+        return;
+      }
       if ((event.altKey || annotatingRef.current) && !gesture.current) {
         const head = annotatingRef.current && !event.altKey ? headItem(event.target) : null;
         const section = annotatingRef.current && !event.altKey && !head ? headSection(event.target) : null;
@@ -4989,6 +5308,12 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       }
       // A press with Z held zooms (onPointerDown), so it must reach the canvas.
       if (zoomArmed.current) return;
+      // Inspecting, a press selects (onPickClick) and the preview does not react to it.
+      if (inspectToolRef.current && event.button === 0 && !spaceArmed.current && inspectTarget(event.target)) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       const annotatePress = annotatingRef.current && event.button === 0 && !spaceArmed.current;
       const pick = pickTarget(event.target);
       if ((!event.altKey && !annotatePress) || !pick) return;
@@ -5004,6 +5329,15 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       if (inTextEdit(event.target)) {
         event.preventDefault();
         event.stopPropagation();
+        return;
+      }
+      if (inspectToolRef.current && !event.altKey) {
+        const target = inspectTarget(event.target);
+        if (!target) return;
+        event.preventDefault();
+        event.stopPropagation();
+        // The second click of a double-click goes inside the component (onPickDoubleClick).
+        if (event.detail < 2) setInspected({ element: target.element, preview: target.preview, itemId: target.item.id });
         return;
       }
       // A double-click's second click: the double-click edits the text instead (onPickDoubleClick).
@@ -5039,6 +5373,15 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       startAnnotation(pick.item.id, (event.clientX - rect.left) / scale, (event.clientY - rect.top) / scale, ref);
     };
     const onPickDoubleClick = (event: MouseEvent) => {
+      // Inspecting, a double-click selects exactly what is under the pointer, inside a component too.
+      if (inspectToolRef.current && !event.altKey) {
+        const target = inspectTarget(event.target);
+        if (!target || !(event.target instanceof Element)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setInspected({ element: event.target, preview: target.preview, itemId: target.item.id });
+        return;
+      }
       // Inside the text being edited, a double-click selects a word and stays there.
       if (inTextEdit(event.target)) {
         event.stopPropagation();
@@ -5127,10 +5470,10 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       const toolKey =
         !plain || !canvasFocus || event.repeat
           ? undefined
-          : { v: "select", h: "hand", n: "note", s: "section" }[event.key.toLowerCase()];
-      if (toolKey && (!shared || toolKey === "select" || toolKey === "hand")) {
+          : { v: "interact", h: "hand", i: inspectable ? "inspect" : undefined, n: "note", s: "section" }[event.key.toLowerCase()];
+      if (toolKey && (!shared || toolKey === "interact" || toolKey === "hand")) {
         event.preventDefault();
-        chooseTool(toolKey as "select" | "hand" | BoardKind);
+        chooseTool(toolKey as "interact" | "hand" | "inspect" | BoardKind);
         return;
       }
       // Delete or Backspace removes the selected note or section, unless a field has the keys.
@@ -5146,6 +5489,28 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
         event.preventDefault();
         deleteBoardRef.current();
         return;
+      }
+      // Inspecting: Escape lets go of the element first, then puts the tool down. Arrow Up selects the
+      // element around the selection, Arrow Down the first one inside it, a component's own parts included.
+      if (inspectToolRef.current && canvasFocus && !(event.target instanceof Element && typingIn(event.target))) {
+        const current = inspectedRef.current;
+        if (event.key === "Escape") {
+          if (current) setInspected(null);
+          else setInspectTool(false);
+          return;
+        }
+        if (current && plain && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+          event.preventDefault();
+          const parent = current.element.parentElement;
+          const next =
+            event.key === "ArrowDown"
+              ? current.element.firstElementChild
+              : parent && parent !== current.preview && current.preview.contains(parent)
+                ? selectable(parent, current.preview, designSystem!, itemsRef.current.find((i) => i.id === current.itemId)?.component)
+                : null;
+          if (next) setInspected({ ...current, element: next });
+          return;
+        }
       }
       if (event.key === "Escape" && handToolRef.current && canvasFocus) {
         setHandTool(false);
@@ -5393,6 +5758,8 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     suppressNextClick,
     textEdited,
     zoomStep,
+    designSystem,
+    inspectable,
   ]);
 
   // The grip and the name both move an item. A press that never travels past
@@ -5684,14 +6051,14 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
           file's own controls top right, and the changes waiting for the agent, only when there are any, top
           centre. The tools bar comes first: item reveals measure the first bar for the bottom margin. */}
       <div className="canvas-toolbar" data-place="tools" role="toolbar" aria-label={labels.toolsBar}>
-          {/* One tool at a time. Select is the default; Escape or V returns to it. */}
+          {/* One tool at a time. Interact is the default; Escape or V returns to it. */}
           <button
             type="button"
             className="canvas-button canvas-icon-button"
-            aria-pressed={!annotating && !boardTool && !handTool}
-            aria-label={labels.selectTool}
-            data-tip={labels.selectToolHint}
-            onClick={() => chooseTool("select")}
+            aria-pressed={!annotating && !boardTool && !handTool && !inspectTool}
+            aria-label={labels.interactTool}
+            data-tip={labels.interactToolHint}
+            onClick={() => chooseTool("interact")}
           >
             <SelectIcon />
           </button>
@@ -5705,6 +6072,18 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
           >
             <HandIcon />
           </button>
+          {inspectable && (
+            <button
+              type="button"
+              className="canvas-button canvas-icon-button"
+              aria-pressed={inspectTool}
+              aria-label={labels.inspectTool}
+              data-tip={labels.inspectToolHint}
+              onClick={() => chooseTool("inspect")}
+            >
+              <InspectIcon />
+            </button>
+          )}
           {!shared && (<>
           <button
             type="button"
@@ -5882,6 +6261,19 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
           noteOpen={!!openAnnotation && openAnnotation.original.itemId === flowItem.id}
           onCloseNote={annotationHandlers.onSave}
           onClose={closeFlow}
+        />
+      )}
+      {inspectTool && designSystem && (
+        <InspectPanel
+          system={designSystem}
+          selection={inspected}
+          stop={items.find((item) => item.id === inspected?.itemId)?.component}
+          changed={inspectChanged}
+          onSelect={(element: Element) => setInspected((current) => (current ? { ...current, element } : current))}
+          onEdit={inspectEdit}
+          onPreview={inspectPreview}
+          onHighlight={inspectHighlight}
+          onResetAll={inspectResetAll}
         />
       )}
       {!shared && trashOpen && (
