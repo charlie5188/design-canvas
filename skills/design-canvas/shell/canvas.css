@@ -2400,7 +2400,7 @@ html[data-canvas-alt] .canvas-frame-root * {
      are; as wide as its left edge was dragged. */
   inset-block-start: 64px;
   inset-inline-end: 16px;
-  inline-size: var(--canvas-inspect-width, 272px);
+  inline-size: var(--canvas-inspect-width, 300px);
   max-block-size: calc(100% - 64px - 68px);
   box-sizing: border-box;
   overflow: hidden;
@@ -2409,6 +2409,9 @@ html[data-canvas-alt] .canvas-frame-root * {
   background: var(--canvas-surface-color);
   box-shadow: var(--canvas-shadow-raised);
   font: 12px/1.4 var(--canvas-font, system-ui, -apple-system, "Segoe UI", sans-serif);
+  /* Sizes and px values keep their place as they change. */
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
 }
 .canvas-inspect-empty {
   margin: 0;
@@ -2446,7 +2449,7 @@ html[data-canvas-alt] .canvas-frame-root * {
   font-weight: 600;
 }
 .canvas-inspect-section {
-  padding: 10px 12px 12px;
+  padding: 10px 12px 14px;
 }
 .canvas-inspect-section + .canvas-inspect-section {
   border-block-start: 1px solid var(--canvas-border-color);
@@ -2465,39 +2468,58 @@ html[data-canvas-alt] .canvas-frame-root * {
 .canvas-inspect-section p {
   margin: 0;
 }
+/* Rows as in a design tool's inspector: a label column, and fields that fill the rest, so
+   values line up in one column whatever their length. */
 .canvas-inspect-rows {
   display: grid;
-  gap: 6px;
+  gap: 4px;
   margin: 0;
 }
 .canvas-inspect-rows > div {
+  position: relative;
   display: grid;
-  grid-template-columns: 64px minmax(0, 1fr);
-  align-items: baseline;
+  grid-template-columns: 72px minmax(0, 1fr);
+  align-items: center;
   gap: 8px;
+  min-block-size: 26px;
 }
 .canvas-inspect-rows dt {
+  overflow: hidden;
   color: var(--canvas-subtle-color);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .canvas-inspect-rows dd {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 4px;
   margin: 0;
   min-inline-size: 0;
 }
-/* Token names can be long (color.background.accent.yellow.subtle): they wrap rather than hide their end. */
-.canvas-inspect-value {
-  max-inline-size: 100%;
-  padding: 2px 6px;
-  border-radius: var(--canvas-radius-s);
-  background: var(--canvas-hover-color);
-  overflow-wrap: break-word;
+/* Two values share the row; four (one per side or corner) go two by two. */
+.canvas-inspect-rows dd > .canvas-inspect-pick,
+.canvas-inspect-rows dd > .canvas-inspect-select {
+  flex: 1 1 0;
 }
-/* A value outside the design system: the same amber the sections use for "set aside". */
-.canvas-inspect-value[data-off] {
-  background: color-mix(in srgb, #b87c00 14%, transparent);
-  color: color-mix(in srgb, #b87c00 70%, var(--canvas-text-color));
+.canvas-inspect-rows dd[data-count="4"] > * {
+  flex-basis: calc(50% - 2px);
+}
+/* Fields that share a row are narrow: no arrow, so the value has the room (the field still opens). */
+.canvas-inspect-rows dd[data-count]:not([data-count="1"]) .canvas-inspect-select > svg {
+  display: none;
+}
+/* A changed row: a dot in the margin before its label, which moves nothing. */
+.canvas-inspect-rows > div[data-changed]::before {
+  content: "";
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: -9px;
+  inline-size: 5px;
+  block-size: 5px;
+  border-radius: 50%;
+  background: var(--canvas-focus-color);
+  translate: 0 -50%;
 }
 /* The selected element, outlined on itself so the outline follows every camera move. */
 [data-canvas-inspected] {
@@ -2510,49 +2532,76 @@ html[data-canvas-alt] .canvas-frame-root * {
 /* Editing in the Inspect panel: a picker per value, chip-sized. A changed value carries a
    dot in the focus color until its note goes; "Reset to …" in its list puts back what the code had. */
 .canvas-inspect-pick {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  max-inline-size: 100%;
+  display: flex;
   min-inline-size: 0;
 }
+/* A field: one line, one height. A long token name ends in an ellipsis, and the whole name is
+   its hint; colors already go by their short name. */
 .canvas-inspect-select {
-  display: inline-flex;
+  display: flex;
+  flex: 1;
   align-items: center;
   gap: 6px;
+  box-sizing: border-box;
   min-inline-size: 0;
-  max-inline-size: 100%;
-  padding: 2px 6px;
+  block-size: 26px;
+  padding: 0 6px 0 8px;
   border: 1px solid transparent;
   border-radius: var(--canvas-radius-s);
   background: var(--canvas-hover-color);
   color: inherit;
   font: inherit;
+  line-height: 16px;
   text-align: start;
   cursor: pointer;
+  transition-property: border-color, background-color;
+  transition-duration: var(--canvas-fast);
+  transition-timing-function: var(--canvas-ease);
 }
 .canvas-inspect-select:hover,
 .canvas-inspect-select[aria-expanded="true"] {
   border-color: var(--canvas-border-color);
+}
+.canvas-inspect-select > svg {
+  flex: none;
+  inline-size: 12px;
+  block-size: 12px;
+  color: var(--canvas-subtle-color);
+}
+/* Read-only: the same field without a surface or a list. */
+.canvas-inspect-select[data-readonly] {
+  background: none;
+  cursor: default;
+}
+.canvas-inspect-select[data-readonly]:hover {
+  border-color: transparent;
+}
+.canvas-inspect-prefix {
+  flex: none;
+  color: var(--canvas-subtle-color);
 }
 .canvas-inspect-select:focus-visible {
   outline: 2px solid var(--canvas-focus-color);
   outline-offset: 1px;
 }
 .canvas-inspect-select-text {
+  flex: 1;
   min-inline-size: 0;
-  overflow-wrap: break-word;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.canvas-inspect-caret {
-  color: var(--canvas-subtle-color);
-  font-size: 10px;
-}
+/* A swatch keeps an edge on any color, light or dark, as an image outline does. */
 .canvas-inspect-swatch {
   flex: none;
-  inline-size: 12px;
-  block-size: 12px;
-  border-radius: 3px;
-  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 15%);
+  inline-size: 14px;
+  block-size: 14px;
+  border-radius: 4px;
+  outline: 1px solid oklch(0 0 0 / 0.1);
+  outline-offset: -1px;
+}
+.canvas-root[data-background="dark"] .canvas-inspect-swatch {
+  outline-color: oklch(1 0 0 / 0.12);
 }
 /* The list a picker opens: over everything, fixed to the window so the panel's scroll never clips it. */
 .canvas-inspect-popover {
@@ -2562,14 +2611,31 @@ html[data-canvas-alt] .canvas-frame-root * {
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--canvas-border-color);
-  border-radius: var(--canvas-radius-m);
+  /* Concentric: an option's 8px corner plus the list's 4px padding. */
+  border-radius: var(--canvas-radius-l);
   background: var(--canvas-surface-color);
   box-shadow: var(--canvas-shadow-overlay);
   font: 12px/1.4 var(--canvas-font, system-ui, -apple-system, "Segoe UI", sans-serif);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  animation: canvas-inspect-open var(--canvas-fast) var(--canvas-ease);
+}
+@keyframes canvas-inspect-open {
+  from {
+    opacity: 0;
+    translate: 0 -2px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .canvas-inspect-popover {
+    animation: none;
+  }
 }
 .canvas-inspect-search {
+  box-sizing: border-box;
+  block-size: 28px;
   margin: 6px 6px 2px;
-  padding: 4px 8px;
+  padding: 0 8px;
   border: 1px solid var(--canvas-border-color);
   border-radius: var(--canvas-radius-s);
   background: transparent;
@@ -2595,9 +2661,13 @@ html[data-canvas-alt] .canvas-frame-root * {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 8px;
-  border-radius: var(--canvas-radius-s);
+  min-block-size: 28px;
+  padding: 0 8px;
+  border-radius: var(--canvas-radius-m);
   cursor: pointer;
+}
+.canvas-inspect-popover li .canvas-subtle {
+  flex: none;
 }
 .canvas-inspect-popover li[data-active] {
   background: var(--canvas-hover-color);
@@ -2608,23 +2678,74 @@ html[data-canvas-alt] .canvas-frame-root * {
 .canvas-inspect-option-text {
   flex: 1;
   min-inline-size: 0;
-  overflow-wrap: break-word;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .canvas-inspect-select[data-off] {
   background: color-mix(in srgb, #b87c00 14%, transparent);
   color: color-mix(in srgb, #b87c00 70%, var(--canvas-text-color));
 }
-.canvas-inspect-select[data-changed],
-.canvas-inspect-switch[data-changed] {
-  box-shadow: inset 3px 0 0 var(--canvas-focus-color);
-}
+/* On and off as a switch: the real checkbox stays for keys and screen readers, unseen. */
 .canvas-inspect-switch {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 1px 6px 1px 2px;
-  border-radius: var(--canvas-radius-s);
+  gap: 8px;
+  block-size: 26px;
   cursor: pointer;
+}
+.canvas-inspect-switch input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.canvas-inspect-switch-track {
+  position: relative;
+  inline-size: 26px;
+  block-size: 16px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--canvas-text-color) 22%, transparent);
+  transition: background-color var(--canvas-fast) var(--canvas-ease);
+}
+.canvas-inspect-switch-track::after {
+  content: "";
+  position: absolute;
+  inset-block-start: 2px;
+  inset-inline-start: 2px;
+  inline-size: 12px;
+  block-size: 12px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 20%);
+  transition: translate var(--canvas-fast) var(--canvas-ease);
+}
+.canvas-inspect-switch input:checked + .canvas-inspect-switch-track {
+  background: var(--canvas-fill-color);
+}
+.canvas-inspect-switch input:checked + .canvas-inspect-switch-track::after {
+  translate: 10px 0;
+}
+.canvas-inspect-switch input:focus-visible + .canvas-inspect-switch-track {
+  outline: 2px solid var(--canvas-focus-color);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .canvas-inspect-switch-track,
+  .canvas-inspect-switch-track::after {
+    transition: none;
+  }
+}
+/* Press feedback on the panel's small buttons. */
+.canvas-inspect-lock,
+.canvas-inspect-crumb button {
+  transition: scale var(--canvas-fast) var(--canvas-ease);
+}
+.canvas-inspect-lock:active,
+.canvas-inspect-crumb button:active {
+  scale: 0.96;
 }
 .canvas-inspect-hint {
   margin-block-start: 8px !important;
@@ -2662,9 +2783,10 @@ html[data-canvas-alt] .canvas-frame-root * {
 }
 .canvas-inspect-lock {
   display: inline-grid;
+  flex: none;
   place-items: center;
-  inline-size: 22px;
-  block-size: 22px;
+  inline-size: 24px;
+  block-size: 24px;
   padding: 0;
   border: 0;
   border-radius: var(--canvas-radius-s);
@@ -2708,7 +2830,7 @@ html[data-canvas-alt] .canvas-frame-root * {
 /* Section headings keep one height whatever buttons they show (a reset comes and goes), so
    nothing below moves when a value changes. The title takes the room the buttons leave. */
 .canvas-inspect-section h3 {
-  min-block-size: 22px;
+  min-block-size: 24px;
 }
 .canvas-inspect-heading {
   flex: 1;

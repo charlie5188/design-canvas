@@ -8,6 +8,7 @@ import {
   pathOf,
   placedComponent,
   PROBE,
+  shortName,
   type Row,
   styleRows,
   type Value,
@@ -301,9 +302,9 @@ function usePanelWidth() {
   const [width, setWidth] = useState(() => {
     try {
       const saved = Number(localStorage.getItem(PANEL_WIDTH_KEY));
-      return saved >= PANEL_MIN && saved <= PANEL_MAX ? saved : 272;
+      return saved >= PANEL_MIN && saved <= PANEL_MAX ? saved : 300;
     } catch {
-      return 272;
+      return 300;
     }
   });
   useLayoutEffect(() => {
@@ -436,7 +437,7 @@ function Props({
         const own = set[prop.name];
         const current = own ?? (prop.boolean ? prop.default === "true" : prop.default);
         return (
-          <div key={prop.name}>
+          <div key={prop.name} data-changed={changed.has(prop.name) ? "" : undefined}>
             <dt>{prop.name}</dt>
             <dd>
               {prop.options.length ? (
@@ -452,8 +453,9 @@ function Props({
                   onOpen={onHold}
                 />
               ) : (
-                <label className="canvas-inspect-switch" data-changed={changed.has(prop.name) ? "" : undefined}>
-                  <input type="checkbox" checked={!!current} onChange={(event) => edit(prop, event.currentTarget.checked)} />
+                <label className="canvas-inspect-switch">
+                  <input type="checkbox" role="switch" checked={!!current} onChange={(event) => edit(prop, event.currentTarget.checked)} />
+                  <span className="canvas-inspect-switch-track" aria-hidden="true" />
                   {current ? labels.inspectOn : labels.inspectOff}
                 </label>
               )}
@@ -519,21 +521,28 @@ function StyleRow({
     value: chosen === RESET ? RESET : chosen || (lengths ? "0" : "transparent"),
     ...(override ? { override } : {}),
   });
+  // The field shows a color by its short name (the row says the kind); its hint, the whole name.
+  const shown = (value: Value) =>
+    value.kind === "token" ? shortName(system, row.category, value.token) : value.kind === "off" ? value.value : none;
+  const full = (value: Value) =>
+    value.kind === "token"
+      ? [value.token, value.value, value.others.length ? labels.inspectAlso(value.others) : ""].filter(Boolean).join("\n")
+      : undefined;
   return (
-    <div>
+    <div data-changed={row.values.some((value) => changed.has(value.property)) ? "" : undefined}>
       <dt>{row.label}</dt>
-      <dd>
+      <dd data-count={row.values.length}>
         {row.values.map((value, index) =>
           editable ? (
             <span key={index} className="canvas-inspect-pick">
-              {value.side && <span className="canvas-subtle">{value.side}</span>}
               <Picker
                 label={[row.label, value.side].filter(Boolean).join(" ")}
-                current={value.kind === "token" ? value.token : value.kind === "off" ? value.value : none}
+                prefix={value.side}
+                current={shown(value)}
                 swatch={paints ? (value.kind === "token" ? options.find((o) => o.value === value.name)?.swatch : value.kind === "off" ? value.value : undefined) : undefined}
                 selected={value.kind === "token" ? value.name : value.kind === "off" ? "current" : ""}
                 off={flag && value.kind === "off"}
-                note={flag ? offNote(value) : undefined}
+                note={flag ? offNote(value) : full(value)}
                 changed={changed.has(value.property)}
                 options={[
                   ...(value.kind === "off" ? [{ value: "current", label: value.value, detail: labels.inspectNotToken(system.name), swatch: paints ? value.value : undefined }] : []),
@@ -556,7 +565,7 @@ function StyleRow({
               />
             </span>
           ) : (
-            <ValueChip key={index} value={value} />
+            <ValueChip key={index} value={value} shown={shown(value)} hint={full(value)} />
           ),
         )}
       </dd>
@@ -564,24 +573,13 @@ function StyleRow({
   );
 }
 
-/** A token by its name, its value on hover. */
-function ValueChip({ value }: { value: Value }) {
-  const side = value.side && <span className="canvas-subtle">{value.side} </span>;
-  if (value.kind === "none") return <span className="canvas-inspect-value canvas-subtle">{side}0</span>;
-  if (value.kind === "token") {
-    const title = [value.value, value.others.length ? labels.inspectAlso(value.others) : ""].filter(Boolean).join("\n");
-    return (
-      <span className="canvas-inspect-value" title={title}>
-        {side}
-        {breakable(value.token)}
-        {value.others.length > 0 && <span className="canvas-subtle"> +{value.others.length}</span>}
-      </span>
-    );
-  }
+/** A read-only value: the same field as a picker, without its list. The whole name on hover. */
+function ValueChip({ value, shown, hint }: { value: Value; shown: string; hint?: string }) {
   return (
-    <span className="canvas-inspect-value">
-      {side}
-      {value.value}
+    <span className="canvas-inspect-select" data-readonly="" title={hint}>
+      {value.side && <span className="canvas-inspect-prefix">{value.side}</span>}
+      <span className="canvas-inspect-select-text">{breakable(shown)}</span>
+      {value.kind === "token" && value.others.length > 0 && <span className="canvas-subtle">+{value.others.length}</span>}
     </span>
   );
 }
@@ -614,6 +612,7 @@ function Picker({
   changed,
   resetTo,
   note,
+  prefix,
   onPreview,
   onChoose,
   onOpen,
@@ -627,8 +626,10 @@ function Picker({
   changed?: boolean;
   /** What the code had, when the value has changed: the list starts with "Reset to …" it. */
   resetTo?: string;
-  /** Said on hover and to screen readers: why the value is marked. */
+  /** Said on hover and to screen readers: why the value is marked, or the whole token name. */
   note?: string;
+  /** A side or axis inside the field, before the value: "↕", "Top". */
+  prefix?: string;
   onPreview: (value: string | null) => void;
   onChoose: (value: string) => void;
   onOpen: (open: boolean) => void;
@@ -730,9 +731,10 @@ function Picker({
           onOpen(true);
         }}
       >
+        {prefix && <span className="canvas-inspect-prefix">{prefix}</span>}
         {swatch && <span className="canvas-inspect-swatch" style={{ background: swatch }} aria-hidden="true" />}
         <span className="canvas-inspect-select-text">{typeof current === "string" ? breakable(current) : current}</span>
-        <span className="canvas-inspect-caret" aria-hidden="true">▾</span>
+        <Icon name="chevron-down" />
       </button>
       {open && place && (
         <div

@@ -545,11 +545,30 @@ export type Choice = { value: string; label: string; short?: string; detail?: st
  * their values, smallest first for lengths. A state's color (hovered, pressed) is left out:
  * it belongs to the component that has the state.
  */
+const KIND_WORDS: Record<Category, string> = {
+  space: "-space-",
+  radius: "-radius-",
+  text: "-color-foreground-",
+  fill: "-color-background-",
+  border: "-color-border-",
+  typography: "",
+};
+/**
+ * A token's name without its kind, where the row already says the kind: `accent.blue.subtle` for
+ * `color.foreground.accent.blue.subtle` in Text, `xSmall` for `space.xSmall` in Padding. Type keeps
+ * its whole name. The full name is the field's hint, and what the note for the agent says.
+ */
+export function shortName(system: DesignSystem, category: Category, label: string) {
+  if (category === "typography") return label;
+  const kind = tokenLabel(`${system.tokenPrefix}${KIND_WORDS[category].slice(1)}`, system);
+  return label.startsWith(kind) ? label.slice(kind.length) : label;
+}
+
 export function choices(element: Element, system: DesignSystem, category: Category): Choice[] {
   const { names, typography } = tokens(system);
   if (category === "typography") return typography.map((name) => ({ value: name, label: name }));
   const style = getComputedStyle(element);
-  const word = { space: "-space-", radius: "-radius-", text: "-color-foreground-", fill: "-color-background-", border: "-color-border-" }[category];
+  const word = KIND_WORDS[category];
   const list = names
     .filter((name) => name.includes(word) && !STATES.test(name))
     .map((name) => ({ name, raw: style.getPropertyValue(name).trim() }))
@@ -558,13 +577,14 @@ export function choices(element: Element, system: DesignSystem, category: Catego
     return list
       .map((t) => ({ ...t, px: parseFloat(t.raw) * (t.raw.endsWith("rem") ? 16 : 1) }))
       .sort((a, b) => a.px - b.px)
-      .map((t) => ({ value: t.name, label: tokenLabel(t.name, system), detail: `${round(t.px)}px` }));
+      .map((t) => {
+        const label = tokenLabel(t.name, system);
+        return { value: t.name, label, short: shortName(system, category, label), detail: `${round(t.px)}px` };
+      });
   }
-  // In the list, a color goes by what follows its kind (`accent.blue.subtle`): the row already says which kind.
-  const kind = tokenLabel(`${system.tokenPrefix}${word.slice(1)}`, system);
   return list.map((t) => {
     const label = tokenLabel(t.name, system);
-    return { value: t.name, label, short: label.startsWith(kind) ? label.slice(kind.length) : label, swatch: t.raw };
+    return { value: t.name, label, short: shortName(system, category, label), swatch: t.raw };
   });
 }
 
