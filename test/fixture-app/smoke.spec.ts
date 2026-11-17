@@ -121,7 +121,7 @@ test("text in a preview has the app's color, on any background and opened alone,
     await expect(phone).toHaveCSS('color', APP_TEXT)
     await expect(item.locator('.canvas-name')).toHaveCSS('color', CHROME_TEXT)
     // A dark board turns the chrome light; the previews stay as the app draws them.
-    await page.getByRole('button', { name: 'Background' }).click()
+    await page.getByRole('button', { name: 'Canvas settings' }).click()
     await page.getByRole('button', { name: 'Dark', exact: true }).click()
     await expect(item.locator('.canvas-name')).toHaveCSS('color', DARK_CHROME_TEXT)
     await expect(item.locator('h2')).toHaveCSS('color', APP_TEXT)

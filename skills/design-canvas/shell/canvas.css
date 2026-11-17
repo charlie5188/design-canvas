@@ -39,7 +39,7 @@ body,
   --canvas-fast: 120ms;
   --canvas-slow: 200ms;
 }
-/* A background the viewer chose for the board (BackgroundPicker in Canvas.tsx).
+/* A background the viewer chose for the board (SettingsMenu in Canvas.tsx).
    Each preset brings a whole set of chrome colors, so the words on the board and
    the bars over it stay readable on it, whatever the project's theme is. */
 .canvas-root[data-background="white"] {
@@ -460,8 +460,10 @@ body,
   background: var(--canvas-surface-color);
   box-shadow: var(--canvas-shadow-raised);
 }
+/* Above the Inspect panel (z-index 5), so a bar's hints and menus (help, settings) that open
+   over the panel are never hidden under it, nor under a list the panel opens. */
 .canvas-toolbar {
-  z-index: 5;
+  z-index: 6;
   inset-block-end: 16px;
 }
 .canvas-toolbar[data-place="tools"],
@@ -494,6 +496,7 @@ body,
   inset-block: calc(100% + 8px) auto;
 }
 .canvas-toast {
+  z-index: 6;
   inset-inline-start: 50%;
   translate: -50% 0;
   inset-block-end: 68px;
@@ -2393,11 +2396,12 @@ html[data-canvas-alt] .canvas-frame-root * {
   z-index: 5;
   display: flex;
   flex-direction: column;
-  /* As tall as its content, down to the window's bottom margin; as wide as its left edge was dragged. */
+  /* As tall as its content, down to just above the view controls, which stay where they always
+     are; as wide as its left edge was dragged. */
   inset-block-start: 64px;
   inset-inline-end: 16px;
   inline-size: var(--canvas-inspect-width, 272px);
-  max-block-size: calc(100% - 64px - 16px);
+  max-block-size: calc(100% - 64px - 68px);
   box-sizing: border-box;
   overflow: hidden;
   border: 1px solid var(--canvas-border-color);
@@ -2701,17 +2705,6 @@ html[data-canvas-alt] .canvas-frame-root * {
   box-shadow: inset 2px 0 0 var(--canvas-focus-color);
   outline: none;
 }
-/* With the panel open, the canvas is the area to its left: the view controls sit beside the
-   panel rather than under it, and the centred bars and notices centre in that area, so a wide
-   panel never pushes one bar into another. */
-:root[data-canvas-inspecting] .canvas-toolbar[data-place="view"] {
-  inset-inline-end: calc(var(--canvas-inspect-width, 272px) + 24px);
-}
-:root[data-canvas-inspecting] .canvas-toolbar[data-place="tools"],
-:root[data-canvas-inspecting] .canvas-toolbar[data-place="pending"],
-:root[data-canvas-inspecting] .canvas-toast {
-  inset-inline-start: calc((100% - var(--canvas-inspect-width, 272px) - 32px) / 2);
-}
 /* Section headings keep one height whatever buttons they show (a reset comes and goes), so
    nothing below moves when a value changes. The title takes the room the buttons leave. */
 .canvas-inspect-section h3 {
@@ -2730,4 +2723,20 @@ html[data-canvas-alt] .canvas-frame-root * {
   flex: none;
   inline-size: 14px;
   block-size: 14px;
+}
+/* Hints in the Inspect panel open under their button and end at its right edge: the panel
+   clips what passes its sides, and its buttons sit at its right edge. */
+.canvas-inspect [data-tip]:hover::after,
+.canvas-inspect [data-tip]:focus-visible::after {
+  inset-block: calc(100% + 6px) auto;
+  inset-inline: auto 0;
+  z-index: 1;
+}
+.canvas-inspect [data-tip] {
+  position: relative;
+}
+.canvas-settings-heading {
+  padding: 4px 8px 2px;
+  color: var(--canvas-subtle-color);
+  font-size: 12px;
 }

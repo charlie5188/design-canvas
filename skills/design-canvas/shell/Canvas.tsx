@@ -1375,7 +1375,12 @@ function saveBackground(storageKey: string, value: Background) {
 }
 
 /** The background button: a swatch of the board's color, opening the presets under it. */
-function BackgroundPicker({ value, onChange }: { value: Background; onChange: (value: Background) => void }) {
+/**
+ * The canvas's own settings, behind a gear at the top right: how the board looks to the
+ * person viewing it, which is seldom changed and changes nothing in the work. For now, its
+ * background. The product's light and dark theme stays outside, since reviewing it is the work.
+ */
+function SettingsMenu({ value, onChange }: { value: Background; onChange: (value: Background) => void }) {
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLSpanElement>(null);
   useEffect(() => {
@@ -1398,16 +1403,19 @@ function BackgroundPicker({ value, onChange }: { value: Background; onChange: (v
       <button
         type="button"
         className="canvas-button canvas-icon-button"
-        aria-label={labels.background}
+        aria-label={labels.canvasSettings}
         aria-expanded={open}
-        aria-controls="canvas-backgrounds"
+        aria-controls="canvas-settings"
         aria-pressed={open}
-        data-tip={open ? undefined : labels.background}
+        data-tip={open ? undefined : labels.canvasSettings}
         onClick={() => setOpen((was) => !was)}
       >
-        <span className="canvas-swatch" data-background={value} aria-hidden="true" />
+        <Icon name="settings" />
       </button>
-      <div id="canvas-backgrounds" role="dialog" aria-label={labels.background} className="canvas-backgrounds" hidden={!open}>
+      <div id="canvas-settings" role="dialog" aria-label={labels.canvasSettings} className="canvas-backgrounds" hidden={!open}>
+        <span className="canvas-settings-heading" id="canvas-settings-background">
+          {labels.background}
+        </span>
         {BACKGROUNDS.map((id) => (
           <button
             key={id}
@@ -6205,7 +6213,7 @@ function CanvasBoard({
             <span className="canvas-separator" aria-hidden="true" />
           </>
         )}
-        <BackgroundPicker value={background} onChange={setBackground} />
+        <SettingsMenu value={background} onChange={setBackground} />
         {!shared && (
           <>
             {/* While the file builds, the icon pulses and the button takes no second click. */}

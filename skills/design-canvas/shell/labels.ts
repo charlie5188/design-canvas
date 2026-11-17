@@ -8,6 +8,7 @@ export const labels = {
   changesBar: "Not sent to the agent yet",
   theme: "Theme",
   background: "Background",
+  canvasSettings: "Canvas settings",
   backgrounds: { default: "Default", white: "White", dark: "Dark" },
   help: "Canvas controls",
   /**

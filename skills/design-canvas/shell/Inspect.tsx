@@ -677,8 +677,9 @@ function Picker({
     const box = trigger.current.getBoundingClientRect();
     const width = Math.max(box.width, 260);
     const left = Math.max(8, Math.min(box.left, window.innerWidth - width - 8));
-    const below = window.innerHeight - box.bottom - 12;
-    const above = box.top - 12;
+    // Clear of the bars at the top and bottom, which sit above the panel and its lists.
+    const below = window.innerHeight - box.bottom - 76;
+    const above = box.top - 64;
     const height = Math.min(320, Math.max(below, above));
     setPlace(below >= Math.min(240, above) ? { left, width, top: box.bottom + 4, height } : { left, width, bottom: window.innerHeight - box.top + 4, height });
     const at = options.findIndex((o) => o.value === selected);
