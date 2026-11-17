@@ -893,6 +893,11 @@ html[data-canvas-alt] .canvas-frame-root * {
 .canvas-pin[data-open] {
   z-index: 1;
 }
+/* An item with its note card open rises above notes and sections on the canvas (z-index 2 and 3);
+   otherwise a note lying over the item is drawn on top of the card being typed in. */
+.canvas-item:has(.canvas-pin[data-open]) {
+  z-index: 4;
+}
 /* A new, empty pin sits on the point just clicked; the second press of a
    double-click goes through it, to the text it edits. */
 .canvas-pin[data-open][data-empty] .canvas-pin-bubble {

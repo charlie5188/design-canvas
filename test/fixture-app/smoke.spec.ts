@@ -731,6 +731,29 @@ test('a note added in annotate mode waits as a ghost and travels with the change
   expect(errors).toEqual([])
 })
 
+test('an open note card is drawn above a note lying over its item', async ({ page }) => {
+  await refuseSaves(page)
+  await page.goto('/')
+  const preview = page.locator('.canvas-item[data-canvas-item="example"] .canvas-preview')
+  await expect(preview).toBeVisible()
+  await page.waitForTimeout(600)
+  const box = (await preview.boundingBox())!
+  await page.getByRole('button', { name: 'Note', exact: true }).click()
+  await page.mouse.click(box.x + 40, box.y + 40)
+  await page.keyboard.type('Underneath')
+  await page.keyboard.press('Escape')
+  const ghost = (await page.locator('[data-board-ghost]').boundingBox())!
+  await page.getByRole('button', { name: 'Ask agent', exact: true }).click()
+  await page.mouse.click(box.x + 20, box.y + 110)
+  const card = page.locator('.canvas-annotation-card')
+  await expect(card).toBeVisible()
+  const covered = await page.evaluate(
+    ([x, y]) => document.elementFromPoint(x!, y!)?.closest('.canvas-annotation-card') !== null,
+    [ghost.x + ghost.width / 2, ghost.y + ghost.height / 2],
+  )
+  expect(covered).toBe(true)
+})
+
 test('a section drawn on empty canvas lists the items inside it', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   const errors = collectErrors(page)
@@ -1533,6 +1556,32 @@ test('Select is the default tool and Escape returns to it', async ({ page }) => 
   await page.mouse.move(400, 300)
   await expect(tool('Select')).toHaveAttribute('aria-pressed', 'true')
   await expect(tool('Ask agent')).toHaveAttribute('aria-pressed', 'false')
+})
+
+test('the Hand tool moves the canvas with a drag, with no key held, and Escape ends it', async ({ page }) => {
+  await page.goto('/')
+  const tool = (name: string) => page.getByRole('button', { name, exact: true })
+  const world = page.locator('.canvas-world')
+  const transform = () => world.evaluate((element) => getComputedStyle(element).transform)
+  await tool('Move canvas').click()
+  await page.mouse.move(400, 300)
+  await expect(tool('Move canvas')).toHaveAttribute('aria-pressed', 'true')
+  await expect(tool('Select')).toHaveAttribute('aria-pressed', 'false')
+  // A drag that starts on an item moves the canvas, not the item.
+  const item = await page.locator('.canvas-item[data-canvas-item="example"] .canvas-preview').boundingBox()
+  const before = await transform()
+  await page.mouse.move(item!.x + 40, item!.y + 40)
+  await page.mouse.down()
+  await page.mouse.move(item!.x + 140, item!.y + 90, { steps: 6 })
+  await page.mouse.up()
+  expect(await transform()).not.toBe(before)
+  await expect(tool('Move canvas')).toHaveAttribute('aria-pressed', 'true')
+  await page.keyboard.press('Escape')
+  await expect(tool('Select')).toHaveAttribute('aria-pressed', 'true')
+  await page.keyboard.press('h')
+  await expect(tool('Move canvas')).toHaveAttribute('aria-pressed', 'true')
+  await page.keyboard.press('v')
+  await expect(tool('Select')).toHaveAttribute('aria-pressed', 'true')
 })
 
 // Before the agent tests: they leave the agent busy for a while, and then the button sends instead of copying.
@@ -2633,7 +2682,12 @@ test('a shared file works from disk, frames included, without the agent tools', 
     const example = page.locator('.canvas-item[data-canvas-item="example"]')
     await expect(example).toContainText('Canvas is ready')
     await expect(page.locator('.canvas-item[data-canvas-item="old"]')).toHaveCount(0)
-    await expect(page.getByRole('button', { name: 'Trash, 1 item' })).toBeVisible()
+    // A shared file is read-only: no trash to open and nothing to move into it.
+    await expect(page.getByRole('button', { name: /^Trash/ })).toHaveCount(0)
+    await page.getByRole('button', { name: /^More actions for / }).first().click()
+    await expect(page.getByRole('link', { name: /in a new tab/ }).first()).toBeVisible()
+    await expect(page.getByRole('button', { name: /to the trash$/ })).toHaveCount(0)
+    await page.keyboard.press('Escape')
     await expect(page.getByRole('button', { name: 'Ask agent', exact: true })).toHaveCount(0)
     // The controls that need an agent, or save, are not in its help.
     await page.getByRole('button', { name: 'Canvas controls' }).click()
@@ -2653,20 +2707,7 @@ test('a shared file works from disk, frames included, without the agent tools', 
     await page.mouse.move(box!.x + 40, box!.y + 40)
     await page.mouse.wheel(0, 120)
     await expect.poll(() => world.evaluate((element) => getComputedStyle(element).transform)).not.toBe(before)
-    // What a viewer changes stays across a reload of that file, and a newer file of the
-    // same canvas opens as it was shared: files on disk share one origin, and so storage.
-    await page.getByRole('button', { name: 'More actions for Example · replace me' }).click()
-    await page.getByRole('button', { name: 'Move Example · replace me to the trash' }).click()
-    await expect(example).toHaveCount(0)
-    await page.reload()
-    await expect(page.getByRole('button', { name: 'Trash, 2 items' })).toBeVisible()
-    await expect(example).toHaveCount(0)
-    const newer = join(folder, 'canvas-newer.html')
-    const sharedAgain = spawnSync('bash', [SHARE, copy, newer], { encoding: 'utf8' })
-    expect(sharedAgain.status, sharedAgain.stderr).toBe(0)
-    await page.goto(pathToFileURL(newer).href)
     await expect(example).toContainText('Canvas is ready')
-    await expect(page.getByRole('button', { name: 'Trash, 1 item' })).toBeVisible()
     // The same file shows one item alone.
     await page.goto(`${url}?item=example`)
     await expect(page.locator('.canvas-frame-root')).toContainText('Canvas is ready')
@@ -2693,10 +2734,8 @@ test('a shared file works from disk, frames included, without the agent tools', 
       await expect(hosted.frameLocator('.canvas-item[data-canvas-item="phone"] iframe').locator('body'), way).toContainText(
         'Canvas is ready',
       )
-      // Inside another page an item has no address of its own, so More has no link to open it alone.
-      await hosted.getByRole('button', { name: /^More actions for / }).first().click()
-      await expect(hosted.getByRole('button', { name: /to the trash$/ }), way).toHaveCount(1)
-      await expect(hosted.getByRole('link', { name: /in a new tab/ }), way).toHaveCount(0)
+      // Inside another page an item has no address of its own, and a shared file cannot trash: no More menu.
+      await expect(hosted.getByRole('button', { name: /^More actions for / }), way).toHaveCount(0)
       await page.keyboard.press('Escape')
       const embeddedWorld = hosted.locator('.canvas-world')
       const start = await embeddedWorld.evaluate((element) => getComputedStyle(element).transform)

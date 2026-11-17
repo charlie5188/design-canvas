@@ -266,6 +266,7 @@ const THEME_ICONS: Partial<Record<string, () => ReactNode>> = { light: SunIcon, 
 
 const AnnotateIcon = () => <Icon name="message-circle" />;
 const SelectIcon = () => <Icon name="pointer" />;
+const HandIcon = () => <Icon name="hand" />;
 const NoteIcon = () => <Icon name="note" />;
 const SectionIcon = () => <Icon name="folder" />;
 const CopyIcon = () => <Icon name="copy" />;
@@ -297,7 +298,7 @@ async function writeClipboard(text: string) {
  * press away, beside the controls used all the time. Opened by a press; Escape, a press
  * outside it, or a choice closes it.
  */
-function ItemMore({ item, onTrash }: { item: CanvasItem; onTrash: (item: CanvasItem) => void }) {
+function ItemMore({ item, onTrash }: { item: CanvasItem; onTrash?: (item: CanvasItem) => void }) {
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLSpanElement>(null);
   useEffect(() => {
@@ -315,6 +316,8 @@ function ItemMore({ item, onTrash }: { item: CanvasItem; onTrash: (item: CanvasI
       window.removeEventListener("keydown", key, true);
     };
   }, [open]);
+  // A shared file is read-only: nothing to trash, so with no address to open either, there is no menu.
+  if (!onTrash && !hasAddress) return null;
   return (
     <span className="canvas-item-more" ref={wrap}>
       <button
@@ -344,18 +347,20 @@ function ItemMore({ item, onTrash }: { item: CanvasItem; onTrash: (item: CanvasI
               {labels.openAloneHint}
             </a>
           )}
-          <button
-            type="button"
-            className="canvas-item-menu-entry"
-            aria-label={labels.moveToTrash(item.name)}
-            onClick={() => {
-              setOpen(false);
-              onTrash(item);
-            }}
-          >
-            <TrashIcon />
-            {labels.moveToTrashHint}
-          </button>
+          {onTrash && (
+            <button
+              type="button"
+              className="canvas-item-menu-entry"
+              aria-label={labels.moveToTrash(item.name)}
+              onClick={() => {
+                setOpen(false);
+                onTrash(item);
+              }}
+            >
+              <TrashIcon />
+              {labels.moveToTrashHint}
+            </button>
+          )}
         </span>
       )}
     </span>
@@ -797,7 +802,7 @@ function CanvasItemView({
   pins: { annotation: Annotation; number?: number }[];
   openAnnotation: string | null;
   annotationHandlers: AnnotationHandlers;
-  onTrash: (item: CanvasItem) => void;
+  onTrash?: (item: CanvasItem) => void;
   /** Opens a note about the whole item. Absent in a shared file, which has no agent. */
   onAsk?: (item: CanvasItem) => void;
   /** The path of the screen a plain item shows now, when a link took it past its first one (routes.ts). */
@@ -2680,8 +2685,19 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
    * The toolbar's tools: Select (the default, nothing armed), Annotate, and the
    * one-shot Note and Section. Only one is on at a time, and Escape returns to Select.
    */
+  const [handTool, setHandTool] = useState(false);
+  const handToolRef = useRef(false);
+  handToolRef.current = handTool;
   const chooseTool = useCallback(
-    (tool: "select" | "annotate" | BoardKind) => {
+    (tool: "select" | "hand" | "annotate" | BoardKind) => {
+      // Hand is Space held, kept on: a drag anywhere moves the canvas. For touch and mouse-only
+      // use, where holding a key down is not possible. Any other tool ends it.
+      setHandTool(tool === "hand");
+      if (tool === "hand") {
+        setBoardTool(null);
+        if (annotatingRef.current) setAnnotateMode(false);
+        return;
+      }
       if (tool === "select") {
         setBoardTool(null);
         if (annotatingRef.current) setAnnotateMode(false);
@@ -4450,6 +4466,18 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
     | null
   >(null);
   const spaceArmed = useRef(false);
+  // The Hand tool turns the Space state on and off with the tool itself.
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    if (handTool) {
+      spaceArmed.current = true;
+      viewport.setAttribute("data-space", "true");
+    } else {
+      spaceArmed.current = false;
+      viewport.removeAttribute("data-space");
+    }
+  }, [handTool]);
   /** Z held, as in Figma: presses zoom instead of reaching items, notes, sections, or previews. */
   const zoomArmed = useRef(false);
   const touches = useRef(new Map<number, Position>());
@@ -4580,6 +4608,8 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       viewport.setAttribute("data-space", "true");
     };
     const clearHeld = () => {
+      // The Hand tool keeps the canvas in its Space state after the key is let go.
+      if (handToolRef.current) return;
       spaceArmed.current = false;
       viewport.removeAttribute("data-space");
     };
@@ -5069,10 +5099,13 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
         return;
       }
       // V puts every tool down, N and S pick the Note and Section tools.
-      const toolKey = shared || !plain || !canvasFocus || event.repeat ? undefined : { v: "select", n: "note", s: "section" }[event.key.toLowerCase()];
-      if (toolKey) {
+      const toolKey =
+        !plain || !canvasFocus || event.repeat
+          ? undefined
+          : { v: "select", h: "hand", n: "note", s: "section" }[event.key.toLowerCase()];
+      if (toolKey && (!shared || toolKey === "select" || toolKey === "hand")) {
         event.preventDefault();
-        chooseTool(toolKey as "select" | BoardKind);
+        chooseTool(toolKey as "select" | "hand" | BoardKind);
         return;
       }
       // Delete or Backspace removes the selected note or section, unless a field has the keys.
@@ -5087,6 +5120,10 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       ) {
         event.preventDefault();
         deleteBoardRef.current();
+        return;
+      }
+      if (event.key === "Escape" && handToolRef.current && canvasFocus) {
+        setHandTool(false);
         return;
       }
       // Escape puts a Note or Section tool down first, then leaves annotate mode.
@@ -5491,7 +5528,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
               // While the flow view shows this item, its open note is drawn there, not twice.
               openAnnotation={flowId === item.id ? null : (openAnnotation?.id ?? null)}
               annotationHandlers={annotationHandlers}
-              onTrash={moveToTrash}
+              onTrash={shared ? undefined : moveToTrash}
               onAsk={shared ? undefined : askItem}
               route={routes[item.id]?.[routes[item.id]!.length - 1]}
               onRestart={restartRoute}
@@ -5620,19 +5657,29 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
       {/* Four groups, each where designers expect it: tools at the bottom centre, the view bottom right, the
           file's own controls top right, and the changes waiting for the agent, only when there are any, top
           centre. The tools bar comes first: item reveals measure the first bar for the bottom margin. */}
-      {!shared && (
-        <div className="canvas-toolbar" data-place="tools" role="toolbar" aria-label={labels.toolsBar}>
+      <div className="canvas-toolbar" data-place="tools" role="toolbar" aria-label={labels.toolsBar}>
           {/* One tool at a time. Select is the default; Escape or V returns to it. */}
           <button
             type="button"
             className="canvas-button canvas-icon-button"
-            aria-pressed={!annotating && !boardTool}
+            aria-pressed={!annotating && !boardTool && !handTool}
             aria-label={labels.selectTool}
             data-tip={labels.selectToolHint}
             onClick={() => chooseTool("select")}
           >
             <SelectIcon />
           </button>
+          <button
+            type="button"
+            className="canvas-button canvas-icon-button"
+            aria-pressed={handTool}
+            aria-label={labels.handTool}
+            data-tip={labels.handToolHint}
+            onClick={() => chooseTool("hand")}
+          >
+            <HandIcon />
+          </button>
+          {!shared && (<>
           <button
             type="button"
             className="canvas-button canvas-icon-button"
@@ -5663,8 +5710,8 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
           >
             <SectionIcon />
           </button>
-        </div>
-      )}
+          </>)}
+      </div>
       <div className="canvas-toolbar" data-place="view" role="toolbar" aria-label={labels.viewBar}>
         <button
           type="button"
@@ -5707,7 +5754,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
           <ResetIcon />
         </button>
       </div>
-      {trashedItems.length > 0 && (
+      {!shared && trashedItems.length > 0 && (
         <div className="canvas-toolbar" data-place="trash" role="toolbar" aria-label={labels.trashHeading}>
           <button
             ref={trashButtonRef}
@@ -5811,7 +5858,7 @@ function CanvasBoard({ items: itemsProp, notes: notesProp = NO_NOTES, sections: 
           onClose={closeFlow}
         />
       )}
-      {trashOpen && (
+      {!shared && trashOpen && (
         <TrashPopover
           items={trashedItems}
           onClose={closeTrash}
