@@ -233,3 +233,14 @@ Before claiming smooth performance, profile a canvas with a realistic number of 
 - Opening a canvas whose registry has a generated item (a computed id, `x`/`y`/`width`/`height`, or a `...spread`) shows one notice naming up to three such items, telling the agent to write them out by hand. A canvas with every entry written out shows none. With no dev server or an older one, nothing shows.
 - When GitHub's `VERSION` is higher than the canvas's own (`canvas/VERSION`, written by install.sh and update.sh), opening the canvas shows one notice, "Version N of this canvas is out", with "Ask the agent to update". With an agent listening the button sends the request; otherwise it copies it. The same version is not offered again in that browser. Offline, with `DESIGN_CANVAS_NO_UPDATE_CHECK=1`, in a shared file, or with an older dev server, nothing shows.
 - On a canvas of 20+ plain (non-`viewport`) items whose CSS has `:has()` rules, panning and zooming stay smooth: in a Chrome performance trace, frames during a pan or zoom show no style recalculation of the whole page (`UpdateLayoutTree` over a few hundred elements). The zoom label still updates while zooming.
+
+## Inspect (prototype)
+
+Needs a canvas whose `design-system.ts` names a real design system (the checks below used Aegis 3.4).
+
+- The Inspect tool (I) shows only with a design system configured, and never in a shared file. A click in a preview selects the design-system component the app placed (a click on Button's label selects Button); a double-click selects exactly what is under the pointer. Arrow Up and Down move between levels; Escape lets go of the element, then puts the tool down.
+- The breadcrumb names components and readable classes (`Card › CardBody › div.actions › Button`), and each level selects.
+- A component lists its design props with the values its types allow and its default marked. Changing one re-renders the component at once; the picker shows the new value. Its own styles are read-only and nothing in them is marked.
+- An element the app built shows padding, gap, margin, radius, fill, and (with text) type and color as pickers of tokens only. A value outside the system is marked, with the nearest tokens. Picking a token shows it on the element at once.
+- Each changed element gets one numbered note: one line per change, then a line asking for the named tokens and props, this element only. ↺ takes one change back and its line out; a note left empty goes. Discard takes every change off the elements; Undo after it brings them back.
+- After a reload, waiting notes stay but their changes no longer show on the elements (prototype shortcut).
