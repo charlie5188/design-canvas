@@ -56,14 +56,19 @@ Map the `--canvas-*` tokens in `theme.css` to the app's tokens so the canvas chr
 
 ## 7a. Design system (Inspect)
 
-The Inspect tool appears only when `design-system.ts` describes the app's design system. Fill it in when the app uses one:
+The Inspect tool appears only when `design-system.ts` describes the app's design system. Leave `designSystem` undefined when the app has none. Two fields are enough for most systems:
 
-- `components`: the package's React exports (`import * as Aegis from "@legalforce/aegis-react"`).
-- `package`: the package name. The dev server reads its type declarations to list each prop's values.
-- `tokenPrefix`: the prefix of its token custom properties (`--aegis-`), and `privateTokens` for names that are not public (`-internal-`).
-- `typographyAttribute`: the attribute its typography styles use, if it has one (`data-aegis-typography`).
+- `name`: shown in the panel.
+- `components`: the package's React exports (`import * as Radix from "@radix-ui/themes"`).
 
-Leave `designSystem` undefined when the app has no design system.
+The canvas then finds the tokens on its own: every custom property in the page's stylesheets is a color or a length by its value, and its kind by common names (`space`, `spacing`, `gap`; `radius`, `rounded`; `font-size`; `foreground`, `bg`, `surface`, `border`). Names that start with the kind (`space-3`, `space.small`) count first; a kind no name says falls back to every color or every length. Check the result in the canvas: select an element the app built and open Padding and Text. Where it does not fit, read the system's docs and token files, and set:
+
+- `package`: the package name. The dev server reads its type declarations to list each prop's values (`variant: solid | subtle`). It reads `<Name>Options` or `<Name>Props` interfaces, unions, and aliases.
+- `propTypes`: each component's props and values, when the declarations do not list them, as for a system that keeps them at runtime. Radix Themes, for one: map its `*PropDefs` (`@radix-ui/themes/components/button.props`) to `{ name, options, boolean, default }`.
+- `tokenPrefix` and `privateTokens`: which custom properties are the system's (`--aegis-`), and which of those are private (`-internal-`). Without a prefix, every custom property but the canvas's own is read.
+- `tokenLabel`: a token's name as the system's people write it, from its custom property. Default: without the prefix (`space-3`). Aegis writes dots: `space.medium`.
+- `tokenKinds`: regular expressions, matched against a name without `--`, for kinds whose names the defaults miss or catch too widely. Aegis names one component's tokens with the same words (`button.background.color`), so it pins its colors to `^aegis-color-foreground`, `^aegis-color-background`, `^aegis-color-border`.
+- `typographyAttribute`: the attribute its typography styles key on, if it has one (`data-aegis-typography`). Without one, type is read as font-size tokens.
 
 ## 8. Fonts
 

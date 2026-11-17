@@ -357,8 +357,10 @@ function usePanelWidth() {
 const typeRequests = new Map<string, Promise<PropType[] | null>>();
 function usePropTypes(system: DesignSystem, component: string | undefined) {
   const [types, setTypes] = useState<Record<string, PropType[] | null>>({});
+  // The system's own prop definitions (design-system.ts) come first; the type declarations, else.
+  const own = component ? system.propTypes?.(component) : undefined;
   useEffect(() => {
-    if (!component || !system.package || component in types) return;
+    if (own || !component || !system.package || component in types) return;
     const key = `${system.package}:${component}`;
     let request = typeRequests.get(key);
     if (!request) {
@@ -374,8 +376,8 @@ function usePropTypes(system: DesignSystem, component: string | undefined) {
     return () => {
       live = false;
     };
-  }, [component, system.package, types]);
-  return component ? types[component] : undefined;
+  }, [component, own, system.package, types]);
+  return own ?? (component ? types[component] : undefined);
 }
 
 // Props that are not design: what the component renders as, and plumbing. Shown nowhere.
@@ -523,7 +525,7 @@ function StyleRow({
   });
   // The field shows a color by its short name (the row says the kind); its hint, the whole name.
   const shown = (value: Value) =>
-    value.kind === "token" ? shortName(system, row.category, value.token) : value.kind === "off" ? value.value : none;
+    value.kind === "token" ? shortName(value.token, row.common) : value.kind === "off" ? value.value : none;
   const full = (value: Value) =>
     value.kind === "token"
       ? [value.token, value.value, value.others.length ? labels.inspectAlso(value.others) : ""].filter(Boolean).join("\n")
@@ -546,7 +548,8 @@ function StyleRow({
                 changed={changed.has(value.property)}
                 options={[
                   ...(value.kind === "off" ? [{ value: "current", label: value.value, detail: labels.inspectNotToken(system.name), swatch: paints ? value.value : undefined }] : []),
-                  ...(row.category !== "typography" ? [{ value: "", label: none }] : []),
+                  // Text always has a size: no "none" for type.
+                  ...(row.category !== "typography" && row.category !== "fontSize" ? [{ value: "", label: none }] : []),
                   // Its nearest tokens say so, where the choice is made.
                   ...options.map((option) =>
                     value.kind === "off" && value.nearest.some((n) => n.token === option.label)

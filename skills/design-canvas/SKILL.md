@@ -77,7 +77,7 @@ The canvas tab is where the person looks, pans, and annotates. Leave its pan, zo
 
 ## 2. Fit the kit to the app
 
-Before adding items, make one real app component render. Work through `references/making-a-kit.md`: global styles, import aliases, providers, environment variables, framework-only modules, and themes. Keep fixes in the canvas folder; ask before changing the app.
+Before adding items, make one real app component render. Work through `references/making-a-kit.md`: global styles, import aliases, providers, environment variables, framework-only modules, themes, and, when the app uses a design system package, `design-system.ts` for the Inspect tool. Keep fixes in the canvas folder; ask before changing the app.
 
 ## 3. Add content
 

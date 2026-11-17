@@ -237,7 +237,9 @@ Before claiming smooth performance, profile a canvas with a realistic number of 
 
 ## Inspect (prototype)
 
-Needs a canvas whose `design-system.ts` names a real design system (the checks below used Aegis 3.4).
+Needs a canvas whose `design-system.ts` names a real design system. The checks below used Aegis 3.4 (with the full config in `references/making-a-kit.md`) and Radix Themes 3.3 (with only `name`, `components`, `package`, and `propTypes` from its prop definitions).
+
+- Without settings, tokens are found by value and name: on Radix, Padding and Gap list `space-1` to `space-9`, Radius `radius-*`, Type `font-size-1` to `font-size-9` (no attribute), a color row every color; no component's own tokens (`inset-*`, `button.column.gap`) join a kind whose system has names that start with it.
 
 - The Inspect tool (I) shows only with a design system configured, and never in a shared file. A click in a preview selects the design-system component the app placed (a click on Button's label selects Button); a double-click selects exactly what is under the pointer. Arrow Up and Down move between levels; Escape lets go of the element, then puts the tool down.
 - The breadcrumb names components and readable classes (`Card › CardBody › div.actions › Button`), and each level selects.
