@@ -2770,51 +2770,13 @@ function CanvasBoard({
     // The changes still waiting: a note already sent is the agent's now, and Reset all leaves it.
     const waiting = (id: string) => annotations.some((a) => a.id === id && !a.sent && !a.queued);
     const record = inspected && [...inspectRecords.current].find(([id, r]) => r.element === inspected.element && waiting(id))?.[1];
-    return { styles: new Set(record?.styles.keys()), props: new Set(record?.props.keys()) };
+    return {
+      styles: new Map([...(record?.styles ?? [])].map(([property, style]) => [property, style.from])),
+      props: new Map([...(record?.props ?? [])].map(([name, prop]) => [name, prop.from])),
+    };
     // `inspectEdits` counts changes to the records, which are a ref.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inspected, inspectEdits, annotations]);
-  /**
-   * Every waiting change on the selected element at once: each put back to what the code
-   * had and its lines taken out of the note (the person's own words there stay; a note left
-   * empty goes). A notice offers Undo, which brings back both the changes and the note.
-   * A note already sent is the agent's now, and stays.
-   */
-  const inspectResetAll = useCallback(() => {
-    const current = inspectedRef.current;
-    if (!current || !designSystem) return;
-    const waiting = (id: string) => annotationsRef.current.some((a) => a.id === id && !a.sent && !a.queued);
-    const found = [...inspectRecords.current].find(([key, r]) => r.element === current.element && waiting(key));
-    if (!found) return;
-    const [id, record] = found;
-    previewing.current?.();
-    previewing.current = null;
-    const note = annotationsRef.current.find((a) => a.id === id)!;
-    const count = record.styles.size + record.props.size;
-    for (const [property, style] of record.styles) showStyle(record.element, property, style.before, designSystem);
-    for (const [name, prop] of record.props) showProp(prop.fiber, name, prop.had ? prop.original : undefined);
-    inspectRecords.current.delete(id);
-    const own = record.block ? note.text.replace(record.block, "").trim() : note.text.trim();
-    if (own) setAnnotations((prev) => prev.map((a) => (a.id === id ? { ...a, text: limitText(own) } : a)));
-    else setAnnotations((prev) => prev.filter((a) => a.id !== id));
-    setInspectEdits((n) => n + 1);
-    notify(labels.inspectResetDone(count), {
-      label: labels.undo,
-      run: () => {
-        if (!record.element.isConnected) return;
-        for (const [property, style] of record.styles) showStyle(record.element, property, style.value, designSystem);
-        for (const [name, prop] of record.props) showProp(prop.fiber, name, prop.value);
-        inspectRecords.current.set(id, record);
-        setAnnotations((prev) => [...prev.filter((a) => a.id !== id), note]);
-        setInspectEdits((n) => n + 1);
-      },
-    });
-  }, [designSystem, notify]);
-  /**
-   * A change from the Inspect panel: shown on the element at once, and written into the
-   * element's one note for the agent, which waits with the other changes. Picking what the
-   * code had (or Undo) takes the line out; a note left with no line and no words goes.
-   */
   // A breadcrumb level hovered in the panel: outlined with the pick box, as a press would select it.
   const inspectHighlight = useCallback((element: Element | null) => {
     const box = pickRef.current;
@@ -2837,8 +2799,24 @@ function CanvasBoard({
       previewing.current?.();
       previewing.current = null;
       const current = inspectedRef.current;
-      if (!edit || !current || !designSystem || edit.value === RESET) return;
+      if (!edit || !current || !designSystem) return;
       const { element } = current;
+      // "Reset to …" in a picker: what the code had, shown until the pointer moves on.
+      if (edit.value === RESET) {
+        const record = [...inspectRecords.current.values()].find((r) => r.element === element);
+        if (edit.kind === "style") {
+          const entry = record?.styles.get(edit.property);
+          if (!entry) return;
+          const now = showStyle(element, edit.property, entry.before, designSystem);
+          previewing.current = () => showStyle(element, edit.property, now, designSystem);
+        } else {
+          const entry = record?.props.get(edit.name);
+          if (!entry) return;
+          showProp(entry.fiber, edit.name, entry.had ? entry.original : undefined);
+          previewing.current = () => showProp(entry.fiber, edit.name, entry.value);
+        }
+        return;
+      }
       if (edit.kind === "style") {
         const before = showStyle(element, edit.property, edit.value, designSystem);
         previewing.current = () => showStyle(element, edit.property, before, designSystem);
@@ -2852,54 +2830,14 @@ function CanvasBoard({
     },
     [designSystem],
   );
-  const inspectEdit = useCallback(
-    (edit: InspectEdit) => {
-      // A value on show for a moment goes first, so what the change replaces is what the code had.
-      previewing.current?.();
-      previewing.current = null;
-      const current = inspectedRef.current;
-      if (!current || !designSystem) return;
+  /**
+   * Writes an Inspect record's lines into its note: the lines it wrote before are swapped,
+   * the person's own words there stay. A note left with neither goes; a first line makes it.
+   */
+  const writeInspectNote = useCallback(
+    (id: string, record: InspectRecord, current: { element: Element; preview: Element; itemId: string }) => {
+      if (!designSystem) return;
       const { element, preview, itemId } = current;
-      const waiting = (id: string) => annotationsRef.current.some((a) => a.id === id && !a.sent && !a.queued);
-      // A note already sent keeps its changes; a further change starts a new note.
-      let id = [...inspectRecords.current].find(([key, r]) => r.element === element && waiting(key))?.[0];
-      const record: InspectRecord = (id && inspectRecords.current.get(id)) || { element, styles: new Map(), props: new Map(), block: "" };
-      id ??= newAnnotationId();
-      if (edit.kind === "style") {
-        const entry = record.styles.get(edit.property);
-        if (edit.value === RESET || (entry && edit.to === entry.from)) {
-          if (entry) showStyle(element, edit.property, entry.before, designSystem);
-          record.styles.delete(edit.property);
-        } else {
-          const before = showStyle(element, edit.property, edit.value, designSystem);
-          record.styles.set(
-            edit.property,
-            entry
-              ? { ...entry, to: edit.to, value: edit.value }
-              : { what: edit.what, from: edit.from, to: edit.to, value: edit.value, before, ...(edit.override ? { override: edit.override } : {}) },
-          );
-        }
-      } else {
-        const entry = record.props.get(edit.name);
-        if (edit.value === RESET || (entry && edit.to === entry.from)) {
-          if (entry) showProp(entry.fiber, edit.name, entry.had ? entry.original : undefined);
-          record.props.delete(edit.name);
-        } else {
-          const props = (edit.fiber as { memoizedProps?: Record<string, unknown> }).memoizedProps ?? {};
-          const had = entry ? entry.had : edit.name in props;
-          const original = entry ? entry.original : props[edit.name];
-          showProp(edit.fiber, edit.name, edit.value);
-          record.props.set(edit.name, {
-            component: edit.component,
-            from: entry?.from ?? edit.from,
-            to: edit.to,
-            value: edit.value,
-            had,
-            original,
-            fiber: edit.fiber,
-          });
-        }
-      }
       const lines = [
         ...[...record.styles.values()].map(
           (style) => labels.inspectStyleLine(style.what, style.from, style.to) + (style.override ? labels.inspectOverrideMark(style.override) : ""),
@@ -2941,9 +2879,105 @@ function CanvasBoard({
         };
         setAnnotations((prev) => [...prev, annotation]);
       }
-      setInspectEdits((n) => n + 1);
     },
     [designSystem],
+  );
+  /**
+   * Every waiting change in one section of the panel (the component's props, or the styles)
+   * on the selected element: each put back to what the code had and its lines taken out of
+   * the note. A notice offers Undo, which brings back the changes and the note as they were.
+   * A note already sent is the agent's now, and stays.
+   */
+  const inspectResetAll = useCallback(
+    (section: "props" | "styles") => {
+      const current = inspectedRef.current;
+      if (!current || !designSystem) return;
+      const waiting = (id: string) => annotationsRef.current.some((a) => a.id === id && !a.sent && !a.queued);
+      const found = [...inspectRecords.current].find(([key, r]) => r.element === current.element && waiting(key));
+      if (!found) return;
+      const [id, record] = found;
+      const count = section === "props" ? record.props.size : record.styles.size;
+      if (!count) return;
+      previewing.current?.();
+      previewing.current = null;
+      const before = { styles: new Map(record.styles), props: new Map(record.props), block: record.block };
+      const note = annotationsRef.current.find((a) => a.id === id);
+      if (section === "styles") {
+        for (const [property, style] of record.styles) showStyle(record.element, property, style.before, designSystem);
+        record.styles = new Map();
+      } else {
+        for (const [name, prop] of record.props) showProp(prop.fiber, name, prop.had ? prop.original : undefined);
+        record.props = new Map();
+      }
+      writeInspectNote(id, record, current);
+      setInspectEdits((n) => n + 1);
+      notify(labels.inspectResetDone(count), {
+        label: labels.undo,
+        run: () => {
+          if (!record.element.isConnected) return;
+          for (const [property, style] of before.styles) showStyle(record.element, property, style.value, designSystem);
+          for (const [name, prop] of before.props) showProp(prop.fiber, name, prop.value);
+          Object.assign(record, before);
+          inspectRecords.current.set(id, record);
+          if (note) setAnnotations((prev) => [...prev.filter((a) => a.id !== id), note]);
+          setInspectEdits((n) => n + 1);
+        },
+      });
+    },
+    [designSystem, notify, writeInspectNote],
+  );
+  const inspectEdit = useCallback(
+    (edit: InspectEdit) => {
+      // A value on show for a moment goes first, so what the change replaces is what the code had.
+      previewing.current?.();
+      previewing.current = null;
+      const current = inspectedRef.current;
+      if (!current || !designSystem) return;
+      const { element } = current;
+      const waiting = (id: string) => annotationsRef.current.some((a) => a.id === id && !a.sent && !a.queued);
+      // A note already sent keeps its changes; a further change starts a new note.
+      let id = [...inspectRecords.current].find(([key, r]) => r.element === element && waiting(key))?.[0];
+      const record: InspectRecord = (id && inspectRecords.current.get(id)) || { element, styles: new Map(), props: new Map(), block: "" };
+      id ??= newAnnotationId();
+      if (edit.kind === "style") {
+        const entry = record.styles.get(edit.property);
+        if (edit.value === RESET || (entry && edit.to === entry.from)) {
+          if (entry) showStyle(element, edit.property, entry.before, designSystem);
+          record.styles.delete(edit.property);
+        } else {
+          const before = showStyle(element, edit.property, edit.value, designSystem);
+          record.styles.set(
+            edit.property,
+            entry
+              ? { ...entry, to: edit.to, value: edit.value }
+              : { what: edit.what, from: edit.from, to: edit.to, value: edit.value, before, ...(edit.override ? { override: edit.override } : {}) },
+          );
+        }
+      } else {
+        const entry = record.props.get(edit.name);
+        if (edit.value === RESET || (entry && edit.to === entry.from)) {
+          if (entry) showProp(entry.fiber, edit.name, entry.had ? entry.original : undefined);
+          record.props.delete(edit.name);
+        } else {
+          const props = (edit.fiber as { memoizedProps?: Record<string, unknown> }).memoizedProps ?? {};
+          const had = entry ? entry.had : edit.name in props;
+          const original = entry ? entry.original : props[edit.name];
+          showProp(edit.fiber, edit.name, edit.value);
+          record.props.set(edit.name, {
+            component: edit.component,
+            from: entry?.from ?? edit.from,
+            to: edit.to,
+            value: edit.value,
+            had,
+            original,
+            fiber: edit.fiber,
+          });
+        }
+      }
+      writeInspectNote(id, record, current);
+      setInspectEdits((n) => n + 1);
+    },
+    [designSystem, writeInspectNote],
   );
   const handToolRef = useRef(false);
   handToolRef.current = handTool;

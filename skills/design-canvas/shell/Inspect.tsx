@@ -35,8 +35,8 @@ export type InspectEdit =
     }
   | { kind: "prop"; component: string; name: string; from: string; to: string; value: unknown; fiber: unknown };
 
-/** What has changed on the selected element, to mark those controls. */
-export type InspectChanged = { styles: ReadonlySet<string>; props: ReadonlySet<string> };
+/** What has changed on the selected element, and what the code had there (for "Reset to …"). */
+export type InspectChanged = { styles: ReadonlyMap<string, string>; props: ReadonlyMap<string, string> };
 
 /**
  * The Inspect panel (prototype), docked at the right while the Inspect tool is on.
@@ -70,8 +70,8 @@ export function InspectPanel({
   onPreview: (edit: InspectEdit | null) => void;
   /** Outlines an element on the canvas while its breadcrumb level is hovered or focused; `null` takes it away. */
   onHighlight: (element: Element | null) => void;
-  /** Puts back every waiting change on the selected element. */
-  onResetAll: () => void;
+  /** Puts back every waiting change on the selected element in one section of the panel. */
+  onResetAll: (section: "props" | "styles") => void;
 }) {
   // A hot update, a change shown on the element, or the agent's change re-renders the preview: read it again then.
   // Not while a picker is open: a value on show for a moment could change the rows under the pointer
@@ -174,20 +174,12 @@ export function InspectPanel({
               </span>
             ))}
           </nav>
-          {/* Only while the element has changes waiting: how many, and one button for all of them. */}
-          {changed.styles.size + changed.props.size > 0 && (
-            <div className="canvas-inspect-changes">
-              <span>{labels.inspectChangeCount(changed.styles.size + changed.props.size)}</span>
-              <button type="button" className="canvas-inspect-reset-all" onClick={onResetAll}>
-                {labels.inspectResetAll}
-              </button>
-            </div>
-          )}
           {read.placed && (
             <section className="canvas-inspect-section">
               <h3>
-                {read.placed.name}
+                <span className="canvas-inspect-heading">{read.placed.name}</span>
                 <span className="canvas-subtle">{read.part ? labels.inspectPartOf(system.name) : system.name}</span>
+                <SectionReset label={labels.inspectResetProps} shown={changed.props.size > 0} onClick={() => onResetAll("props")} />
               </h3>
               <Props
                 placed={read.placed}
@@ -212,6 +204,7 @@ export function InspectPanel({
                   {labels.inspectStyles}
                 </button>
                 {read.size && <span className="canvas-subtle">{read.size}</span>}
+                <SectionReset label={labels.inspectResetStyles} shown={changed.styles.size > 0} onClick={() => onResetAll("styles")} />
                 <button
                   type="button"
                   className="canvas-inspect-lock"
@@ -260,8 +253,9 @@ export function InspectPanel({
           ) : (
             <section className="canvas-inspect-section">
               <h3>
-                {labels.inspectStyles}
+                <span className="canvas-inspect-heading">{labels.inspectStyles}</span>
                 {read.size && <span className="canvas-subtle">{read.size}</span>}
+                <SectionReset label={labels.inspectResetStyles} shown={changed.styles.size > 0} onClick={() => onResetAll("styles")} />
               </h3>
               {read.rows.length ? (
                 <dl className="canvas-inspect-rows">
@@ -397,7 +391,7 @@ function Props({
 }: {
   placed: NonNullable<ReturnType<typeof placedComponent>>;
   types: PropType[] | null | undefined;
-  changed: ReadonlySet<string>;
+  changed: ReadonlyMap<string, string>;
   onEdit: (edit: InspectEdit) => void;
   onPreview: (edit: InspectEdit | null) => void;
   onHold: (open: boolean) => void;
@@ -449,6 +443,7 @@ function Props({
                   selected={current === undefined ? undefined : String(current)}
                   changed={changed.has(prop.name)}
                   options={prop.options.map((option) => ({ value: option, label: option, detail: option === prop.default ? labels.inspectDefaultMark : undefined }))}
+                  resetTo={changed.get(prop.name)}
                   onPreview={(value) => (value === null ? onPreview(null) : edit(prop, value, true))}
                   onChoose={(value) => edit(prop, value)}
                   onOpen={onHold}
@@ -459,7 +454,8 @@ function Props({
                   {current ? labels.inspectOn : labels.inspectOff}
                 </label>
               )}
-              {changed.has(prop.name) && <Reset onClick={() => edit(prop, RESET)} />}
+              {/* An on/off switch has no list to hold "Reset to …"; its ↺ fits on its line. */}
+              {!prop.options.length && changed.has(prop.name) && <Reset onClick={() => edit(prop, RESET)} />}
             </dd>
           </div>
         );
@@ -492,14 +488,20 @@ function StyleRow({
   flag: boolean;
   /** The component whose own look a change here overrides. */
   override?: string;
-  changed: ReadonlySet<string>;
+  changed: ReadonlyMap<string, string>;
   onEdit: (edit: InspectEdit) => void;
   onPreview: (edit: InspectEdit | null) => void;
   onHold: (open: boolean) => void;
 }) {
   // One line under the row for its values outside the system: what it is not, and what it is closest to.
-  const off = flag ? row.values.filter((value) => value.kind === "off") : [];
-  const nearest = off.flatMap((value) => (value.kind === "off" ? value.nearest : []));
+  // A value outside the system is marked on its picker, and explained on hover and in its list,
+  // never with a line of its own: the row would shrink once it is fixed, and move what is below.
+  const offNote = (value: Value) =>
+    value.kind !== "off"
+      ? undefined
+      : value.nearest.length
+        ? labels.inspectNearest(system.name, value.nearest.map((n) => `${n.token} (${n.value})`))
+        : labels.inspectNotToken(system.name);
   const options = useMemo(() => (editable ? choices(element, system, row.category) : []), [editable, element, system, row.category]);
   const lengths = row.category === "space" || row.category === "radius";
   const paints = row.category === "text" || row.category === "fill" || row.category === "border";
@@ -528,12 +530,19 @@ function StyleRow({
                 swatch={paints ? (value.kind === "token" ? options.find((o) => o.value === value.name)?.swatch : value.kind === "off" ? value.value : undefined) : undefined}
                 selected={value.kind === "token" ? value.name : value.kind === "off" ? "current" : ""}
                 off={flag && value.kind === "off"}
+                note={flag ? offNote(value) : undefined}
                 changed={changed.has(value.property)}
                 options={[
                   ...(value.kind === "off" ? [{ value: "current", label: value.value, detail: labels.inspectNotToken(system.name), swatch: paints ? value.value : undefined }] : []),
                   ...(row.category !== "typography" ? [{ value: "", label: none }] : []),
-                  ...options,
+                  // Its nearest tokens say so, where the choice is made.
+                  ...options.map((option) =>
+                    value.kind === "off" && value.nearest.some((n) => n.token === option.label)
+                      ? { ...option, detail: [option.detail, labels.inspectNearestMark].filter(Boolean).join(" · ") }
+                      : option,
+                  ),
                 ]}
+                resetTo={changed.get(value.property)}
                 onPreview={(chosen) => {
                   // The value outside the system is what the element shows without a preview.
                   if (chosen === null || chosen === "current") return onPreview(null);
@@ -542,20 +551,10 @@ function StyleRow({
                 onChoose={(chosen) => onEdit(chosen === "current" ? styleEdit(value, RESET) : styleEdit(value, chosen))}
                 onOpen={onHold}
               />
-              {changed.has(value.property) && (
-                <Reset onClick={() => onEdit({ kind: "style", property: value.property, what: "", from: "", to: "", value: RESET })} />
-              )}
             </span>
           ) : (
             <ValueChip key={index} value={value} />
           ),
-        )}
-        {off.length > 0 && (
-          <span className="canvas-inspect-off">
-            {nearest.length
-              ? labels.inspectNearest(system.name, nearest.map((n) => `${n.token} (${n.value})`))
-              : labels.inspectNotToken(system.name)}
-          </span>
         )}
       </dd>
     </div>
@@ -594,7 +593,7 @@ function Reset({ onClick }: { onClick: () => void }) {
 }
 
 /** `short`: the name shown in the list, when it differs from `label`, which is what the note says. */
-type PickerOption = { value: string; label: string; short?: string; detail?: string; swatch?: string };
+type PickerOption = { value: string; label: string; short?: string; detail?: string; swatch?: string; reset?: boolean };
 
 /**
  * A value picker that shows each option on the element before it is picked, which a native
@@ -610,6 +609,8 @@ function Picker({
   options,
   off,
   changed,
+  resetTo,
+  note,
   onPreview,
   onChoose,
   onOpen,
@@ -621,6 +622,10 @@ function Picker({
   options: PickerOption[];
   off?: boolean;
   changed?: boolean;
+  /** What the code had, when the value has changed: the list starts with "Reset to …" it. */
+  resetTo?: string;
+  /** Said on hover and to screen readers: why the value is marked. */
+  note?: string;
   onPreview: (value: string | null) => void;
   onChoose: (value: string) => void;
   onOpen: (open: boolean) => void;
@@ -635,8 +640,9 @@ function Picker({
   const searchable = options.length > 12;
   const shown = useMemo(() => {
     const words = query.trim().toLowerCase();
-    return words ? options.filter((o) => o.label.toLowerCase().includes(words)) : options;
-  }, [options, query]);
+    const found = words ? options.filter((o) => o.label.toLowerCase().includes(words)) : options;
+    return resetTo === undefined ? found : [{ value: RESET, label: labels.inspectResetTo(resetTo), reset: true } as PickerOption, ...found];
+  }, [options, query, resetTo]);
   const id = useMemo(() => `canvas-pick-${Math.random().toString(36).slice(2, 8)}`, []);
 
   const close = (focus = true) => {
@@ -701,6 +707,8 @@ function Picker({
         type="button"
         className="canvas-inspect-select"
         aria-label={label}
+        // Read as the button's description, and shown on hover.
+        title={note}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? id : undefined}
@@ -777,6 +785,7 @@ function Picker({
                 key={option.value}
                 id={`${id}-${index}`}
                 data-index={index}
+                data-reset={option.reset ? "" : undefined}
                 role="option"
                 aria-selected={option.value === selected}
                 data-active={index === active ? "" : undefined}
@@ -784,7 +793,8 @@ function Picker({
                 onClick={() => choose(option.value)}
               >
                 {option.swatch !== undefined && <span className="canvas-inspect-swatch" style={{ background: option.swatch }} aria-hidden="true" />}
-                <span className="canvas-inspect-option-text">{breakable(option.short ?? option.label)}</span>
+                {option.reset && <Icon name="arrow-back-up" />}
+                <span className="canvas-inspect-option-text">{option.reset ? option.label : breakable(option.short ?? option.label)}</span>
                 {option.detail && <span className="canvas-subtle">{option.detail}</span>}
               </li>
             ))}
@@ -798,3 +808,13 @@ function Picker({
 
 /** A token name that wraps only after its dots (`color.foreground.` / `inverse`), never inside a word. */
 const breakable = (name: string) => name.replace(/\./g, ".\u200b");
+
+/** A section's reset, in its heading: there only while the section has changes, and no taller than the heading. */
+function SectionReset({ label, shown, onClick }: { label: string; shown: boolean; onClick: () => void }) {
+  if (!shown) return null;
+  return (
+    <button type="button" className="canvas-inspect-lock" aria-label={label} data-tip={label} onClick={onClick}>
+      <Icon name="arrow-back-up" />
+    </button>
+  );
+}

@@ -2501,10 +2501,6 @@ html[data-canvas-alt] .canvas-frame-root * {
   background: color-mix(in srgb, #b87c00 14%, transparent);
   color: color-mix(in srgb, #b87c00 70%, var(--canvas-text-color));
 }
-.canvas-inspect-off {
-  flex-basis: 100%;
-  color: color-mix(in srgb, #b87c00 70%, var(--canvas-text-color));
-}
 /* The selected element, outlined on itself so the outline follows every camera move. */
 [data-canvas-inspected] {
   outline: 2px solid var(--canvas-focus, #2f6fed) !important;
@@ -2735,30 +2731,22 @@ html[data-canvas-alt] .canvas-frame-root * {
 :root[data-canvas-inspecting] .canvas-toast {
   inset-inline-start: calc((100% - var(--canvas-inspect-width, 272px) - 32px) / 2);
 }
-/* The selected element's waiting changes: a count, and Reset all. */
-.canvas-inspect-changes {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 8px 6px 12px;
+/* Section headings keep one height whatever buttons they show (a reset comes and goes), so
+   nothing below moves when a value changes. The title takes the room the buttons leave. */
+.canvas-inspect-section h3 {
+  min-block-size: 22px;
+}
+.canvas-inspect-heading {
+  flex: 1;
+}
+.canvas-inspect-popover li[data-reset] {
   border-block-end: 1px solid var(--canvas-border-color);
-  background: color-mix(in srgb, var(--canvas-focus-color) 6%, transparent);
-  color: var(--canvas-subtle-color);
-}
-.canvas-inspect-reset-all {
-  padding: 2px 8px;
-  border: 1px solid var(--canvas-border-color);
-  border-radius: var(--canvas-radius-s);
-  background: var(--canvas-surface-color);
+  border-radius: var(--canvas-radius-s) var(--canvas-radius-s) 0 0;
+  margin-block-end: 4px;
   color: var(--canvas-text-color);
-  font: inherit;
-  cursor: pointer;
 }
-.canvas-inspect-reset-all:hover {
-  background: var(--canvas-hover-color);
-}
-.canvas-inspect-reset-all:focus-visible {
-  outline: 2px solid var(--canvas-focus-color);
-  outline-offset: 1px;
+.canvas-inspect-popover li svg {
+  flex: none;
+  inline-size: 14px;
+  block-size: 14px;
 }
