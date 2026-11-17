@@ -3,7 +3,7 @@ import { appendFileSync, cpSync, mkdtempSync, readdirSync, readFileSync, rmSync,
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { expect, type Page, test } from '@playwright/test'
+import { test as base, expect, type Page } from '@playwright/test'
 
 const LISTEN = fileURLToPath(new URL('../../skills/design-canvas/scripts/listen.sh', import.meta.url))
 const SHARE = fileURLToPath(new URL('../../skills/design-canvas/scripts/share.sh', import.meta.url))
@@ -20,6 +20,43 @@ function collectErrors(page: Page) {
 
 const REGISTRY = 'design-canvas/smoke/registry.tsx'
 const EXAMPLE = 'design-canvas/smoke/items/Example.tsx'
+// The registry as installed. Every test starts from it.
+const INSTALLED = readFileSync(REGISTRY, 'utf8')
+
+// After each test, its pages are closed, every registry write they sent is done, and
+// the registry is as installed. A canvas save still on its way when a test ended used
+// to land during the next one: that test lost what it had just written, or the tests
+// after it kept the items it had added.
+const test = base.extend<{ settledRegistry: void }>({
+  settledRegistry: [
+    async ({ context, request, baseURL }, use, testInfo) => {
+      const sent: Promise<unknown>[] = []
+      context.on('request', (r) => {
+        if (r.method() === 'POST' && r.url().includes('/__design-canvas/edit')) sent.push(r.response().catch(() => null))
+      })
+      await use()
+      for (const page of context.pages()) await page.close()
+      await Promise.race([Promise.all(sent), new Promise((resolve) => setTimeout(resolve, 5_000))])
+      // The dev server makes registry writes one at a time, so once this one is answered,
+      // every write sent before it is done. It names no item, so it writes nothing.
+      await request.post('/__design-canvas/edit', {
+        headers: { Origin: new URL(baseURL!).origin },
+        data: { edits: [{ kind: 'item', id: 'no-such-item', set: { x: 0 } }] },
+      })
+      if (readFileSync(REGISTRY, 'utf8') === INSTALLED) return
+      console.log(`"${testInfo.title}" left registry.tsx changed; it is back as installed.`)
+      const served = await (await request.get('/registry.tsx')).text()
+      writeFileSync(REGISTRY, INSTALLED)
+      // So the next test's page loads it, not the version before. A change only in comments
+      // can serve the same module, which is fine to load.
+      await expect
+        .poll(async () => (await (await request.get('/registry.tsx')).text()) !== served, { timeout: 5_000 })
+        .toBe(true)
+        .catch(() => {})
+    },
+    { auto: true },
+  ],
+})
 
 // The dev server writes moves and new notes into registry.tsx. Tests about the
 // agent path need the write refused, which is what makes a change fall back to
