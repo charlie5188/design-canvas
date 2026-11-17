@@ -1384,7 +1384,7 @@ test('the zoom buttons and keys step between fixed levels', async ({ page }) => 
   // The limit holds.
   await page.getByRole('button', { name: 'Zoom in' }).click()
   await expect(zoom).toHaveText('300%')
-  for (const level of ['200%', '100%', '50%', '25%', '10%', '10%']) {
+  for (const level of ['200%', '100%', '50%', '25%', '10%', '5%', '2%', '2%']) {
     await page.getByRole('button', { name: 'Zoom out' }).click()
     await expect(zoom).toHaveText(level)
   }
@@ -1397,6 +1397,38 @@ test('the zoom buttons and keys step between fixed levels', async ({ page }) => 
   await page.keyboard.press('=')
   await expect(zoom).toHaveText('100%')
   expect(errors).toEqual([])
+})
+
+test('Fit all takes in items far apart, below the old 10% limit', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    // 30,000 px apart: at 10% a 1280 px wide view covers only 12,800 px.
+    writeFileSync(
+      REGISTRY,
+      original.replace(
+        /\];\s*$/,
+        '  { id: "far", name: "Far", component: Example, x: 30000, y: 0, width: 360, height: 180 },\n];\n',
+      ),
+    )
+    await page.goto('/')
+    const far = page.locator('.canvas-item[data-canvas-item="far"]')
+    await expect(far).toHaveCount(1, { timeout: 15_000 })
+    await page.getByRole('button', { name: 'Fit all' }).click()
+    const view = page.viewportSize()!
+    for (const id of ['example', 'far']) {
+      await expect
+        .poll(async () => {
+          const box = (await page.locator(`.canvas-item[data-canvas-item="${id}"]`).boundingBox())!
+          return box.x >= 0 && box.x + box.width <= view.width && box.y >= 0 && box.y + box.height <= view.height
+        })
+        .toBe(true)
+    }
+    expect(Number((await page.locator('.canvas-zoom').textContent())!.replace('%', ''))).toBeLessThan(10)
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
 })
 
 test('the help opens on a press, shows the controls in groups, and stays until it is closed', async ({ page }) => {
