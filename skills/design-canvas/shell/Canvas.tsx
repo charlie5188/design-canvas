@@ -1439,7 +1439,7 @@ function inspectRef(item: CanvasItem | undefined, element: Element, preview: Ele
  */
 type InspectRecord = {
   element: Element;
-  styles: Map<string, { what: string; from: string; to: string; value: string; before: string }>;
+  styles: Map<string, { what: string; from: string; to: string; value: string; before: string; override?: string }>;
   props: Map<string, { component: string; from: string; to: string; value: unknown; had: boolean; original: unknown; fiber: unknown }>;
   block: string;
 };
@@ -2777,6 +2777,18 @@ function CanvasBoard({
    * element's one note for the agent, which waits with the other changes. Picking what the
    * code had (or Undo) takes the line out; a note left with no line and no words goes.
    */
+  // A breadcrumb level hovered in the panel: outlined with the pick box, as a press would select it.
+  const inspectHighlight = useCallback((element: Element | null) => {
+    const box = pickRef.current;
+    if (!box) return;
+    if (!element || !element.isConnected) {
+      box.hidden = true;
+      return;
+    }
+    const rect = element.getBoundingClientRect();
+    Object.assign(box.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
+    box.hidden = false;
+  }, []);
   /**
    * A value shown for a moment, while the pointer is over it in a picker (Inspect.tsx). It
    * changes nothing that is saved: `null`, or the next one, puts back what was there.
@@ -2824,7 +2836,9 @@ function CanvasBoard({
           const before = showStyle(element, edit.property, edit.value, designSystem);
           record.styles.set(
             edit.property,
-            entry ? { ...entry, to: edit.to, value: edit.value } : { what: edit.what, from: edit.from, to: edit.to, value: edit.value, before },
+            entry
+              ? { ...entry, to: edit.to, value: edit.value }
+              : { what: edit.what, from: edit.from, to: edit.to, value: edit.value, before, ...(edit.override ? { override: edit.override } : {}) },
           );
         }
       } else {
@@ -2849,10 +2863,15 @@ function CanvasBoard({
         }
       }
       const lines = [
-        ...[...record.styles.values()].map((style) => labels.inspectStyleLine(style.what, style.from, style.to)),
+        ...[...record.styles.values()].map(
+          (style) => labels.inspectStyleLine(style.what, style.from, style.to) + (style.override ? labels.inspectOverrideMark(style.override) : ""),
+        ),
         ...[...record.props].map(([name, prop]) => labels.inspectPropLine(prop.component, name, prop.from, prop.to)),
       ];
-      const block = lines.length ? [...lines, labels.inspectScope(designSystem.name)].join("\n") : "";
+      const overrides = [...record.styles.values()].some((style) => style.override);
+      const block = lines.length
+        ? [...lines, ...(overrides ? [labels.inspectOverrideScope(designSystem.name)] : []), labels.inspectScope(designSystem.name)].join("\n")
+        : "";
       const existing = annotationsRef.current.find((a) => a.id === id);
       const own = existing && record.block ? existing.text.replace(record.block, "").trim() : (existing?.text.trim() ?? "");
       const text = [block, own].filter(Boolean).join("\n");
@@ -5159,6 +5178,8 @@ function CanvasBoard({
       if (inTextEdit(event.target)) return hidePick();
       if (moveDraw(event)) return;
       if (inspectToolRef.current) {
+        // Over the panel, its breadcrumb owns the box (inspectHighlight).
+        if (event.target instanceof Element && event.target.closest(".canvas-inspect, .canvas-inspect-popover")) return;
         const target = gesture.current ? null : inspectTarget(event.target);
         if (target) placeBox(pickRef.current, target.element.getBoundingClientRect());
         else hidePick();
@@ -6145,6 +6166,7 @@ function CanvasBoard({
           onSelect={(element: Element) => setInspected((current) => (current ? { ...current, element } : current))}
           onEdit={inspectEdit}
           onPreview={inspectPreview}
+          onHighlight={inspectHighlight}
         />
       )}
       {!shared && trashOpen && (

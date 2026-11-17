@@ -2493,7 +2493,7 @@ html[data-canvas-alt] .canvas-frame-root * {
   padding: 2px 6px;
   border-radius: var(--canvas-radius-s);
   background: var(--canvas-hover-color);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 /* A value outside the design system: the same amber the sections use for "set aside". */
 .canvas-inspect-value[data-off] {
@@ -2546,7 +2546,7 @@ html[data-canvas-alt] .canvas-frame-root * {
 }
 .canvas-inspect-select-text {
   min-inline-size: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 .canvas-inspect-caret {
   color: var(--canvas-subtle-color);
@@ -2613,7 +2613,7 @@ html[data-canvas-alt] .canvas-frame-root * {
 .canvas-inspect-option-text {
   flex: 1;
   min-inline-size: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 .canvas-inspect-select[data-off] {
   background: color-mix(in srgb, #b87c00 14%, transparent);
@@ -2646,4 +2646,59 @@ html[data-canvas-alt] .canvas-frame-root * {
 }
 .canvas-inspect-hint {
   margin-block-start: 8px !important;
+}
+/* A design-system component's own styles: a fold and a lock in the section's heading. */
+.canvas-inspect-section h3 {
+  align-items: center;
+}
+.canvas-inspect-fold {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  gap: 4px;
+  margin-inline-start: -4px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: var(--canvas-radius-s);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.canvas-inspect-fold:hover,
+.canvas-inspect-lock:hover {
+  background: var(--canvas-hover-color);
+}
+.canvas-inspect-fold svg {
+  inline-size: 12px;
+  block-size: 12px;
+  transition: rotate var(--canvas-fast) var(--canvas-ease);
+}
+.canvas-inspect-fold[aria-expanded="true"] svg {
+  rotate: 90deg;
+}
+.canvas-inspect-lock {
+  display: inline-grid;
+  place-items: center;
+  inline-size: 22px;
+  block-size: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--canvas-radius-s);
+  background: none;
+  color: var(--canvas-subtle-color);
+  cursor: pointer;
+}
+.canvas-inspect-lock svg {
+  inline-size: 14px;
+  block-size: 14px;
+}
+.canvas-inspect-lock[aria-pressed="true"] {
+  color: var(--canvas-focus-color);
+}
+@media (prefers-reduced-motion: reduce) {
+  .canvas-inspect-fold svg {
+    transition: none;
+  }
 }

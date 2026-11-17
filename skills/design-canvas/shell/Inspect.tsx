@@ -10,6 +10,7 @@ import {
   styleRows,
   type Value,
 } from "./inspect-read";
+import { Icon } from "./icons";
 import { labels } from "./labels";
 import type { PropType } from "./props-types.ts";
 
@@ -27,6 +28,8 @@ export type InspectEdit =
       to: string;
       /** A token's custom property name, or "" for 0 or none. */
       value: string;
+      /** The design-system component whose own look this changes, when it is unlocked (an override). */
+      override?: string;
     }
   | { kind: "prop"; component: string; name: string; from: string; to: string; value: unknown; fiber: unknown };
 
@@ -51,6 +54,7 @@ export function InspectPanel({
   onSelect,
   onEdit,
   onPreview,
+  onHighlight,
 }: {
   system: DesignSystem;
   selection: { element: Element; preview: Element } | null;
@@ -61,12 +65,19 @@ export function InspectPanel({
   onEdit: (edit: InspectEdit) => void;
   /** Shows a value on the element while the pointer is over it in a picker; `null` puts back what was there. */
   onPreview: (edit: InspectEdit | null) => void;
+  /** Outlines an element on the canvas while its breadcrumb level is hovered or focused; `null` takes it away. */
+  onHighlight: (element: Element | null) => void;
 }) {
   // A hot update, a change shown on the element, or the agent's change re-renders the preview: read it again then.
   // Not while a picker is open: a value on show for a moment could change the rows under the pointer
   // (padding ↕ and ↔ that come out equal become one row), so the panel reads again once it closes.
   const [version, setVersion] = useState(0);
   const [holding, setHolding] = useState(false);
+  // A design-system component's own styles: folded and locked by default, since they are the system's.
+  // Unlocked, they can be changed to try an override (for a proposal), and the note says it is one.
+  // Both stay as set while the tool is on, so working on one component does not mean unlocking each time.
+  const [stylesOpen, setStylesOpen] = useState(false);
+  const [unlocked, setUnlocked] = useState(false);
   const holdingRef = useRef(false);
   holdingRef.current = holding;
   useEffect(() => {
@@ -105,12 +116,12 @@ export function InspectPanel({
       placed,
       // Inside a component, not its outer box: its own parts are the component's business.
       part: !!placed && placed.root !== element,
-      rows: styleRows(element, preview, system, !placed),
+      rows: styleRows(element, preview, system, !placed || unlocked),
       size: element instanceof HTMLElement ? `${element.offsetWidth} × ${element.offsetHeight}` : "",
     };
     // `version` re-reads the same element after its preview changed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selection, system, stop, version]);
+  }, [selection, system, stop, version, unlocked]);
 
   const types = usePropTypes(system, read?.placed?.name);
 
@@ -128,6 +139,11 @@ export function InspectPanel({
                   type="button"
                   aria-current={entry.element === read.element ? "true" : undefined}
                   onClick={() => onSelect(entry.element)}
+                  // Which area a level is, before choosing it.
+                  onPointerEnter={() => onHighlight(entry.element)}
+                  onPointerLeave={() => onHighlight(null)}
+                  onFocus={() => onHighlight(entry.element)}
+                  onBlur={() => onHighlight(null)}
                 >
                   {entry.name}
                 </button>
@@ -150,33 +166,92 @@ export function InspectPanel({
               />
             </section>
           )}
-          <section className="canvas-inspect-section">
-            <h3>
-              {labels.inspectStyles}
-              {read.size && <span className="canvas-subtle">{read.size}</span>}
-            </h3>
-            {read.rows.length ? (
-              <dl className="canvas-inspect-rows">
-                {read.rows.map((row) => (
-                  <StyleRow
-                    key={row.label}
-                    row={row}
-                    system={system}
-                    element={read.element}
-                    // A design-system component's own styles are read-only, and not marked (see InspectPanel).
-                    editable={!read.placed}
-                    changed={changed.styles}
-                    onEdit={onEdit}
-                    onPreview={onPreview}
-                    onHold={setHolding}
-                  />
-                ))}
-              </dl>
-            ) : (
-              <p className="canvas-subtle">{labels.inspectNoStyles}</p>
-            )}
-            {read.placed && <p className="canvas-subtle canvas-inspect-hint">{labels.inspectOwnStyles(read.placed.name)}</p>}
-          </section>
+          {read.placed ? (
+            <section className="canvas-inspect-section">
+              <h3>
+                <button
+                  type="button"
+                  className="canvas-inspect-fold"
+                  aria-expanded={stylesOpen || changed.styles.size > 0}
+                  onClick={() => setStylesOpen((open) => !open)}
+                >
+                  <Icon name="chevron-right" />
+                  {labels.inspectStyles}
+                </button>
+                {read.size && <span className="canvas-subtle">{read.size}</span>}
+                <button
+                  type="button"
+                  className="canvas-inspect-lock"
+                  aria-pressed={unlocked}
+                  aria-label={unlocked ? labels.inspectLock : labels.inspectUnlock}
+                  data-tip={unlocked ? labels.inspectLock : labels.inspectUnlock}
+                  onClick={() => {
+                    setUnlocked((was) => !was);
+                    setStylesOpen(true);
+                  }}
+                >
+                  <Icon name={unlocked ? "lock-open-2" : "lock"} />
+                </button>
+              </h3>
+              {/* Open by itself when an override is on show, so a change is never hidden. */}
+              {(stylesOpen || changed.styles.size > 0) && (
+                <>
+                  {read.rows.length ? (
+                    <dl className="canvas-inspect-rows">
+                      {read.rows.map((row) => (
+                        <StyleRow
+                          key={row.label}
+                          row={row}
+                          system={system}
+                          element={read.element}
+                          editable={unlocked}
+                          // The component's own values need not be tokens: nothing is marked.
+                          flag={false}
+                          override={read.placed!.name}
+                          changed={changed.styles}
+                          onEdit={onEdit}
+                          onPreview={onPreview}
+                          onHold={setHolding}
+                        />
+                      ))}
+                    </dl>
+                  ) : (
+                    <p className="canvas-subtle">{labels.inspectNoStyles}</p>
+                  )}
+                  <p className="canvas-subtle canvas-inspect-hint">
+                    {unlocked ? labels.inspectOverriding(read.placed.name) : labels.inspectOwnStyles(read.placed.name)}
+                  </p>
+                </>
+              )}
+            </section>
+          ) : (
+            <section className="canvas-inspect-section">
+              <h3>
+                {labels.inspectStyles}
+                {read.size && <span className="canvas-subtle">{read.size}</span>}
+              </h3>
+              {read.rows.length ? (
+                <dl className="canvas-inspect-rows">
+                  {read.rows.map((row) => (
+                    <StyleRow
+                      key={row.label}
+                      row={row}
+                      system={system}
+                      element={read.element}
+                      editable
+                      flag
+                      changed={changed.styles}
+                      onEdit={onEdit}
+                      onPreview={onPreview}
+                      onHold={setHolding}
+                    />
+                  ))}
+                </dl>
+              ) : (
+                <p className="canvas-subtle">{labels.inspectNoStyles}</p>
+              )}
+            </section>
+          )}
         </>
       )}
     </aside>
@@ -305,6 +380,8 @@ function StyleRow({
   system,
   element,
   editable,
+  flag,
+  override,
   changed,
   onEdit,
   onPreview,
@@ -314,13 +391,17 @@ function StyleRow({
   system: DesignSystem;
   element: Element;
   editable: boolean;
+  /** Whether a value outside the system is marked: not for a component's own values. */
+  flag: boolean;
+  /** The component whose own look a change here overrides. */
+  override?: string;
   changed: ReadonlySet<string>;
   onEdit: (edit: InspectEdit) => void;
   onPreview: (edit: InspectEdit | null) => void;
   onHold: (open: boolean) => void;
 }) {
   // One line under the row for its values outside the system: what it is not, and what it is closest to.
-  const off = editable ? row.values.filter((value) => value.kind === "off") : [];
+  const off = flag ? row.values.filter((value) => value.kind === "off") : [];
   const nearest = off.flatMap((value) => (value.kind === "off" ? value.nearest : []));
   const options = useMemo(() => (editable ? choices(element, system, row.category) : []), [editable, element, system, row.category]);
   const lengths = row.category === "space" || row.category === "radius";
@@ -334,6 +415,7 @@ function StyleRow({
     from: value.kind === "token" ? value.token : value.kind === "off" ? value.value : none,
     to: chosen === RESET ? "" : chosen ? (options.find((o) => o.value === chosen)?.label ?? chosen) : none,
     value: chosen === RESET ? RESET : chosen || (lengths ? "0" : "transparent"),
+    ...(override ? { override } : {}),
   });
   return (
     <div>
@@ -348,7 +430,7 @@ function StyleRow({
                 current={value.kind === "token" ? value.token : value.kind === "off" ? value.value : none}
                 swatch={paints ? (value.kind === "token" ? options.find((o) => o.value === value.name)?.swatch : value.kind === "off" ? value.value : undefined) : undefined}
                 selected={value.kind === "token" ? value.name : value.kind === "off" ? "current" : ""}
-                off={value.kind === "off"}
+                off={flag && value.kind === "off"}
                 changed={changed.has(value.property)}
                 options={[
                   ...(value.kind === "off" ? [{ value: "current", label: value.value, detail: labels.inspectNotToken(system.name), swatch: paints ? value.value : undefined }] : []),
@@ -392,7 +474,7 @@ function ValueChip({ value }: { value: Value }) {
     return (
       <span className="canvas-inspect-value" title={title}>
         {side}
-        {value.token}
+        {breakable(value.token)}
         {value.others.length > 0 && <span className="canvas-subtle"> +{value.others.length}</span>}
       </span>
     );
@@ -540,7 +622,7 @@ function Picker({
         }}
       >
         {swatch && <span className="canvas-inspect-swatch" style={{ background: swatch }} aria-hidden="true" />}
-        <span className="canvas-inspect-select-text">{current}</span>
+        <span className="canvas-inspect-select-text">{typeof current === "string" ? breakable(current) : current}</span>
         <span className="canvas-inspect-caret" aria-hidden="true">▾</span>
       </button>
       {open && place && (
@@ -605,7 +687,7 @@ function Picker({
                 onClick={() => choose(option.value)}
               >
                 {option.swatch !== undefined && <span className="canvas-inspect-swatch" style={{ background: option.swatch }} aria-hidden="true" />}
-                <span className="canvas-inspect-option-text">{option.short ?? option.label}</span>
+                <span className="canvas-inspect-option-text">{breakable(option.short ?? option.label)}</span>
                 {option.detail && <span className="canvas-subtle">{option.detail}</span>}
               </li>
             ))}
@@ -616,3 +698,6 @@ function Picker({
     </>
   );
 }
+
+/** A token name that wraps only after its dots (`color.foreground.` / `inverse`), never inside a word. */
+const breakable = (name: string) => name.replace(/\./g, ".\u200b");

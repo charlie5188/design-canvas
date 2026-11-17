@@ -310,7 +310,13 @@ export const labels = {
   inspectOff: "Off",
   inspectNone: "None",
   inspectReset: "Undo this change",
-  inspectOwnStyles: (component: string) => `${component} sets these. Change them with its props.`,
+  inspectOwnStyles: (component: string) => `${component} sets these. Change them with its props, or unlock them to try an override.`,
+  inspectOverriding: (component: string) => `Changes here override ${component}'s own look.`,
+  inspectUnlock: "Unlock to override",
+  inspectLock: "Lock",
+  inspectOverrideMark: (component: string) => ` (overrides ${component})`,
+  inspectOverrideScope: (system: string) =>
+    `Lines marked “overrides” change a component's own look, outside its props: apply them to this instance only, and leave ${system} itself as it is.`,
   /** The note for the agent that changes from the Inspect panel become. */
   inspectStyleLine: (what: string, from: string, to: string) => `${what}: ${from} → ${to}`,
   inspectPropLine: (component: string, name: string, from: string, to: string) => `${component} ${name}: ${from} → ${to}`,
