@@ -79,3 +79,10 @@ jobs:
       - name: Load the canvas in a browser
         if: steps.changes.outputs.docs_only != 'true'
         run: npx playwright test
+      - name: Keep the traces of failed tests
+        if: failure() && steps.changes.outputs.docs_only != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-traces
+          path: test/fixture-app/test-results
+          retention-days: 7
