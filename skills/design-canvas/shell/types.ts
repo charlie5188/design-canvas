@@ -93,3 +93,9 @@ export type CanvasSection = {
   width: number;
   height: number;
 };
+
+// The section a pick makes for the versions that were not picked. The agent's own
+// set-aside sections, drawn around one dropped item where it stands, have ids that
+// start with this one (SKILL.md, "Decision notes"); items in either kind are out of the running.
+export const SET_ASIDE_ID = "set-aside";
+export const isSetAside = (section: { id: string }) => section.id === SET_ASIDE_ID || section.id.startsWith(`${SET_ASIDE_ID}-`);
