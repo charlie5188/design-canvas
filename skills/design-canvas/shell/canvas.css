@@ -1279,17 +1279,13 @@ html[data-canvas-alt] .canvas-frame-root * {
   font-weight: 600;
   overflow-wrap: anywhere;
 }
-.canvas-share-fields {
-  display: grid;
-  gap: 10px;
-  padding-inline-end: 6px;
-}
-/* A label column, then the field: the checkbox lines up under the field. */
+/* A label column, then the field. */
 .canvas-share-row {
   display: grid;
   grid-template-columns: 56px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
+  padding-inline-end: 6px;
 }
 .canvas-share-label {
   color: var(--canvas-subtle-color);
@@ -1327,42 +1323,17 @@ html[data-canvas-alt] .canvas-frame-root * {
   color: var(--canvas-subtle-color);
   pointer-events: none;
 }
-.canvas-share-check {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  cursor: pointer;
-}
-.canvas-share-row + .canvas-share-check {
-  margin-inline-start: 64px;
-}
-.canvas-share-check input {
-  margin: 0;
-  accent-color: var(--canvas-fill-color);
-}
-.canvas-share-summary {
+.canvas-share-hint {
   margin: 0;
   padding-inline-end: 6px;
   color: var(--canvas-subtle-color);
   font-size: 13px;
   text-wrap: pretty;
 }
-.canvas-share-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding-inline-end: 4px;
-}
-.canvas-share-hint {
-  color: var(--canvas-subtle-color);
-  font-size: 12px;
-  line-height: 1.4;
-  text-wrap: pretty;
-}
-.canvas-share-foot .canvas-button-primary {
-  flex: none;
+/* Last in the panel, the width of the panel's content. */
+.canvas-share-download {
+  justify-content: center;
+  margin-inline-end: 6px;
 }
 
 /* Notes and sections.

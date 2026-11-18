@@ -1224,34 +1224,29 @@ function TrashPopover({
   );
 }
 
-/** What to share: the whole canvas or one section (its id), and whether set-aside versions go too. */
-type ShareChoice = { section: string | null; setAside: boolean };
-/** What a choice puts in the file, and the registry ids the file leaves out. */
-type ShareContents = { items: number; notes: number; setAside: number; leaveOut: { items: string[]; notes: string[]; sections: string[] } };
+/** What a share puts in the file: how many items, and the registry ids the file leaves out. */
+type ShareContents = { items: number; leaveOut: { items: string[]; notes: string[]; sections: string[] } };
 
 /**
  * Before Share downloads the file: what goes in it. A canvas collects many explorations, and the
- * reader often needs one, so a canvas with sections offers each. Set-aside versions are the record
- * of a decision and go too, unless the person unticks them. The summary says what the reader gets,
- * and that the notes for the agent and the trash never go. The download then says so in a notice.
+ * reader often needs one, so a canvas with sections offers the whole canvas or one section; one
+ * without sections offers no choice. The download then says so in a notice.
  */
 function SharePanel({
   scopes,
   whole,
-  contents,
   busy,
   onDownload,
   onClose,
 }: {
   scopes: { id: string; title: string; items: number }[];
   whole: number;
-  contents: (choice: ShareChoice) => ShareContents;
   busy: boolean;
-  onDownload: (choice: ShareChoice) => void;
+  /** `section`: the id of the one section to share, or null for the whole canvas. */
+  onDownload: (section: string | null) => void;
   onClose: () => void;
 }) {
-  const [choice, setChoice] = useState<ShareChoice>({ section: null, setAside: true });
-  const now = contents(choice);
+  const [section, setSection] = useState<string | null>(null);
   const downloadRef = useRef<HTMLButtonElement>(null);
   useEffect(() => downloadRef.current?.focus({ preventScroll: true }), []);
   return (
@@ -1272,45 +1267,31 @@ function SharePanel({
           <CloseIcon />
         </button>
       </div>
-      {/* Only a real choice is offered: a canvas without sections is shared whole. */}
-      {(scopes.length > 0 || now.setAside > 0) && (
-        <div className="canvas-share-fields">
-          {scopes.length > 0 && (
-            <label className="canvas-share-row">
-              <span className="canvas-share-label">{labels.shareScope}</span>
-              <span className="canvas-share-select">
-                <select value={choice.section ?? ""} onChange={(event) => setChoice({ ...choice, section: event.currentTarget.value || null })}>
-                  <option value="">{`${labels.shareWhole} · ${labels.shareCount(whole)}`}</option>
-                  {scopes.map((scope) => (
-                    <option key={scope.id} value={scope.id}>{`${scope.title} · ${labels.shareCount(scope.items)}`}</option>
-                  ))}
-                </select>
-                <Icon name="chevron-down" />
-              </span>
-            </label>
-          )}
-          {now.setAside > 0 && (
-            <label className="canvas-share-check">
-              <input type="checkbox" checked={choice.setAside} onChange={(event) => setChoice({ ...choice, setAside: event.currentTarget.checked })} />
-              {labels.shareSetAside(now.setAside)}
-            </label>
-          )}
-        </div>
+      {scopes.length > 0 && (
+        <label className="canvas-share-row">
+          <span className="canvas-share-label">{labels.shareScope}</span>
+          <span className="canvas-share-select">
+            <select value={section ?? ""} onChange={(event) => setSection(event.currentTarget.value || null)}>
+              <option value="">{`${labels.shareWhole} · ${labels.shareCount(whole)}`}</option>
+              {scopes.map((scope) => (
+                <option key={scope.id} value={scope.id}>{`${scope.title} · ${labels.shareCount(scope.items)}`}</option>
+              ))}
+            </select>
+            <Icon name="chevron-down" />
+          </span>
+        </label>
       )}
-      <p className="canvas-share-summary">{labels.shareSummary(now.items, now.notes)}</p>
-      <div className="canvas-share-foot">
-        <span className="canvas-share-hint">{labels.shareHint}</span>
-        <button
-          ref={downloadRef}
-          type="button"
-          className="canvas-button canvas-button-primary"
-          disabled={busy}
-          aria-busy={busy}
-          onClick={() => onDownload(choice)}
-        >
-          {busy ? labels.sharing : labels.shareDownload}
-        </button>
-      </div>
+      <p className="canvas-share-hint">{labels.shareHint}</p>
+      <button
+        ref={downloadRef}
+        type="button"
+        className="canvas-button canvas-button-primary canvas-share-download"
+        disabled={busy}
+        aria-busy={busy}
+        onClick={() => onDownload(section)}
+      >
+        {busy ? labels.sharing : labels.shareDownload}
+      </button>
     </div>
   );
 }
@@ -1905,53 +1886,43 @@ function CanvasBoard({
     };
   }, [items, notes, sections, positions]);
   const shareContents = useCallback(
-    (choice: ShareChoice): ShareContents => {
+    (section: string | null): ShareContents => {
       const holds = (frame: CanvasSection, at: { x: number; y: number } | undefined) =>
         !!at && at.x >= frame.x && at.x <= frame.x + frame.width && at.y >= frame.y && at.y <= frame.y + frame.height;
-      const scope = choice.section ? sections.find((section) => section.id === choice.section) : undefined;
+      const scope = section ? sections.find((s) => s.id === section) : undefined;
       const inScope = (at: { x: number; y: number } | undefined) => !scope || holds(scope, at);
-      const setAsideFrames = sections.filter((section) => isSetAside(section) && section !== scope && inScope(shareCentres.sections.get(section.id)));
-      const setAsideItems = items.filter(
-        (item) => !trash.includes(item.id) && inScope(shareCentres.items.get(item.id)) && setAsideFrames.some((f) => holds(f, shareCentres.items.get(item.id))),
-      );
-      const dropped = choice.setAside ? [] : setAsideFrames;
-      const kept = (at: { x: number; y: number } | undefined) => inScope(at) && !dropped.some((f) => holds(f, at));
-      const keptItems = items.filter((item) => !trash.includes(item.id) && kept(shareCentres.items.get(item.id)));
-      const keptNotes = notes.filter((note) => kept(shareCentres.notes.get(note.id)));
-      const keptSections = sections.filter(
-        (section) => section === scope || (!dropped.includes(section) && kept(shareCentres.sections.get(section.id))),
-      );
+      const keptItems = items.filter((item) => !trash.includes(item.id) && inScope(shareCentres.items.get(item.id)));
+      const keptNotes = notes.filter((note) => inScope(shareCentres.notes.get(note.id)));
+      const keptSections = sections.filter((s) => s === scope || inScope(shareCentres.sections.get(s.id)));
       const out = <T extends { id: string }>(all: T[], keep: T[]) => all.filter((entry) => !keep.includes(entry)).map((entry) => entry.id);
       return {
         items: keptItems.length,
-        notes: keptNotes.length,
-        setAside: setAsideItems.length,
         leaveOut: { items: out(items, keptItems), notes: out(notes, keptNotes), sections: out(sections, keptSections) },
       };
     },
     [items, notes, sections, trash, shareCentres],
   );
   // Each titled section a person may share alone, in reading order. Set-aside frames are not offered:
-  // they are the losing side of a decision, which goes with it or not at all (the checkbox).
+  // they are the losing side of a decision, and go with the canvas or the section they sit in.
   const shareScopes = useMemo(
     () =>
       sections
         .filter((section) => section.title.trim() && !isSetAside(section))
         .sort((a, b) => a.y - b.y || a.x - b.x)
-        .map((section) => ({ id: section.id, title: section.title.trim(), items: shareContents({ section: section.id, setAside: true }).items })),
+        .map((section) => ({ id: section.id, title: section.title.trim(), items: shareContents(section.id).items })),
     [sections, shareContents],
   );
   const share = useCallback(
-    async (choice: ShareChoice) => {
+    async (only: string | null) => {
       setSharing(true);
       try {
         // The file is named for the canvas (and the section shared), not its folder, with the day it was made.
         const now = new Date();
         const date = [now.getFullYear(), now.getMonth() + 1, now.getDate()].map((n) => String(n).padStart(2, "0")).join("-");
         const title = document.title.replace(/\s*·\s*canvas\s*$/, "").trim() || "canvas";
-        const section = choice.section ? sections.find((s) => s.id === choice.section)?.title.trim() : undefined;
+        const section = only ? sections.find((s) => s.id === only)?.title.trim() : undefined;
         const name = `${[title, section].filter(Boolean).join(" · ")} ${date}`.replace(/[\\/:*?"<>|]+/g, "-");
-        const file = await downloadSharedFile(shareContents(choice).leaveOut, `${name}.html`);
+        const file = await downloadSharedFile(shareContents(only).leaveOut, `${name}.html`);
         setShareOpen(false);
         shareButtonRef.current?.focus({ preventScroll: true });
         notify(file.missing.length ? `${labels.shared(file.name)}. ${labels.sharedMissing(file.missing)}` : labels.shared(file.name), undefined, file.missing.length > 0);
@@ -6387,10 +6358,9 @@ function CanvasBoard({
       {shareOpen && (
         <SharePanel
           scopes={shareScopes}
-          whole={shareContents({ section: null, setAside: true }).items}
-          contents={shareContents}
+          whole={shareContents(null).items}
           busy={sharing}
-          onDownload={(choice) => void share(choice)}
+          onDownload={(section) => void share(section)}
           onClose={closeSharePanel}
         />
       )}

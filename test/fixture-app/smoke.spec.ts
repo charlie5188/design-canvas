@@ -2899,12 +2899,12 @@ test('Share downloads the canvas as one file, without reloading the canvas', asy
   await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toContainText('Canvas is ready')
   // The build runs inside the dev server; a page reload during it would lose this.
   await page.evaluate(() => Object.assign(window, { kept: true }))
-  // Share opens a panel first: what the file will hold, and what never goes in. Escape closes it.
+  // Share opens a panel first. Escape closes it.
   await page.getByRole('button', { name: 'Share as an HTML file' }).click()
   const panel = page.getByRole('dialog', { name: 'Share as a file' })
-  await expect(panel).toContainText('1 item. Notes for the agent and the trash stay out.')
-  // A canvas without sections or set-aside versions has nothing to choose.
-  await expect(panel.locator('select, input[type="checkbox"]')).toHaveCount(0)
+  await expect(panel).toContainText('Opens in any browser.')
+  // A canvas without sections has nothing to choose.
+  await expect(panel.locator('select')).toHaveCount(0)
   await expect(panel.getByRole('button', { name: 'Download' })).toBeFocused()
   await page.keyboard.press('Escape')
   await expect(panel).toHaveCount(0)
@@ -2943,9 +2943,7 @@ test('Share can share one section: the rest is not in the file at all', async ({
     await page.getByRole('button', { name: 'Share as an HTML file' }).click()
     const panel = page.getByRole('dialog', { name: 'Share as a file' })
     await expect(panel.locator('select option')).toHaveText(['Whole canvas · 1 item', 'Corner · 0 items'])
-    await expect(panel).toContainText('1 item, 1 note.')
     await panel.locator('select').selectOption('corner')
-    await expect(panel).toContainText('0 items, 1 note.')
     const download = page.waitForEvent('download')
     await panel.getByRole('button', { name: 'Download' }).click()
     const file = await download

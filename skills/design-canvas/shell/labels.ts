@@ -232,10 +232,6 @@ export const labels = {
   shareScope: "Share",
   shareWhole: "Whole canvas",
   shareCount: (n: number) => `${n} ${n === 1 ? "item" : "items"}`,
-  shareSetAside: (n: number) => `Include set-aside versions (${n})`,
-  /** What the file will hold, and what never goes in. */
-  shareSummary: (items: number, notes: number) =>
-    `${items} ${items === 1 ? "item" : "items"}${notes ? `, ${notes} ${notes === 1 ? "note" : "notes"}` : ""}. Notes for the agent and the trash stay out.`,
   shareHint: "Opens in any browser. Drag it into Figma or Notion to embed it.",
   shareDownload: "Download",
   shareFailed: (reason: string) => `Couldn't make the file: ${reason}`,
