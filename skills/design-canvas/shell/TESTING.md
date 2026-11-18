@@ -109,6 +109,7 @@ a device or input you do not have.
 
 - The Ask agent button and A (with the canvas, toolbar, or a pin focused) toggle annotate mode; Escape leaves it. A typed inside a preview or a field reaches that field.
 - In annotate mode, hovering outlines elements in plain items and in frames without holding Alt; the outline hides when the camera moves.
+- In a frame, a menu, popover, or dialog that the item portals to the frame's body is the item too: hovering outlines its elements, a click names one and places a pin that stays on it, a drawn area lists them, a double-click edits their text, and Alt-click copies their reference, as in the item's root. A press on the frame's empty space names nothing. A plain item's portaled content still cannot be pointed at.
 - Clicking an element in a plain item or in a frame places a numbered pin at the click, also right after a zoom, and opens a note showing `Item › role “label”`. The control is not activated, and a link shows no notice and leaves the URL unchanged.
 - Dragging across a plain item or a frame draws a box, kept inside the item, and on release opens a note showing `Item › area W×H at X,Y: …` with the controls, headings, and texts entirely inside it, in item pixels at any zoom. The area keeps its outline, with its pin at the top-left corner; no element note opens too. A press that barely moves stays a click on one element.
 - Clicking an item's name or grip annotates the whole item (`Item`), outlined around the preview; dragging them still moves the item. Hovering a title outlines the whole preview.
