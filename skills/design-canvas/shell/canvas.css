@@ -2607,6 +2607,8 @@ html[data-canvas-alt] .canvas-frame-root * {
 .canvas-inspect-popover {
   position: fixed;
   z-index: 7;
+  /* Placed by its outer box (Picker measures it so), border included. */
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -2632,6 +2634,8 @@ html[data-canvas-alt] .canvas-frame-root * {
   }
 }
 .canvas-inspect-search {
+  /* Its full height in a list held short: only the options scroll. */
+  flex: none;
   box-sizing: border-box;
   block-size: 28px;
   margin: 6px 6px 2px;

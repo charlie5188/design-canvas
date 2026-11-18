@@ -666,24 +666,77 @@ function colorOf(raw: string) {
 
 // --- Editing ----------------------------------------------------------------------------
 
-/** `detail`: a length's value. `swatch`: a color as the element resolves it. */
-export type Choice = { value: string; label: string; short?: string; detail?: string; swatch?: string };
+/** `detail`: a length's value, and `px` the same as a number. `swatch`: a color as the element resolves it. */
+export type Choice = { value: string; label: string; short?: string; detail?: string; swatch?: string; px?: number };
+
+/**
+ * How big a size's name says it is: `xSmall` -2, `small` -1, `medium` 0, `large` 1, `2xl` 3,
+ * `x3Small` -4, `semiSmall` -0.5 (half a step toward medium), or a number's own value.
+ * `undefined` for any other name.
+ */
+export function sizeRank(name: string): number | undefined {
+  const word = name.toLowerCase().replace(/[-_\s]/g, "");
+  if (word && Number.isFinite(Number(word))) return Number(word);
+  if (/^(medium|md|m|base|regular|normal|default)$/.test(word)) return 0;
+  if (word === "none") return -1000;
+  if (word === "full") return 1000;
+  if (word.startsWith("semi") && word.length > 4) {
+    const rank = sizeRank(word.slice(4));
+    return rank === undefined || rank === 0 ? undefined : rank - Math.sign(rank) / 2;
+  }
+  const size = /^(?:(\d+)x|x(\d+)|(x*))(small|sm|s|large|lg|l)$/.exec(word);
+  if (!size) return undefined;
+  const steps = 1 + Number(size[1] ?? size[2] ?? size[3]!.length);
+  return size[4]!.startsWith("s") ? -steps : steps;
+}
+
+/**
+ * Biggest first, when every name says a size; else as they were. Lists of sizes read the
+ * way the arrow keys go: up is bigger, so the values beside the current one are one step
+ * either way (a library's own order can be `small | medium | xSmall`).
+ */
+export function bySize<T>(items: T[], name: (item: T) => string): T[] {
+  const ranks = items.map((item) => sizeRank(name(item)));
+  if (ranks.some((rank) => rank === undefined)) return items;
+  return items
+    .map((item, index) => ({ item, rank: ranks[index]! }))
+    .sort((a, b) => b.rank - a.rank)
+    .map(({ item }) => item);
+}
+
+/**
+ * Typography styles by role (`body`, `title`), biggest first in each, a weight
+ * (`body.large.bold`) right after its regular one.
+ */
+function typographyOrder(names: string[]) {
+  const keyed = names.map((name) => {
+    const parts = name.split(".");
+    let at = parts.length - 1;
+    while (at >= 0 && sizeRank(parts[at]!) === undefined) at--;
+    return at < 0
+      ? { name, role: name, rank: 0, rest: "" }
+      : { name, role: parts.slice(0, at).join("."), rank: sizeRank(parts[at]!)!, rest: parts.slice(at + 1).join(".") };
+  });
+  return keyed
+    .sort((a, b) => a.role.localeCompare(b.role) || b.rank - a.rank || a.rest.localeCompare(b.rest))
+    .map(({ name }) => name);
+}
 
 /**
  * What a row can be set to: the tokens of its kind, as the element resolves them, with
- * their values, smallest first for lengths. A state's color (hovered, pressed) is left out:
- * it belongs to the component that has the state.
+ * their values, biggest first for lengths (see bySize). A state's color (hovered, pressed)
+ * is left out: it belongs to the component that has the state.
  */
 export function choices(element: Element, system: DesignSystem, category: Category): Choice[] {
-  if (category === "typography") return tokens(system).typography.map((name) => ({ value: name, label: name }));
+  if (category === "typography") return typographyOrder(tokens(system).typography).map((name) => ({ value: name, label: name }));
   const list = kindList(classify(element, system), category).filter((t) => !STATES.test(t.name));
   const common = commonStart(list.map((t) => tokenLabel(t.name, system)));
   return list
     .map((t) => ({ t, label: tokenLabel(t.name, system) }))
-    .sort((a, b) => ("px" in a.t && "px" in b.t ? a.t.px - b.t.px : 0))
+    .sort((a, b) => ("px" in a.t && "px" in b.t ? b.t.px - a.t.px : 0))
     .map(({ t, label }) =>
       "px" in t
-        ? { value: t.name, label, short: shortName(label, common), detail: `${round(t.px)}px` }
+        ? { value: t.name, label, short: shortName(label, common), detail: `${round(t.px)}px`, px: t.px }
         : { value: t.name, label, short: shortName(label, common), swatch: t.raw },
     );
 }
