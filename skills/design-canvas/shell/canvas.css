@@ -3216,3 +3216,15 @@ html[data-canvas-alt] .canvas-frame-root * {
   margin: 0;
   padding-inline-start: 1.4em;
 }
+/* Set here, not left to the browser: an app's reset (Tailwind's preflight, among others) takes
+   the markers off every list, and a note's items then read as one indented paragraph. */
+.canvas-note-body ul {
+  list-style: disc outside;
+}
+.canvas-note-body ol {
+  list-style: decimal outside;
+}
+.canvas-note-body li {
+  display: list-item;
+  margin: 0;
+}

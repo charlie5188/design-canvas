@@ -4,3 +4,11 @@ body {
   /* A base text color unlike the canvas chrome's, as many apps set one: previews must inherit it. */
   color: #1d3557;
 }
+
+/* A list reset, as Tailwind's preflight and many apps have: the canvas's own lists (a note's) must keep their markers. */
+ol,
+ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}

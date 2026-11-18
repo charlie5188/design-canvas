@@ -1748,6 +1748,9 @@ test('a note draws **bold** and lists, and is edited as the text it is', async (
     await expect(note).toBeVisible()
     await expect(note.locator('ul > li')).toHaveText(['A keeps the summary', 'B hides it'])
     await expect(note.locator('ol > li')).toHaveText(['Pick one', 'Ship it'])
+    // The app resets lists (src/index.css), and the note's still show their markers.
+    await expect(note.locator('ul')).toHaveCSS('list-style-type', 'disc')
+    await expect(note.locator('ol')).toHaveCSS('list-style-type', 'decimal')
     await expect(note.locator('strong')).toHaveText(['A'])
     // The marks are drawn, not shown; stars with spaces inside are no mark.
     await expect(note).not.toContainText('**A**')

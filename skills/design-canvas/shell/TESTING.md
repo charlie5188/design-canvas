@@ -233,7 +233,7 @@ Before claiming smooth performance, profile a canvas with a realistic number of 
 
 ## Note formatting
 
-- A note shows `**words**` in bold and lines that start with `- `, `* `, or `• ` as a bulleted list, and with `1. ` or `1) ` as a numbered list that starts at the number written. Everything else shows as typed, with its line breaks and blank lines. Stars with a space inside them (`2 ** 3 ** 4`) stay as typed. The same for a note from the registry, a note waiting as a ghost, and a note in a shared file.
+- A note shows `**words**` in bold and lines that start with `- `, `* `, or `• ` as a bulleted list, and with `1. ` or `1) ` as a numbered list that starts at the number written; the bullets and numbers show also in an app that resets lists (Tailwind's preflight). Everything else shows as typed, with its line breaks and blank lines. Stars with a space inside them (`2 ** 3 ** 4`) stay as typed. The same for a note from the registry, a note waiting as a ghost, and a note in a shared file.
 - While a note is edited, its field shows the text as typed, marks included; they are drawn again when the edit ends. The registry, a section note's reference, and the message to the agent keep the text as typed.
 
 ## Selection
