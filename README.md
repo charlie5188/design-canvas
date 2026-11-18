@@ -4,7 +4,7 @@ English | [日本語](#日本語)
 
 An agent skill that puts your React app's real components on a pannable, zoomable canvas, so you can explore and compare UI directions side by side by talking to your coding agent.
 
-https://github.com/user-attachments/assets/cdf83204-7091-470a-b9ef-4243571ff98e
+https://github.com/user-attachments/assets/1c30edec-5395-42c9-8111-1f851f88737e
 
 Instead of asking the agent to build a canvas from scratch for every project, the skill installs a ready-made, tested canvas shell and fits it to your app. The agent only writes the items you want to compare.
 
