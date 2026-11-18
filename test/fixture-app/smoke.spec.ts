@@ -1775,6 +1775,71 @@ test('a note draws **bold** and lists, and is edited as the text it is', async (
   }
 })
 
+test('a note draws links and `code`; a click opens a link, and a drag from it moves the note', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    const long = 'https://www.example.com/design/AbCdEfGh/checkout-flow?node-id=12-34'
+    const text = `See [the spec](https://example.com/spec) and ${long}. Then https://example.com/jaを見る\\nUse \`Button\` with **\`variant\` [here](https://example.com/b)**, not \`**raw**\`.`
+    const noted = original.replace(
+      'export const notes: CanvasNote[] = [];',
+      `export const notes: CanvasNote[] = [\n  { id: "links", text: "${text}", x: 0, y: 300 },\n];`,
+    )
+    expect(noted).toContain('id: "links"')
+    writeFileSync(REGISTRY, noted)
+    await expect
+      .poll(async () => (await (await page.request.get('/registry.tsx')).text()).includes('id: "links"'), { timeout: 15_000 })
+      .toBe(true)
+    // The new tabs land here instead of the network.
+    await page.context().route('https://example.com/**', (route) => route.fulfill({ body: 'linked' }))
+    await page.context().route('https://www.example.com/**', (route) => route.fulfill({ body: 'linked' }))
+    await page.goto('/')
+    const note = page.locator('.canvas-note-card[data-board-id="links"]')
+    await expect(note).toBeVisible()
+    const links = note.locator('a.canvas-note-link')
+    // A typed address shows short, without its full stop; Japanese right after it is not part of it.
+    await expect(links).toHaveText(['the spec', 'example.com/design/AbCdEfGh/checkout-fl…', 'example.com/ja', 'here'])
+    expect(await links.evaluateAll((all) => all.map((a) => a.getAttribute('href')))).toEqual([
+      'https://example.com/spec',
+      long,
+      'https://example.com/ja',
+      'https://example.com/b',
+    ])
+    await expect(note).toContainText('checkout-fl…. Then')
+    await expect(note).toContainText('を見る')
+    await expect(note.locator('code')).toHaveText(['Button', 'variant', '**raw**'])
+    await expect(note.locator('strong code')).toHaveText(['variant'])
+    await expect(note.locator('strong a')).toHaveText(['here'])
+
+    // One click opens one tab and selects the note; the registry is unchanged.
+    await page.waitForTimeout(600)
+    const opened: string[] = []
+    page.context().on('page', (tab) => opened.push(tab.url()))
+    const popup = page.waitForEvent('popup')
+    await links.first().click()
+    const tab = await popup
+    await tab.waitForURL('https://example.com/spec')
+    await tab.close()
+    await expect(note).toHaveAttribute('data-selected', 'true')
+    expect(opened).toHaveLength(1)
+    expect(readFileSync(REGISTRY, 'utf8')).toBe(noted)
+
+    // A drag that starts on a link moves the note and opens nothing.
+    await page.bringToFront()
+    const start = (await links.first().boundingBox())!
+    await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(start.x + start.width / 2 + 60, start.y + start.height / 2 + 40, { steps: 6 })
+    await page.mouse.up()
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8').match(/id: "links"[^}]*?\bx: (-?\d+)/)?.[1], { timeout: 15_000 }).not.toBe('0')
+    await page.waitForTimeout(300)
+    expect(opened).toHaveLength(1)
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
 test('a pasted image is kept in the canvas folder, moves and resizes in proportion, and Delete and Undo work on it', async ({ page }) => {
   const original = readFileSync(REGISTRY, 'utf8')
   const folder = 'design-canvas/smoke/images'
