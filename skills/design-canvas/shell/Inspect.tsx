@@ -361,11 +361,12 @@ function usePropTypes(system: DesignSystem, component: string | undefined) {
   // The system's own prop definitions (design-system.ts) come first; the type declarations, else.
   const own = component ? system.propTypes?.(component) : undefined;
   useEffect(() => {
-    if (own || !component || !system.package || component in types) return;
-    const key = `${system.package}:${component}`;
+    if (own || !component || component in types) return;
+    const key = `${system.package ?? ""}:${component}`;
     let request = typeRequests.get(key);
     if (!request) {
-      const query = new URLSearchParams({ package: system.package, component: component.split(".")[0]! });
+      // Without a package, the dev server looks for the component in the app's own source (shadcn/ui).
+      const query = new URLSearchParams({ ...(system.package ? { package: system.package } : {}), component });
       request = fetch(`${PROPS_PATH}?${query}`)
         .then((response) => (response.ok ? response.json() : { props: null }))
         .then((body: { props: PropType[] | null }) => body.props)
@@ -405,22 +406,21 @@ function Props({
 }) {
   const set = placed.props;
   const editable = (types ?? []).filter((p) => !PLUMBING.test(p.name) && (p.options.length > 0 || p.boolean));
+  // What the code set that no picker covers (a value the types leave open, such as Chakra's
+  // `colorPalette` or MUI Chip's `label`): shown as it is, so nothing the code says goes missing.
+  const fixed = designProps(set).filter(([name]) => !editable.some((p) => p.name === name));
+  const readOnly = fixed.map(([name, value]) => (
+    <div key={name}>
+      <dt>{name}</dt>
+      <dd>
+        <span className="canvas-inspect-select" data-readonly="">
+          <span className="canvas-inspect-select-text">{String(value)}</span>
+        </span>
+      </dd>
+    </div>
+  ));
   if (!editable.length) {
-    const shown = designProps(set);
-    return shown.length ? (
-      <dl className="canvas-inspect-rows">
-        {shown.map(([name, value]) => (
-          <div key={name}>
-            <dt>{name}</dt>
-            <dd>
-              <span className="canvas-inspect-value">{String(value)}</span>
-            </dd>
-          </div>
-        ))}
-      </dl>
-    ) : (
-      <p className="canvas-subtle">{labels.inspectDefaults}</p>
-    );
+    return fixed.length ? <dl className="canvas-inspect-rows">{readOnly}</dl> : <p className="canvas-subtle">{labels.inspectDefaults}</p>;
   }
   const edit = (prop: PropType, value: unknown, preview = false) => {
     const current = set[prop.name] ?? prop.default;
@@ -472,6 +472,7 @@ function Props({
           </div>
         );
       })}
+      {readOnly}
     </dl>
   );
 }

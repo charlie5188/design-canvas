@@ -31,9 +31,13 @@ export type DesignSystem = {
   name: string;
   /** The package's React exports, such as `import * as Aegis from "@legalforce/aegis-react"`. */
   components: Record<string, unknown>;
-  /** The package the components come from: its type declarations list each prop's values. */
+  /**
+   * The package the components come from: its type declarations list each prop's values, and its
+   * name the prefix of its tokens. Without one, props come from the `cva(...)` in the app's own
+   * source (shadcn/ui).
+   */
   package?: string;
-  /** The prefix of its token custom properties, such as "--aegis-". Default: any custom property but the canvas's own. */
+  /** The prefix of its token custom properties, such as "--aegis-". Default: the package's name when most custom properties carry it, else any. */
   tokenPrefix?: string;
   /** Token names that contain this, or match it, are private and never shown, such as "-internal-". */
   privateTokens?: string | RegExp;
@@ -61,13 +65,64 @@ const KINDS: Record<TokenKind, RegExp> = {
   space: /(^|[-_.])(space|spacing|spacer|gap|gutter)([-_.]|$)/i,
   radius: /radius|radii|rounded|corner/i,
   fontSize: /font-?size|text-?size|(^|[-_.])text-(2xs|xs|sm|md|base|lg|[2-9]?xl|\d+)$/i,
-  text: /foreground|(^|[-_.])(fg|text|ink|on)([-_.]|$)/i,
+  text: /foreground|contrast-?text|(^|[-_.])(fg|text|ink|on)([-_.]|$)/i,
   fill: /background|(^|[-_.])(bg|surface|fill|panel|canvas|base)([-_.]|$)/i,
   border: /border|outline|divider|stroke|separator|ring/i,
 };
-/** The canvas's own custom properties, never a design system's. */
-const CANVAS_OWN = /^--(canvas|section|fold|item)-/;
-const prefixOf = (system: DesignSystem) => system.tokenPrefix ?? "--";
+/**
+ * Custom properties that are never a design system's tokens: the canvas's own, Tailwind's
+ * working values (`--tw-shadow`), and those of one component (a name part in PascalCase, as
+ * MUI's `--mui-palette-Tooltip-bg`).
+ */
+const NOT_TOKENS = /^--(canvas|section|fold|item|tw)-|-[A-Z][a-z]\w*(-|$)/;
+
+/**
+ * Where the system's tokens start. Its own `tokenPrefix`, else the package's name when most of
+ * the page's custom properties carry it (`--mui-`, `--chakra-`, `--aegis-`): the rest are then a
+ * component's working values (MUI's `--variant-containedBg`), not tokens. Else every name.
+ */
+const detected = new WeakMap<DesignSystem, { sheets: number; prefix: string }>();
+function prefixOf(system: DesignSystem) {
+  if (system.tokenPrefix !== undefined) return system.tokenPrefix;
+  const sheets = document.styleSheets.length;
+  let found = detected.get(system);
+  if (found?.sheets !== sheets) {
+    found = { sheets, prefix: detectPrefix(system) };
+    detected.set(system, found);
+  }
+  return found.prefix;
+}
+function detectPrefix(system: DesignSystem) {
+  const words = (system.package ?? "")
+    .toLowerCase()
+    .split(/[@/._-]+/)
+    .filter((word) => word.length > 2 && !/^(react|core|themes?|components?|design|system|web|lib|js|kit)$/.test(word));
+  if (!words.length) return "--";
+  const counts = new Map(words.map((word) => [word, 0]));
+  let total = 0;
+  const walk = (list: CSSRuleList) => {
+    for (const rule of Array.from(list)) {
+      if (rule instanceof CSSStyleRule) {
+        for (let i = 0; i < rule.style.length; i++) {
+          const name = rule.style[i]!;
+          if (!name.startsWith("--") || NOT_TOKENS.test(name)) continue;
+          total++;
+          for (const word of words) if (name.startsWith(`--${word}-`)) counts.set(word, counts.get(word)! + 1);
+        }
+      }
+      if ("cssRules" in rule && (rule as CSSGroupingRule).cssRules) walk((rule as CSSGroupingRule).cssRules);
+    }
+  };
+  for (const sheet of Array.from(document.styleSheets)) {
+    try {
+      walk(sheet.cssRules);
+    } catch {
+      // Another origin's stylesheet: not this page's tokens.
+    }
+  }
+  const [word, count] = [...counts].sort((a, b) => b[1] - a[1])[0]!;
+  return count > 0 && count >= total / 2 ? `--${word}-` : "--";
+}
 
 type Fiber = {
   tag: number;
@@ -173,10 +228,24 @@ function current(fiber: Fiber): Fiber {
   return a.tag === 3 && root?.current !== a ? alternate : fiber;
 }
 
-/** The first DOM element a component renders: the box it shows as. */
+/**
+ * The first DOM element a component renders: the box it shows as. In tree order, not only down
+ * the first child: a styled component (Emotion, in MUI and Chakra) renders a style helper that
+ * shows nothing before its element.
+ */
 function hostRoot(fiber: Fiber): Element | null {
-  for (let node = fiber.child, guard = 0; node && guard < 80; node = node.child, guard++) {
+  let node = fiber.child;
+  for (let guard = 0; node && guard < 400; guard++) {
     if (node.tag === HOST_COMPONENT && node.stateNode instanceof Element) return node.stateNode;
+    if (node.child) {
+      node = node.child;
+      continue;
+    }
+    while (node && !node.sibling) {
+      node = node.return;
+      if (!node || node === fiber) return null;
+    }
+    node = node?.sibling ?? null;
   }
   return null;
 }
@@ -254,7 +323,7 @@ function tokens(system: DesignSystem): TokenSet {
   const uses = `var(${prefix}`;
   const hidden = system.privateTokens;
   const isPrivate = (name: string) =>
-    CANVAS_OWN.test(name) || (typeof hidden === "string" ? !!hidden && name.includes(hidden) : !!hidden && hidden.test(name));
+    NOT_TOKENS.test(name) || (typeof hidden === "string" ? !!hidden && name.includes(hidden) : !!hidden && hidden.test(name));
   const attribute = system.typographyAttribute;
   const pattern = attribute ? new RegExp(`\\[${attribute.replace(/[-]/g, "\\-")}=["']?([^"'\\]]+)["']?\\]`, "g") : null;
   const walk = (list: CSSRuleList) => {
@@ -284,8 +353,17 @@ function tokens(system: DesignSystem): TokenSet {
   return set;
 }
 
-/** A token's name as its people write it: the system's own form (tokenLabel), or without the prefix. */
-export const tokenLabel = (name: string, system: DesignSystem) => system.tokenLabel?.(name) ?? name.slice(prefixOf(system).length);
+/**
+ * A token's name as its people write it: the system's own form (tokenLabel), or without the
+ * prefix. A step of a base unit (see classify) is the unit's name and the step: `spacing 4`.
+ */
+export const tokenLabel = (name: string, system: DesignSystem): string => {
+  const step = /^calc\(var\((--[\w-]+)\) \* ([\d.]+)\)$/.exec(name);
+  if (step) return `${tokenLabel(step[1]!, system)} ${step[2]}`;
+  return DERIVED.get(name) ?? system.tokenLabel?.(name) ?? name.slice(prefixOf(system).length);
+};
+/** Values made from a token that have no token of their own (see classify), by their names. */
+const DERIVED = new Map<string, string>();
 
 export type Value = (
   /** A token: `name` as written in CSS, `token` as shown. `others`: tokens with the same value. */
@@ -500,18 +578,21 @@ function declaredTokens(
     }
     return list;
   };
-  /** What a declaration names. A component's own variable (`--aegis-internal-…`) is followed to the tokens it is set to. */
+  /**
+   * What a declaration names. A component's own variable (`--aegis-internal-…`, MUI's
+   * `--variant-containedColor`) is followed to the tokens it is set to.
+   */
   const named = (value: string, at: Element, depth: number): string[] =>
     [...value.matchAll(pattern)].flatMap((match) => {
       const name = match[1]!;
-      if (!name.startsWith(prefix)) return [];
-      if (depth > 3) return [name];
+      const token = name.startsWith(prefix) ? [name] : [];
+      if (depth > 3) return token;
       for (let scope: Element | null = at; scope; scope = scope.parentElement) {
         const own = scope instanceof HTMLElement ? scope.style.getPropertyValue(name) : "";
         const set = own || matching(scope).map((rule) => rule.style.getPropertyValue(name)).filter(Boolean).pop();
-        if (set) return [name, ...named(set, scope, depth + 1)];
+        if (set) return [...token, ...named(set, scope, depth + 1)];
       }
-      return [name];
+      return token;
     });
   for (let at: Element | null = element; at; at = inherited ? at.parentElement : null) {
     const found: string[] = [];
@@ -559,7 +640,7 @@ function textLooksLike(element: Element, style: CSSStyleDeclaration) {
  */
 export function shortName(label: string, common = "") {
   const rest = common && label.startsWith(common) ? label.slice(common.length) : "";
-  return rest && !/^\d/.test(rest) ? rest : label;
+  return rest && !/^\d+(\.\d+)?$/.test(rest) ? rest : label;
 }
 
 /** The start all the names share, up to a separator (`.`, `-`, `_`): `color.foreground.`, `space-`. */
@@ -597,19 +678,49 @@ function classify(element: Element, system: DesignSystem): Kinds {
     }
   }
   const patterns = { ...KINDS, ...system.tokenKinds };
-  // Tokens whose name starts with the kind (`space.small`) are the system's own scale; others that
+  const says = (t: { name: string }, kind: TokenKind) => patterns[kind].test(t.name.slice(2));
+  // A length whose name starts with the kind (`space.small`) is the system's own scale; others that
   // only mention it (`button.column.gap`) belong to one component, so they count only when no
   // name starts with it.
-  const named = <T extends { name: string }>(list: T[], kind: TokenKind) => {
-    const all = list.filter((t) => patterns[kind].test(t.name.slice(2)));
+  const sized = (kind: TokenKind) => {
+    const all = lengths.filter((t) => says(t, kind));
     const leading = all.filter((t) => tokenLabel(t.name, system).search(patterns[kind]) === 0);
     return leading.length ? leading : all;
   };
-  const radius = named(lengths, "radius");
-  const fontSize = named(lengths, "fontSize");
-  const space = named(lengths, "space");
+  let radius = sized("radius");
+  // A token named `radius` beside Tailwind's steps only (`radius-md`) is shadcn/ui's base: its
+  // theme makes `rounded-sm` to `rounded-xl` from it, and Tailwind keeps a token only for the
+  // steps the page uses. The others are made from the base, as the theme makes them.
+  const base = radius.find((t) => tokenLabel(t.name, system) === "radius");
+  const steps = radius.filter((t) => t !== base);
+  if (base && steps.every((t) => /^radius-(xs|sm|md|lg|[2-4]?xl)$/.test(tokenLabel(t.name, system)))) {
+    radius = RADII.map(([step, delta]) => {
+      const own = steps.find((t) => tokenLabel(t.name, system) === `radius-${step}`);
+      if (own) return own;
+      const name = `calc(var(${base.name}) ${delta < 0 ? "-" : "+"} ${Math.abs(delta)}px)`;
+      DERIVED.set(name, `radius-${step}`);
+      return { name, raw: name, px: base.px + delta };
+    });
+    radius.push(...steps.filter((t) => !radius.includes(t)));
+  }
+  const fontSize = sized("fontSize");
+  let space = sized("space");
+  // One spacing token is a base unit (Tailwind's `--spacing`, MUI's `--mui-spacing`): its steps
+  // are the scale, as `p-4` or `spacing(2)` write it.
+  if (space.length === 1 && /(^|[-_.])(spacing|space|unit)$/i.test(tokenLabel(space[0]!.name, system))) {
+    const unit = space[0]!;
+    space = STEPS.filter((n) => n * unit.px <= 128).map((n) => {
+      const name = `calc(var(${unit.name}) * ${n})`;
+      return { name, raw: name, px: n * unit.px };
+    });
+  }
   const paints = (kind: TokenKind) => {
-    const list = named(colors, kind);
+    const list = colors.filter((t) => says(t, kind));
+    // A system that names its fills by role (`primary`, `muted`, `card`) says "fill" in none of
+    // them: every color its text and border names leave is a fill too.
+    if (kind === "fill" && !system.tokenKinds?.fill) {
+      for (const t of colors) if (!list.includes(t) && !says(t, "text") && !says(t, "border")) list.push(t);
+    }
     return list.length ? list : colors;
   };
   return {
@@ -622,6 +733,15 @@ function classify(element: Element, system: DesignSystem): Kinds {
     colors,
   };
 }
+/** The steps of a base unit offered for spacing: those Tailwind and MUI scales share. */
+const STEPS = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 20, 24, 28, 32];
+/** shadcn/ui's radii, from its theme: `--radius-md: calc(var(--radius) - 2px)` and so on. */
+const RADII: [string, number][] = [
+  ["sm", -4],
+  ["md", -2],
+  ["lg", 0],
+  ["xl", 4],
+];
 const kindList = (kinds: Kinds, category: Category): (Length | Paint)[] => (category === "typography" ? [] : kinds[category]);
 
 // Measuring a token's value takes a style pass, and a system has hundreds of tokens: each raw

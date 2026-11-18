@@ -33,7 +33,7 @@ import { access, chmod, constants, readFile, realpath, rename, rm, stat, writeFi
 import { basename, dirname, join } from "node:path";
 import type { Plugin } from "vite";
 import { AGENT_EVENT, AGENT_PATH, type AgentReply, EDIT_PATH, MAX_REPLY, NOTE_ID, PROPS_PATH, REPLY_EVENT, SHARE_PATH, VERSION_PATH } from "./channel.ts";
-import { componentProps } from "./props-types.ts";
+import { componentProps, sourceProps } from "./props-types.ts";
 import { addEntry, applyEdits, type DirectAdd, type DirectEdit, type DirectRemove, placeableItems, removeEntry, validAdd, validEdit, validRemove } from "./registry-edit.ts";
 
 export type AgentState = "off" | "listening" | "working";
@@ -468,9 +468,11 @@ export function agentChannel(): Plugin {
         const query = new URL(request.url ?? "/", "http://canvas").searchParams;
         const pkg = query.get("package") ?? "";
         const component = query.get("component") ?? "";
-        if (!/^(@[\w.-]+\/)?[\w.-]+$/.test(pkg)) return send(response, 400, "Bad package");
+        if (pkg && !/^(@[\w.-]+\/)?[\w.-]+$/.test(pkg)) return send(response, 400, "Bad package");
         try {
-          sendJson(response, { props: componentProps(server.config.root, pkg, component) });
+          // A system with no package (shadcn/ui) has its components in the app's own source.
+          const props = pkg ? componentProps(server.config.root, pkg, component) : sourceProps(server.config.root, component);
+          sendJson(response, { props });
         } catch (error) {
           send(response, 500, error instanceof Error ? error.message : String(error));
         }

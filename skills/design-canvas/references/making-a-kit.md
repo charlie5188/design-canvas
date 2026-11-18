@@ -56,16 +56,30 @@ Map the `--canvas-*` tokens in `theme.css` to the app's tokens so the canvas chr
 
 ## 7a. Design system (Inspect)
 
-The Inspect tool appears only when `design-system.ts` describes the app's design system. Leave `designSystem` undefined when the app has none. Two fields are enough for most systems:
+The Inspect tool appears only when `design-system.ts` describes the app's design system. Leave `designSystem` undefined when the app has none. Two or three fields are enough for most systems:
 
 - `name`: shown in the panel.
-- `components`: the package's React exports (`import * as Radix from "@radix-ui/themes"`).
+- `components`: the system's React components by name. For a package, its exports (`import * as Mui from "@mui/material"`). For components copied into the app, as shadcn/ui does, the app's own: `{ Button, Badge, ...CardParts }` from `src/components/ui`.
+- `package`: the package name, when there is one. The dev server reads its type declarations to list each prop's values (`variant: text | outlined | contained`).
 
-The canvas then finds the tokens on its own: every custom property in the page's stylesheets is a color or a length by its value, and its kind by common names (`space`, `spacing`, `gap`; `radius`, `rounded`; `font-size`; `foreground`, `bg`, `surface`, `border`). Names that start with the kind (`space-3`, `space.small`) count first; a kind no name says falls back to every color or every length. Check the result in the canvas: select an element the app built and open Padding and Text. Where it does not fit, read the system's docs and token files, and set:
+Without `package`, the dev server looks for each component in the app's source, and reads its props from the `cva(...)` call that builds its class names (`variant`, `size`, and their `defaultVariants`).
 
-- `package`: the package name. The dev server reads its type declarations to list each prop's values (`variant: solid | subtle`). It reads `<Name>Options` or `<Name>Props` interfaces, unions, and aliases.
+The canvas then finds the tokens on its own:
+- Every custom property in the page's stylesheets is a color or a length by its value, and its kind by common names (`space`, `spacing`, `gap`; `radius`, `rounded`; `font-size`; `foreground`, `fg`, `contrastText`; `bg`, `surface`; `border`, `ring`). A color named for neither text nor border is a fill too, as `primary` and `muted` are in shadcn/ui.
+- When most custom properties start with the package's name (`--mui-`, `--chakra-`), only those are tokens; the rest are components' working values. Tailwind's `--tw-*` and names with a component in them (`--mui-palette-Tooltip-bg`) are never tokens.
+- A single spacing token is a base unit (Tailwind's `--spacing`, MUI's `--mui-spacing`): its steps are the scale (`spacing 4`, as `p-4` or `spacing(4)` write it). A `--radius` beside Tailwind's `radius-*` steps is shadcn/ui's base, and gives `radius-sm` to `radius-xl`.
+
+What the common systems need:
+- **MUI:** `name`, `components`, `package: "@mui/material"`. Its theme must be made with `createTheme({ cssVariables: true })`, or its colors and spacing are plain values with no tokens to offer.
+- **Chakra UI:** `name`, `components`, `package: "@chakra-ui/react"`. Props come from its recipes (`size`, `variant`); `colorPalette` shows as set, read-only.
+- **shadcn/ui:** `name` and `components` only, from the app's `components/ui`.
+- **Radix Themes:** `name`, `components`, `package`, and `propTypes` (below).
+- **Aegis:** the full example in the kit's `design-system.ts`.
+
+Check the result in the canvas: select a component and something the app built, and open its prop lists, Padding, Fill, and Text. Where it does not fit, read the system's docs and token files, and set:
+
 - `propTypes`: each component's props and values, when the declarations do not list them, as for a system that keeps them at runtime. Radix Themes, for one: map its `*PropDefs` (`@radix-ui/themes/components/button.props`) to `{ name, options, boolean, default }`.
-- `tokenPrefix` and `privateTokens`: which custom properties are the system's (`--aegis-`), and which of those are private (`-internal-`). Without a prefix, every custom property but the canvas's own is read.
+- `tokenPrefix` and `privateTokens`: which custom properties are the system's (`--aegis-`), and which of those are private (`-internal-`), when the package's name does not say.
 - `tokenLabel`: a token's name as the system's people write it, from its custom property. Default: without the prefix (`space-3`). Aegis writes dots: `space.medium`.
 - `tokenKinds`: regular expressions, matched against a name without `--`, for kinds whose names the defaults miss or catch too widely. Aegis names one component's tokens with the same words (`button.background.color`), so it pins its colors to `^aegis-color-foreground`, `^aegis-color-background`, `^aegis-color-border`.
 - `typographyAttribute`: the attribute its typography styles key on, if it has one (`data-aegis-typography`). Without one, type is read as font-size tokens.
