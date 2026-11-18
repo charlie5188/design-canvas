@@ -164,8 +164,17 @@ export const labels = {
   movedToTrash: (name: string) => `Moved ${name} to the trash`,
   trash: (n: number) => `Trash, ${n} item${n === 1 ? "" : "s"}`,
   trashHeading: "Trash",
-  trashHint: "Click an item to put it back",
+  trashCount: (n: number) => `${n} item${n === 1 ? "" : "s"}`,
+  trashToday: "Today",
+  trashYesterday: "Yesterday",
+  trashEarlier: "Earlier",
+  trashAll: "Back to all items",
+  trashPrevious: "Previous (←)",
+  trashNext: "Next (→)",
+  trashPosition: (n: number, of: number) => `${n} of ${of}`,
+  closeTrash: "Close",
   putBack: (name: string) => `Put back ${name}`,
+  putBackShort: "Put back",
   // The tool is a conversation with the agent, at the place the words are about:
   // a request for a change, or a question. "Ask" covers both, and names who answers.
   annotate: "Ask agent",

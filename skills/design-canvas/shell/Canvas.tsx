@@ -113,7 +113,7 @@ import { ToastView, useNotices, useOpeningChecks, writeClipboard } from "./Notic
 import { type Background, loadBackground, saveBackground, SettingsMenu } from "./Settings";
 import { ShareButton, SharePanel, useShare } from "./Share";
 import { type ThemeStore, useThemeId } from "./theme";
-import { TrashButton, TrashPopover, useTrash, useTrashList } from "./Trash";
+import { TrashButton, TrashDialog, useTrash, useTrashList } from "./Trash";
 import { type Box, type Guide, SNAP_DISTANCE, type Snap, snapBox } from "./snap";
 import { type CanvasItem, type CanvasNote, type CanvasSection, isSetAside } from "./types";
 import { DEFAULT_CAMERA, useCamera } from "./camera";
@@ -309,7 +309,7 @@ function CanvasBoard({
   // The trash (Trash.tsx): the items it holds are not on the canvas. Only the list is here,
   // since the rest of the board is built on which items are shown; moving items in and out is `useTrash`, below.
   const trashList = useTrashList(items, saved.trash, !!saved.camera);
-  const { ids: trash, idsRef: trashRef, kept: trashKept } = trashList;
+  const { ids: trash, idsRef: trashRef, kept: trashKept, times: trashTimes } = trashList;
   const shown = useMemo(() => items.filter((item) => !trash.includes(item.id)), [items, trash]);
   const shownIds = useMemo(() => new Set(shown.map((item) => item.id)), [shown]);
   // What an annotation can be on: a shown item, or a section (sectionKey).
@@ -341,6 +341,7 @@ function CanvasBoard({
         ids: trashRef.current,
         kept: [...trashKept.current],
         inRegistry: !shared,
+        at: trashTimes.current,
       }),
     [storageKey, theme],
   );
@@ -2176,6 +2177,7 @@ function CanvasBoard({
   );
   const {
     trashedItems,
+    times: trashedAt,
     open: trashOpen,
     setOpen: setTrashOpen,
     buttonRef: trashButtonRef,
@@ -4107,8 +4109,9 @@ function CanvasBoard({
         />
       )}
       {!shared && trashOpen && (
-        <TrashPopover
+        <TrashDialog
           items={trashedItems}
+          times={trashedAt.current}
           onClose={closeTrash}
           onPutBack={(item) => {
             setTrashOpen(false);

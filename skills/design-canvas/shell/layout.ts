@@ -13,10 +13,12 @@ export const ITEM_HEAD = 48;
  * the whole trash. `kept`: items the registry could not take, kept here instead.
  * `inRegistry`: this browser's trash has been written into the registry, so `ids`
  * is only its order. Without it, `ids` is a trash from an older shell, kept only
- * in the browser, to be written into the registry once.
+ * in the browser, to be written into the registry once. `at`: when this browser
+ * saw each item go to the trash, for the trash's "Today" and "Yesterday"; an item
+ * trashed elsewhere, or before the canvas kept the time, has none.
  */
-export type SavedTrash = { ids: string[]; kept: string[]; inRegistry: boolean };
-const NO_TRASH: SavedTrash = { ids: [], kept: [], inRegistry: false };
+export type SavedTrash = { ids: string[]; kept: string[]; inRegistry: boolean; at: Record<string, number> };
+const NO_TRASH: SavedTrash = { ids: [], kept: [], inRegistry: false, at: {} };
 
 // As low as Figma goes, so Fit all still takes in a canvas that grew wide over many rounds.
 export const ZOOM_MIN = 0.02;
@@ -106,6 +108,7 @@ export function loadLayout(
       trash?: unknown;
       trashKept?: unknown;
       trashInRegistry?: unknown;
+      trashAt?: unknown;
     };
     if (doc?.version !== VERSION) return { positions: {}, trash: NO_TRASH };
     const positions: Record<string, Position> = {};
@@ -122,7 +125,13 @@ export function loadLayout(
       Array.isArray(value)
         ? [...new Set(value.slice(0, MAX_POSITIONS).filter((id): id is string => typeof id === "string" && ids.has(id)))]
         : [];
-    const trash = { ids: idList(doc.trash), kept: idList(doc.trashKept), inRegistry: doc.trashInRegistry === true };
+    const at: Record<string, number> = {};
+    if (doc.trashAt && typeof doc.trashAt === "object") {
+      for (const [id, time] of Object.entries(doc.trashAt as Record<string, unknown>).slice(0, MAX_POSITIONS)) {
+        if (ids.has(id) && finite(time) && time > 0) at[id] = time;
+      }
+    }
+    const trash = { ids: idList(doc.trash), kept: idList(doc.trashKept), inRegistry: doc.trashInRegistry === true, at };
     return { camera: validCamera(doc.camera), positions, theme, trash };
   } catch {
     return { positions: {}, trash: NO_TRASH };
@@ -150,6 +159,7 @@ export function saveLayout(
       trash: trash.ids.length ? trash.ids : undefined,
       trashKept: trash.kept.length ? trash.kept : undefined,
       trashInRegistry: trash.inRegistry || undefined,
+      trashAt: Object.keys(trash.at).length ? trash.at : undefined,
     });
     if (doc.length <= MAX_DOCUMENT) window.localStorage.setItem(storageKey, doc);
   } catch {

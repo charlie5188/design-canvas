@@ -27,7 +27,7 @@ export function nestedCanScroll(target: EventTarget | null, stop: Element, dx: n
 }
 
 /** Canvas chrome: the item titles, toolbar, notices, and trash. Never previews. */
-export const CHROME = ".canvas-item-head, .canvas-toolbar, .canvas-toast, .canvas-trash-popover";
+export const CHROME = ".canvas-item-head, .canvas-toolbar, .canvas-toast, .canvas-trash";
 
 /** The link a plain click would follow, unless it belongs to the canvas chrome. */
 export function previewLink(event: MouseEvent): HTMLAnchorElement | null {
