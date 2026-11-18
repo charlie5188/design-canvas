@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { appendFileSync, cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -3417,7 +3417,28 @@ test('a shared file works from disk, frames included, without the agent tools', 
     .replace(/\];\s*$/, `${added}\n`)
     .replace('export const images: CanvasImage[] = [];', 'export const images: CanvasImage[] = [\n  { id: "ref", file: "ref.png", x: 400, y: 240, width: 120, height: 120 },\n];')
   expect(withImage).toContain('file: "ref.png"')
-  writeFileSync(`${copy}/registry.tsx`, withImage)
+  // And an item that loads a file from the app's public folder through a path helper that
+  // rejects anything but a root path, as apps with a base path do. Swapping the path in
+  // the code for the file made the helper throw and left the whole shared file blank.
+  const withLogo = withImage
+    .replace('import { Example } from "./items/Example";', 'import { Example } from "./items/Example";\nimport { Logo } from "./items/Logo";')
+    .replace(/\];\s*$/, '  { id: "logo", name: "Logo", component: Logo, x: 800, y: 0, width: 200, height: 120 },\n];\n')
+  expect(withLogo).toContain('component: Logo')
+  writeFileSync(`${copy}/registry.tsx`, withLogo)
+  writeFileSync(
+    `${copy}/items/Logo.tsx`,
+    'const withBase = (path: string) => {\n' +
+      '  if (!path.startsWith("/")) throw new Error(`withBase expects a root path, got ${path.slice(0, 30)}`);\n' +
+      '  return path;\n' +
+      '};\n' +
+      'const LOGO = withBase("/smoke-logo.png");\n' +
+      'export function Logo() {\n' +
+      '  return <img alt="Logo" src={LOGO} data-path={LOGO} />;\n' +
+      '}\n',
+  )
+  const hadPublic = existsSync('public')
+  mkdirSync('public', { recursive: true })
+  writeFileSync('public/smoke-logo.png', Buffer.from(DOT_PNG, 'base64'))
   mkdirSync(`${copy}/images`, { recursive: true })
   writeFileSync(`${copy}/images/ref.png`, Buffer.from(DOT_PNG, 'base64'))
   const folder = mkdtempSync(join(tmpdir(), 'design-canvas-share-'))
@@ -3435,6 +3456,10 @@ test('a shared file works from disk, frames included, without the agent tools', 
     const picture = page.locator('.canvas-image[data-canvas-image="ref"]')
     await expect.poll(() => picture.locator('img').evaluate((element: HTMLImageElement) => element.naturalWidth)).toBe(1)
     await expect(picture).not.toHaveAttribute('data-interactive')
+    // The public-folder file shows from inside the file, and the item's code still held its path.
+    const logo = page.locator('.canvas-item[data-canvas-item="logo"] img')
+    await expect(logo).toHaveAttribute('data-path', '/smoke-logo.png')
+    await expect.poll(() => logo.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBe(1)
     // A shared file is read-only: no trash to open and nothing to move into it.
     await expect(page.getByRole('button', { name: /^Trash/ })).toHaveCount(0)
     await page.getByRole('button', { name: /^More actions for / }).first().click()
@@ -3503,6 +3528,7 @@ test('a shared file works from disk, frames included, without the agent tools', 
     }
   } finally {
     rmSync(copy, { recursive: true, force: true })
+    rmSync(hadPublic ? 'public/smoke-logo.png' : 'public', { recursive: true, force: true })
   }
   expect(errors).toEqual([])
 })
