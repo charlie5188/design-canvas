@@ -8,6 +8,7 @@ export const labels = {
   changesBar: "Not sent to the agent yet",
   theme: "Theme",
   background: "Background",
+  canvasSettings: "Canvas settings",
   backgrounds: { default: "Default", white: "White", dark: "Dark" },
   help: "Canvas controls",
   /**
@@ -226,13 +227,13 @@ export const labels = {
   /** The first two files the shared file could not hold, and how many more. */
   sharedMissing: (missing: string[]) =>
     `Missing from the file: ${missing.slice(0, 2).join(", ")}${missing.length > 2 ? ` and ${missing.length - 2} more` : ""}`,
-  /** After a download: each way to pass the file on, and how. */
-  shareWays: [
-    ["Open", "Double-click it. No setup needed."],
-    ["Send", "Like any file: Slack, email, or Drive."],
-    ["Figma", "Drag it onto a canvas, then press play. Full screen works too."],
-    ["Notion", "Drag it into a page to embed it."],
-  ] as const,
+  /** The share panel, before the download. */
+  shareTitle: "Share as a file",
+  shareScope: "Share",
+  shareWhole: "Whole canvas",
+  shareCount: (n: number) => `${n} ${n === 1 ? "item" : "items"}`,
+  shareHint: "Opens in any browser. Drag it into Figma or Notion to embed it.",
+  shareDownload: "Download",
   shareFailed: (reason: string) => `Couldn't make the file: ${reason}`,
   agentFinished: "The agent finished",
   agentGoneQueued: (n: number) => `The agent stopped listening, so ${n} ${n === 1 ? "wasn't" : "weren't"} sent`,

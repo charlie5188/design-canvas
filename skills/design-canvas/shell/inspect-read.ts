@@ -18,20 +18,120 @@
 //   color scheme set by an ancestor changes them), then compared with its computed
 //   style. Tokens come from the installed package, never from a fixed list.
 
+import { THEME_PATH } from "./channel.ts";
+import type { PropType } from "./props-types.ts";
+
+/**
+ * A design system, as the canvas's Inspect tool reads it (design-system.ts in a kit). Only
+ * `name` and `components` are needed; the rest fits the reading to systems that differ from
+ * the defaults, and is best written by the agent that sets the canvas up, from the system's
+ * own docs and files.
+ */
 export type DesignSystem = {
   /** Shown in the panel, such as "Aegis". */
   name: string;
   /** The package's React exports, such as `import * as Aegis from "@legalforce/aegis-react"`. */
   components: Record<string, unknown>;
-  /** The prefix of its token custom properties, such as "--aegis-". */
-  tokenPrefix: string;
-  /** Token names that contain this are private and never shown, such as "-internal-". */
-  privateTokens?: string;
-  /** The attribute its typography styles key on, such as "data-aegis-typography". */
-  typographyAttribute?: string;
-  /** The package the components come from, such as "@legalforce/aegis-react": its types list each prop's values. */
+  /**
+   * The package the components come from: its type declarations list each prop's values, and its
+   * name the prefix of its tokens. Without one, props come from the `cva(...)` in the app's own
+   * source (shadcn/ui).
+   */
   package?: string;
+  /** The prefix of its token custom properties, such as "--aegis-". Default: the package's name when most custom properties carry it, else any. */
+  tokenPrefix?: string;
+  /** Token names that contain this, or match it, are private and never shown, such as "-internal-". */
+  privateTokens?: string | RegExp;
+  /** A token's name as its people write it, from its custom property. Default: without the prefix. */
+  tokenLabel?: (property: string) => string;
+  /** Which tokens are which kind, by name, where the defaults (KINDS) do not fit the system's naming. */
+  tokenKinds?: Partial<Record<TokenKind, RegExp>>;
+  /** The attribute its typography styles key on, such as "data-aegis-typography". Without one, type is read as font-size tokens. */
+  typographyAttribute?: string;
+  /**
+   * The system's tokens as a theme object, for a system whose styles carry its values but not
+   * their names (MUI without `cssVariables`, styled-components themes): `{ palette: theme.palette,
+   * shape: theme.shape, spacing: theme.spacing(1) }`. Each string is a token by its path
+   * (`palette.primary.main`); a number is a length in px where its path says so (`shape.borderRadius`).
+   * Given, these are the tokens, and custom properties are not read.
+   */
+  tokens?: Record<string, unknown>;
+  /**
+   * Each component's props and their values, where its type declarations cannot say: a system
+   * that keeps them at runtime (Radix Themes' prop definitions), say. Undefined for a component
+   * falls back to the declarations.
+   */
+  propTypes?: (component: string) => PropType[] | undefined;
 };
+
+/** The kinds of token a row offers. Lengths and colors are told apart by value; kinds, by name. */
+export type TokenKind = "space" | "radius" | "fontSize" | "text" | "fill" | "border";
+/**
+ * The names most systems give each kind, matched against a token's name without "--". A system
+ * whose names say none of these falls back to every length (or color) for that kind.
+ */
+const KINDS: Record<TokenKind, RegExp> = {
+  space: /(^|[-_.])(space|spacing|spacer|gap|gutter)([-_.]|$)/i,
+  radius: /radius|radii|rounded|corner/i,
+  fontSize: /font-?size|text-?size|(^|[-_.])text-(2xs|xs|sm|md|base|lg|[2-9]?xl|\d+)$/i,
+  text: /foreground|contrast-?text|(^|[-_.])(fg|text|ink|on)([-_.]|$)/i,
+  fill: /background|(^|[-_.])(bg|surface|fill|panel|canvas|base)([-_.]|$)/i,
+  border: /border|outline|divider|stroke|separator|ring/i,
+};
+/**
+ * Custom properties that are never a design system's tokens: the canvas's own, Tailwind's
+ * working values (`--tw-shadow`), and those of one component (a name part in PascalCase, as
+ * MUI's `--mui-palette-Tooltip-bg`).
+ */
+const NOT_TOKENS = /^--(canvas|section|fold|item|tw)-|-[A-Z][a-z]\w*(-|$)/;
+
+/**
+ * Where the system's tokens start. Its own `tokenPrefix`, else the package's name when most of
+ * the page's custom properties carry it (`--mui-`, `--chakra-`, `--aegis-`): the rest are then a
+ * component's working values (MUI's `--variant-containedBg`), not tokens. Else every name.
+ */
+const detected = new WeakMap<DesignSystem, { sheets: number; prefix: string }>();
+function prefixOf(system: DesignSystem) {
+  if (system.tokenPrefix !== undefined) return system.tokenPrefix;
+  const sheets = document.styleSheets.length;
+  let found = detected.get(system);
+  if (found?.sheets !== sheets) {
+    found = { sheets, prefix: detectPrefix(system) };
+    detected.set(system, found);
+  }
+  return found.prefix;
+}
+function detectPrefix(system: DesignSystem) {
+  const words = (system.package ?? "")
+    .toLowerCase()
+    .split(/[@/._-]+/)
+    .filter((word) => word.length > 2 && !/^(react|core|themes?|components?|design|system|web|lib|js|kit)$/.test(word));
+  if (!words.length) return "--";
+  const counts = new Map(words.map((word) => [word, 0]));
+  let total = 0;
+  const walk = (list: CSSRuleList) => {
+    for (const rule of Array.from(list)) {
+      if (rule instanceof CSSStyleRule) {
+        for (let i = 0; i < rule.style.length; i++) {
+          const name = rule.style[i]!;
+          if (!name.startsWith("--") || NOT_TOKENS.test(name)) continue;
+          total++;
+          for (const word of words) if (name.startsWith(`--${word}-`)) counts.set(word, counts.get(word)! + 1);
+        }
+      }
+      if ("cssRules" in rule && (rule as CSSGroupingRule).cssRules) walk((rule as CSSGroupingRule).cssRules);
+    }
+  };
+  for (const sheet of Array.from(document.styleSheets)) {
+    try {
+      walk(sheet.cssRules);
+    } catch {
+      // Another origin's stylesheet: not this page's tokens.
+    }
+  }
+  const [word, count] = [...counts].sort((a, b) => b[1] - a[1])[0]!;
+  return count > 0 && count >= total / 2 ? `--${word}-` : "--";
+}
 
 type Fiber = {
   tag: number;
@@ -137,10 +237,24 @@ function current(fiber: Fiber): Fiber {
   return a.tag === 3 && root?.current !== a ? alternate : fiber;
 }
 
-/** The first DOM element a component renders: the box it shows as. */
+/**
+ * The first DOM element a component renders: the box it shows as. In tree order, not only down
+ * the first child: a styled component (Emotion, in MUI and Chakra) renders a style helper that
+ * shows nothing before its element.
+ */
 function hostRoot(fiber: Fiber): Element | null {
-  for (let node = fiber.child, guard = 0; node && guard < 80; node = node.child, guard++) {
+  let node = fiber.child;
+  for (let guard = 0; node && guard < 400; guard++) {
     if (node.tag === HOST_COMPONENT && node.stateNode instanceof Element) return node.stateNode;
+    if (node.child) {
+      node = node.child;
+      continue;
+    }
+    while (node && !node.sibling) {
+      node = node.return;
+      if (!node || node === fiber) return null;
+    }
+    node = node?.sibling ?? null;
   }
   return null;
 }
@@ -206,15 +320,39 @@ const measured = { px: new Map<string, number>(), color: new Map<string, string>
 type TokenSet = { names: string[]; typography: string[]; rules: CSSStyleRule[] };
 let tokenCache: { key: string; set: TokenSet } | null = null;
 
+/**
+ * The Tailwind theme the app builds with (tailwind-theme.ts), by custom property: the page holds
+ * only the values its classes use, and the lists offer the rest too. Empty without Tailwind.
+ */
+const declaredTheme = new Map<string, string>();
+let themeRequest: Promise<void> | null = null;
+/** Asks the dev server for the app's Tailwind theme, once. Resolves when it is known. */
+export function loadTheme(): Promise<void> {
+  themeRequest ??= fetch(THEME_PATH)
+    .then((response) => (response.ok ? response.json() : { theme: {} }))
+    .then((body: { theme?: Record<string, string> }) => {
+      for (const [name, value] of Object.entries(body.theme ?? {})) declaredTheme.set(name, value);
+    })
+    .catch(() => {});
+  return themeRequest;
+}
+/** A token's value: as the element resolves it, else as the theme declares it (a value no class uses yet). */
+const valueOf = (style: CSSStyleDeclaration, name: string) => style.getPropertyValue(name).trim() || declaredTheme.get(name) || "";
+
 /** Every public token name, and every typography style, the page's stylesheets define. */
 function tokens(system: DesignSystem): TokenSet {
+  if (system.tokens) return themeTokens(system);
   // A stylesheet added or removed (a hot update) can change the set; the count is enough to notice.
-  const key = `${system.tokenPrefix}:${document.styleSheets.length}`;
+  const prefix = prefixOf(system);
+  const key = `${prefix}:${document.styleSheets.length}:${declaredTheme.size}`;
   if (tokenCache?.key === key) return tokenCache.set;
   const names = new Set<string>();
   const typography = new Set<string>();
   const rules: CSSStyleRule[] = [];
-  const uses = `var(${system.tokenPrefix}`;
+  const uses = `var(${prefix}`;
+  const hidden = system.privateTokens;
+  const isPrivate = (name: string) =>
+    NOT_TOKENS.test(name) || (typeof hidden === "string" ? !!hidden && name.includes(hidden) : !!hidden && hidden.test(name));
   const attribute = system.typographyAttribute;
   const pattern = attribute ? new RegExp(`\\[${attribute.replace(/[-]/g, "\\-")}=["']?([^"'\\]]+)["']?\\]`, "g") : null;
   const walk = (list: CSSRuleList) => {
@@ -222,7 +360,7 @@ function tokens(system: DesignSystem): TokenSet {
       if (rule instanceof CSSStyleRule) {
         for (let i = 0; i < rule.style.length; i++) {
           const name = rule.style[i]!;
-          if (name.startsWith(system.tokenPrefix) && !(system.privateTokens && name.includes(system.privateTokens))) names.add(name);
+          if (name.startsWith(prefix) && !isPrivate(name)) names.add(name);
         }
         if (pattern) for (const match of rule.selectorText.matchAll(pattern)) typography.add(match[1]!);
         if (rule.style.cssText.includes(uses)) rules.push(rule);
@@ -237,6 +375,16 @@ function tokens(system: DesignSystem): TokenSet {
       // A stylesheet from another origin cannot be read; it holds no tokens of this page.
     }
   }
+  // The theme's values no class uses yet. One that only names a token the page has (shadcn/ui's
+  // `--color-primary: var(--primary)`) is that token, not a second one.
+  for (const [name, value] of declaredTheme) {
+    const alias = /^var\((--[\w-]+)\)$/.exec(value)?.[1];
+    if (name.startsWith(prefix) && !isPrivate(name) && !(alias && names.has(alias))) names.add(name);
+  }
+  for (const name of names) {
+    const alias = /^var\((--[\w-]+)\)$/.exec(declaredTheme.get(name) ?? "")?.[1];
+    if (alias && names.has(alias) && !rules.some((rule) => rule.style.cssText.includes(`var(${name})`))) names.delete(name);
+  }
   const set = { names: [...names].sort(), typography: [...typography].sort(), rules };
   tokenCache = { key, set };
   measured.px.clear();
@@ -244,8 +392,45 @@ function tokens(system: DesignSystem): TokenSet {
   return set;
 }
 
-/** `--aegis-space-medium` → `space.medium`: the form the design system's code and docs use. */
-export const tokenLabel = (name: string, system: DesignSystem) => name.slice(system.tokenPrefix.length).replace(/-/g, ".");
+/** A theme object's token, by its path: `theme:palette.primary.main`. */
+const THEME = "theme:";
+/** Each theme token's value, as the system's `tokens` give it. */
+const themeValues = new Map<string, string>();
+let themeCache: { tokens: Record<string, unknown>; set: TokenSet } | null = null;
+// A number is a length only where its path says so: `shape.borderRadius` is, `action.hoverOpacity` is not.
+const LENGTH_PATH = /radius|spacing|space|gap|size|width|height/i;
+function themeTokens(system: DesignSystem): TokenSet {
+  const cached = themeCache;
+  if (cached && cached.tokens === system.tokens) return cached.set;
+  themeValues.clear();
+  const walk = (value: unknown, path: string[], depth: number) => {
+    if (depth > 6) return;
+    const key = THEME + path.join(".");
+    if (typeof value === "string") themeValues.set(key, value);
+    else if (typeof value === "number" && LENGTH_PATH.test(path.join("."))) themeValues.set(key, `${value}px`);
+    else if (value && typeof value === "object" && !Array.isArray(value))
+      for (const [name, inner] of Object.entries(value)) walk(inner, [...path, name], depth + 1);
+  };
+  walk(system.tokens, [], 0);
+  // The typography styles still come from the attribute, when the system has one.
+  const typography = system.typographyAttribute ? tokens({ ...system, tokens: undefined }).typography : [];
+  const set: TokenSet = { names: [...themeValues.keys()].sort(), typography, rules: [] };
+  themeCache = { tokens: system.tokens!, set };
+  return set;
+}
+
+/**
+ * A token's name as its people write it: the system's own form (tokenLabel), or without the
+ * prefix. A step of a base unit (see classify) is the unit's name and the step: `spacing 4`.
+ */
+export const tokenLabel = (name: string, system: DesignSystem): string => {
+  const step = /^calc\(var\((--[\w-]+)\) \* ([\d.]+)\)$/.exec(name);
+  if (step) return `${tokenLabel(step[1]!, system)} ${step[2]}`;
+  if (name.startsWith(THEME)) return DERIVED.get(name) ?? name.slice(THEME.length);
+  return DERIVED.get(name) ?? system.tokenLabel?.(name) ?? name.slice(prefixOf(system).length);
+};
+/** Values made from a token that have no token of their own (see classify), by their names. */
+const DERIVED = new Map<string, string>();
 
 export type Value = (
   /** A token: `name` as written in CSS, `token` as shown. `others`: tokens with the same value. */
@@ -261,9 +446,10 @@ export type Value = (
   property: string;
 };
 
-/** Which tokens a row's values can be: lengths, radii, the three kinds of color, or typography. */
-export type Category = "space" | "radius" | "text" | "fill" | "border" | "typography";
-export type Row = { label: string; category: Category; values: Value[] };
+/** Which tokens a row's values can be: a kind of token, or a typography style (by attribute). */
+export type Category = TokenKind | "typography";
+/** `common`: the start its kind's token names share, which its fields leave out (see shortName). */
+export type Row = { label: string; category: Category; values: Value[]; common?: string };
 
 /**
  * The element's styles that matter, each as tokens. Read-only (`all` false): only what is
@@ -271,13 +457,16 @@ export type Row = { label: string; category: Category; values: Value[] };
  * too (padding, margin, radius, fill), at 0 or none. A text row only for an element with text.
  */
 export function styleRows(element: Element, preview: Element, system: DesignSystem, all = false): Row[] {
-  const { names, typography, rules } = tokens(system);
+  const { typography, rules } = tokens(system);
   // Which rules match an element is asked again and again (each property, each ancestor, each alias): once per read.
   const matched = new Map<Element, CSSStyleRule[]>();
   const declared = (properties: string[], inherited = false) =>
-    declaredTokens(element, properties, rules, system.tokenPrefix, inherited, matched);
+    declaredTokens(element, properties, rules, prefixOf(system), inherited, matched);
   const style = getComputedStyle(element);
-  // Probes measure token values as the element would see them: under the app's providers,
+  const kinds = classify(element, system);
+  const { space, radius, fontSize } = kinds;
+  const kindOf = (kind: TokenKind) => (name: string) => ({ ...KINDS, ...system.tokenKinds })[kind].test(name.slice(2));
+  // Typography probes measure styles as the element would see them: under the app's providers,
   // which set scale and color scheme. Beside the preview, not in it: the panel watches the
   // preview for changes, and its own probes must not count as one (each read would start the
   // next, for as long as an element is selected). Added and removed in one go, so React never sees them.
@@ -286,46 +475,16 @@ export function styleRows(element: Element, preview: Element, system: DesignSyst
   probes.style.cssText = "position:absolute;visibility:hidden;pointer-events:none;inset:0 auto auto 0;contain:strict;width:0;height:0";
   (preview.parentElement ?? preview).append(probes);
   try {
-    const probe = document.createElement("div");
-    probes.append(probe);
-    // Each needs a style pass on the probe, and a design system has hundreds of colors: a raw
-    // value is measured once and remembered (cleared with the token set, on a stylesheet change).
-    const px = (raw: string) => {
-      if (/^-?[\d.]+px$/.test(raw)) return parseFloat(raw);
-      let value = measured.px.get(raw);
-      if (value === undefined) {
-        probe.style.paddingLeft = raw;
-        value = parseFloat(getComputedStyle(probe).paddingLeft);
-        probe.style.paddingLeft = "";
-        measured.px.set(raw, value);
-      }
-      return value;
-    };
-    const color = (raw: string) => {
-      let value = measured.color.get(raw);
-      if (value === undefined) {
-        probe.style.color = "";
-        probe.style.color = raw;
-        value = probe.style.color ? getComputedStyle(probe).color : "";
-        measured.color.set(raw, value);
-      }
-      return value;
-    };
-    // Each token's value as the selected element resolves it.
-    const resolved = (filter: (name: string) => boolean) =>
-      names.filter(filter).map((name) => ({ name, raw: style.getPropertyValue(name).trim() })).filter((t) => t.raw);
-
-    const lengthTokens = (word: string) => resolved((name) => name.includes(word)).map((t) => ({ ...t, px: px(t.raw) }));
-    const space = lengthTokens("-space-");
-    const radius = lengthTokens("-radius-");
-    const colors = resolved((name) => name.includes("-color-")).map((t) => ({ ...t, color: color(t.raw) }));
-
     // Several tokens can have one value. The one the code names comes first, then the
-    // one made for this kind of property, then the plainest name.
-    const pick = (same: { name: string }[], used: string[], prefer: string[], shown: string): Value => {
+    // one made for this kind of property, then one of the same family as the element's fill
+    // (`primary.contrastText` on `primary.main`: a theme without custom properties names
+    // nothing), then the plainest name.
+    const familyOf = (label: string) => label.split(/[-_.]/).slice(-2, -1)[0];
+    const pick = (same: { name: string }[], used: string[], prefer: (name: string) => boolean, shown: string, family?: string): Value => {
       const score = (name: string) =>
         (used.includes(name) ? 0 : 100) +
-        (prefer.some((word) => name.includes(word)) ? 0 : 10) +
+        (prefer(name) ? 0 : 10) +
+        (family && familyOf(tokenLabel(name, system)) !== family ? 3 : 0) +
         // A resting element rarely uses a state's token, even when the values agree.
         (STATES.test(name) ? 5 : 0) +
         (name.includes("default") ? 0 : 1) +
@@ -345,17 +504,17 @@ export function styleRows(element: Element, preview: Element, system: DesignSyst
       if (!Number.isFinite(value) || Math.abs(value) < 0.5) return { kind: "none", property };
       const same = scale.filter((t) => Math.abs(t.px - value) < 0.5);
       const shown = `${round(value)}px`;
-      if (same.length) return { ...pick(same, used, [], shown), property };
+      if (same.length) return { ...pick(same, used, () => true, shown), property };
       // Every token at the smallest distance: 14px is as near to 12px as to 16px.
       const distance = Math.min(...scale.map((t) => Math.abs(t.px - value)));
       const nearest = scale.filter((t) => Math.abs(Math.abs(t.px - value) - distance) < 0.5);
       return { kind: "off", value: shown, nearest: nearest.map((t) => ({ token: tokenLabel(t.name, system), value: `${round(t.px)}px` })), property };
     };
-    const paint = (raw: string, prefer: string[], used: string[], property: string): Value => {
-      const value = color(raw);
+    const paint = (raw: string, prefer: (name: string) => boolean, used: string[], property: string, family?: string): Value => {
+      const value = colorOf(raw);
       if (!value || /^rgba\(0, 0, 0, 0\)$|^transparent$/.test(value)) return { kind: "none", property };
-      const same = colors.filter((t) => t.color === value);
-      if (same.length) return { ...pick(same, used, prefer, hex(value)), property };
+      const same = kinds.colors.filter((t) => t.color === value);
+      if (same.length) return { ...pick(same, used, prefer, hex(value), family), property };
       return { kind: "off", value: hex(value), nearest: [], property };
     };
     // One value for four equal sides, one per axis for two pairs, else each side (each that is set, read-only).
@@ -375,17 +534,20 @@ export function styleRows(element: Element, preview: Element, system: DesignSyst
     const shows = (values: Value[]) => all || values.some((v) => v.kind !== "none");
 
     const rows: Row[] = [];
+    const fill = paint(style.backgroundColor, kindOf("fill"), declared(["background-color", "background"]), "background-color");
+    const family = fill.kind === "token" ? familyOf(fill.token) : undefined;
     const hasText =
       element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || textLooksLike(element, style);
     if (hasText) {
+      // Type: a typography style where the system keys them on an attribute, else its font-size tokens.
       if (typography.length) rows.push({ label: "Type", category: "typography", values: [typeStyle(element, style, typography, probes, system)] });
-      rows.push({ label: "Text", category: "text", values: [paint(style.color, ["foreground", "text"], declared(["color"], true), "color")] });
+      else if (fontSize.length) rows.push({ label: "Type", category: "fontSize", values: [length(style.fontSize, fontSize, "font-size", declared(["font-size", "font"], true))] });
+      rows.push({ label: "Text", category: "text", values: [paint(style.color, kindOf("text"), declared(["color"], true), "color", family)] });
     }
-    const fill = paint(style.backgroundColor, ["background", "surface", "fill"], declared(["background-color", "background"]), "background-color");
     if (shows([fill])) rows.push({ label: "Fill", category: "fill", values: [fill] });
     if (["Top", "Right", "Bottom", "Left"].some((side) => parseFloat(style.getPropertyValue(`border-${side.toLowerCase()}-width`)) > 0)) {
       const used = declared(["border-color", "border", "border-top-color", "border-top"]);
-      rows.push({ label: "Border", category: "border", values: [paint(style.borderTopColor, ["border"], used, "border-color")] });
+      rows.push({ label: "Border", category: "border", values: [paint(style.borderTopColor, kindOf("border"), used, "border-color")] });
     }
     // A radius is per corner, not per side or axis: one value, or each corner.
     const radii = [style.borderTopLeftRadius, style.borderTopRightRadius, style.borderBottomRightRadius, style.borderBottomLeftRadius];
@@ -411,6 +573,8 @@ export function styleRows(element: Element, preview: Element, system: DesignSyst
     }
     const margin = sides([style.marginTop, style.marginRight, style.marginBottom, style.marginLeft], space, "margin", declared(MARGIN));
     if (shows(margin)) rows.push({ label: "Margin", category: "space", values: margin });
+    // Each row's kind shares a start in its names (`color.foreground.`), which its fields leave out.
+    for (const row of rows) row.common = commonStart(kindList(kinds, row.category).map((t) => tokenLabel(t.name, system)));
     return rows;
   } finally {
     probes.remove();
@@ -486,18 +650,21 @@ function declaredTokens(
     }
     return list;
   };
-  /** What a declaration names. A component's own variable (`--aegis-internal-…`) is followed to the tokens it is set to. */
+  /**
+   * What a declaration names. A component's own variable (`--aegis-internal-…`, MUI's
+   * `--variant-containedColor`) is followed to the tokens it is set to.
+   */
   const named = (value: string, at: Element, depth: number): string[] =>
     [...value.matchAll(pattern)].flatMap((match) => {
       const name = match[1]!;
-      if (!name.startsWith(prefix)) return [];
-      if (depth > 3) return [name];
+      const token = name.startsWith(prefix) ? [name] : [];
+      if (depth > 3) return token;
       for (let scope: Element | null = at; scope; scope = scope.parentElement) {
         const own = scope instanceof HTMLElement ? scope.style.getPropertyValue(name) : "";
         const set = own || matching(scope).map((rule) => rule.style.getPropertyValue(name)).filter(Boolean).pop();
-        if (set) return [name, ...named(set, scope, depth + 1)];
+        if (set) return [...token, ...named(set, scope, depth + 1)];
       }
-      return [name];
+      return token;
     });
   for (let at: Element | null = element; at; at = inherited ? at.parentElement : null) {
     const found: string[] = [];
@@ -535,37 +702,239 @@ function textLooksLike(element: Element, style: CSSStyleDeclaration) {
   return inner.fontSize === style.fontSize && inner.fontWeight === style.fontWeight && inner.color === style.color;
 }
 
+// --- Token kinds --------------------------------------------------------------------------
+
+/**
+ * A token's name without the start every name of its kind shares, where the row already says the
+ * kind: `accent.blue.subtle` for `color.foreground.accent.blue.subtle` in Text, `small` for
+ * `space.small` in Padding. A bare number (`3` of `space-3`) keeps its whole name. The full name is
+ * the field's hint, and what the note for the agent says.
+ */
+export function shortName(label: string, common = "") {
+  const rest = common && label.startsWith(common) ? label.slice(common.length) : "";
+  return rest && !/^\d+(\.\d+)?$/.test(rest) ? rest : label;
+}
+
+/** The start all the names share, up to a separator (`.`, `-`, `_`): `color.foreground.`, `space-`. */
+function commonStart(labels: string[]) {
+  if (labels.length < 2) return "";
+  let start = labels[0]!;
+  for (const label of labels) while (!label.startsWith(start)) start = start.slice(0, -1);
+  const cut = Math.max(start.lastIndexOf("."), start.lastIndexOf("-"), start.lastIndexOf("_"));
+  return cut > 0 ? start.slice(0, cut + 1) : "";
+}
+
+type Length = { name: string; raw: string; px: number };
+type Paint = { name: string; raw: string; color: string };
+type Kinds = Record<TokenKind, Length[] | Paint[]> & { space: Length[]; radius: Length[]; fontSize: Length[]; text: Paint[]; fill: Paint[]; border: Paint[]; colors: Paint[] };
+
+/**
+ * The system's tokens as the element resolves them, sorted into kinds. A token is a color or a
+ * length by its value, whatever it is called; its kind, by its name (KINDS, or the system's own
+ * tokenKinds). A kind no name says falls back: every color for a color kind, every length that is
+ * not a radius or a type size for spacing, every length for radius.
+ */
+function classify(element: Element, system: DesignSystem): Kinds {
+  const { names } = tokens(system);
+  const style = getComputedStyle(element);
+  const lengths: Length[] = [];
+  const colors: Paint[] = [];
+  for (const name of names) {
+    const raw = name.startsWith(THEME) ? (themeValues.get(name) ?? "") : valueOf(style, name);
+    if (!raw) continue;
+    const color = colorOf(raw);
+    if (color) colors.push({ name, raw, color });
+    else {
+      const px = pxOf(raw);
+      if (Number.isFinite(px)) lengths.push({ name, raw, px });
+    }
+  }
+  const patterns = { ...KINDS, ...system.tokenKinds };
+  const says = (t: { name: string }, kind: TokenKind) =>
+    patterns[kind].test(t.name.startsWith(THEME) ? tokenLabel(t.name, system) : t.name.slice(2));
+  // A length whose name starts with the kind (`space.small`) is the system's own scale; others that
+  // only mention it (`button.column.gap`) belong to one component, so they count only when no
+  // name starts with it.
+  const sized = (kind: TokenKind) => {
+    const all = lengths.filter((t) => says(t, kind));
+    const leading = all.filter((t) => tokenLabel(t.name, system).search(patterns[kind]) === 0);
+    return leading.length ? leading : all;
+  };
+  let radius = sized("radius");
+  // A token named `radius` beside Tailwind's steps only (`radius-md`) is shadcn/ui's base: its
+  // theme makes `rounded-sm` to `rounded-xl` from it, and Tailwind keeps a token only for the
+  // steps the page uses. The others are made from the base, as the theme makes them.
+  const base = radius.find((t) => tokenLabel(t.name, system) === "radius");
+  const steps = radius.filter((t) => t !== base);
+  if (base && steps.every((t) => /^radius-(xs|sm|md|lg|[2-4]?xl)$/.test(tokenLabel(t.name, system)))) {
+    radius = RADII.map(([step, delta]) => {
+      const own = steps.find((t) => tokenLabel(t.name, system) === `radius-${step}`);
+      if (own) return own;
+      const name = `calc(var(${base.name}) ${delta < 0 ? "-" : "+"} ${Math.abs(delta)}px)`;
+      DERIVED.set(name, `radius-${step}`);
+      return { name, raw: name, px: base.px + delta };
+    });
+    radius.push(...steps.filter((t) => !radius.includes(t)));
+  }
+  const fontSize = sized("fontSize");
+  let space = sized("space");
+  // One spacing token is a base unit (Tailwind's `--spacing`, MUI's `--mui-spacing`): its steps
+  // are the scale, as `p-4` or `spacing(2)` write it.
+  if (space.length === 1 && /(^|[-_.])(spacing|space|unit)$/i.test(tokenLabel(space[0]!.name, system))) {
+    const unit = space[0]!;
+    space = STEPS.filter((n) => n * unit.px <= 128).map((n) => {
+      // A theme's unit has no custom property to refer to: its value stands in.
+      const name = unit.name.startsWith(THEME) ? `calc(${unit.raw} * ${n})` : `calc(var(${unit.name}) * ${n})`;
+      if (unit.name.startsWith(THEME)) DERIVED.set(name, `${tokenLabel(unit.name, system)} ${n}`);
+      return { name, raw: name, px: n * unit.px };
+    });
+  }
+  const paints = (kind: TokenKind) => {
+    const list = colors.filter((t) => says(t, kind));
+    // A color named for none of the three (a role, `primary`, `card`; a palette shade, `red-500`)
+    // can be a fill and a text color both, as Tailwind's `bg-primary` and `text-primary` are. It
+    // follows the colors named for the kind.
+    if ((kind === "fill" || kind === "text") && !system.tokenKinds?.[kind]) {
+      for (const t of colors) if (!list.includes(t) && !says(t, "text") && !says(t, "fill") && !says(t, "border")) list.push(t);
+    }
+    return list.length ? list : colors;
+  };
+  return {
+    space: space.length ? space : lengths.filter((t) => !radius.includes(t) && !fontSize.includes(t)),
+    radius: radius.length ? radius : lengths,
+    fontSize,
+    text: paints("text"),
+    fill: paints("fill"),
+    border: paints("border"),
+    colors,
+  };
+}
+/** The steps of a base unit offered for spacing: those Tailwind and MUI scales share. */
+const STEPS = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 20, 24, 28, 32];
+/** shadcn/ui's radii, from its theme: `--radius-md: calc(var(--radius) - 2px)` and so on. */
+const RADII: [string, number][] = [
+  ["sm", -4],
+  ["md", -2],
+  ["lg", 0],
+  ["xl", 4],
+];
+const kindList = (kinds: Kinds, category: Category): (Length | Paint)[] => (category === "typography" ? [] : kinds[category]);
+
+// Measuring a token's value takes a style pass, and a system has hundreds of tokens: each raw
+// value is measured once, on one hidden element outside every preview (its value is already the
+// element's own, so the place does not matter), and remembered until the stylesheets change.
+let meter: HTMLElement | null = null;
+const meterOf = () => {
+  if (!meter?.isConnected) {
+    meter = document.createElement("div");
+    meter.setAttribute(PROBE, "");
+    meter.style.cssText = "position:fixed;visibility:hidden;pointer-events:none;inset:0 auto auto 0;width:0;height:0;contain:strict";
+    document.body.append(meter);
+  }
+  return meter;
+};
+/** A length in px, or NaN for a value that is no length. */
+function pxOf(raw: string) {
+  if (/^-?[\d.]+px$/.test(raw)) return parseFloat(raw);
+  let value = measured.px.get(raw);
+  if (value === undefined) {
+    const probe = meterOf();
+    probe.style.paddingLeft = "";
+    probe.style.paddingLeft = raw;
+    value = probe.style.paddingLeft ? parseFloat(getComputedStyle(probe).paddingLeft) : NaN;
+    probe.style.paddingLeft = "";
+    measured.px.set(raw, value);
+  }
+  return value;
+}
+/** A color as computed, or "" for a value that is no color. */
+function colorOf(raw: string) {
+  let value = measured.color.get(raw);
+  if (value === undefined) {
+    const probe = meterOf();
+    probe.style.color = "";
+    probe.style.color = raw;
+    value = probe.style.color ? getComputedStyle(probe).color : "";
+    measured.color.set(raw, value);
+  }
+  return value;
+}
+
 // --- Editing ----------------------------------------------------------------------------
 
-/** `detail`: a length's value. `swatch`: a color as the element resolves it. */
-export type Choice = { value: string; label: string; short?: string; detail?: string; swatch?: string };
+/** `detail`: a length's value, and `px` the same as a number. `swatch`: a color as the element resolves it. */
+export type Choice = { value: string; label: string; short?: string; detail?: string; swatch?: string; px?: number };
+
+/**
+ * How big a size's name says it is: `xSmall` -2, `small` -1, `medium` 0, `large` 1, `2xl` 3,
+ * `x3Small` -4, `semiSmall` -0.5 (half a step toward medium), or a number's own value.
+ * `undefined` for any other name.
+ */
+export function sizeRank(name: string): number | undefined {
+  const word = name.toLowerCase().replace(/[-_\s]/g, "");
+  if (word && Number.isFinite(Number(word))) return Number(word);
+  if (/^(medium|md|m|base|regular|normal|default)$/.test(word)) return 0;
+  if (word === "none") return -1000;
+  if (word === "full") return 1000;
+  if (word.startsWith("semi") && word.length > 4) {
+    const rank = sizeRank(word.slice(4));
+    return rank === undefined || rank === 0 ? undefined : rank - Math.sign(rank) / 2;
+  }
+  const size = /^(?:(\d+)x|x(\d+)|(x*))(small|sm|s|large|lg|l)$/.exec(word);
+  if (!size) return undefined;
+  const steps = 1 + Number(size[1] ?? size[2] ?? size[3]!.length);
+  return size[4]!.startsWith("s") ? -steps : steps;
+}
+
+/**
+ * Biggest first, when every name says a size; else as they were. Lists of sizes read the
+ * way the arrow keys go: up is bigger, so the values beside the current one are one step
+ * either way (a library's own order can be `small | medium | xSmall`).
+ */
+export function bySize<T>(items: T[], name: (item: T) => string): T[] {
+  const ranks = items.map((item) => sizeRank(name(item)));
+  if (ranks.some((rank) => rank === undefined)) return items;
+  return items
+    .map((item, index) => ({ item, rank: ranks[index]! }))
+    .sort((a, b) => b.rank - a.rank)
+    .map(({ item }) => item);
+}
+
+/**
+ * Typography styles by role (`body`, `title`), biggest first in each, a weight
+ * (`body.large.bold`) right after its regular one.
+ */
+function typographyOrder(names: string[]) {
+  const keyed = names.map((name) => {
+    const parts = name.split(".");
+    let at = parts.length - 1;
+    while (at >= 0 && sizeRank(parts[at]!) === undefined) at--;
+    return at < 0
+      ? { name, role: name, rank: 0, rest: "" }
+      : { name, role: parts.slice(0, at).join("."), rank: sizeRank(parts[at]!)!, rest: parts.slice(at + 1).join(".") };
+  });
+  return keyed
+    .sort((a, b) => a.role.localeCompare(b.role) || b.rank - a.rank || a.rest.localeCompare(b.rest))
+    .map(({ name }) => name);
+}
 
 /**
  * What a row can be set to: the tokens of its kind, as the element resolves them, with
- * their values, smallest first for lengths. A state's color (hovered, pressed) is left out:
- * it belongs to the component that has the state.
+ * their values, biggest first for lengths (see bySize). A state's color (hovered, pressed)
+ * is left out: it belongs to the component that has the state.
  */
 export function choices(element: Element, system: DesignSystem, category: Category): Choice[] {
-  const { names, typography } = tokens(system);
-  if (category === "typography") return typography.map((name) => ({ value: name, label: name }));
-  const style = getComputedStyle(element);
-  const word = { space: "-space-", radius: "-radius-", text: "-color-foreground-", fill: "-color-background-", border: "-color-border-" }[category];
-  const list = names
-    .filter((name) => name.includes(word) && !STATES.test(name))
-    .map((name) => ({ name, raw: style.getPropertyValue(name).trim() }))
-    .filter((t) => t.raw);
-  if (category === "space" || category === "radius") {
-    return list
-      .map((t) => ({ ...t, px: parseFloat(t.raw) * (t.raw.endsWith("rem") ? 16 : 1) }))
-      .sort((a, b) => a.px - b.px)
-      .map((t) => ({ value: t.name, label: tokenLabel(t.name, system), detail: `${round(t.px)}px` }));
-  }
-  // In the list, a color goes by what follows its kind (`accent.blue.subtle`): the row already says which kind.
-  const kind = tokenLabel(`${system.tokenPrefix}${word.slice(1)}`, system);
-  return list.map((t) => {
-    const label = tokenLabel(t.name, system);
-    return { value: t.name, label, short: label.startsWith(kind) ? label.slice(kind.length) : label, swatch: t.raw };
-  });
+  if (category === "typography") return typographyOrder(tokens(system).typography).map((name) => ({ value: name, label: name }));
+  const list = kindList(classify(element, system), category).filter((t) => !STATES.test(t.name));
+  const common = commonStart(list.map((t) => tokenLabel(t.name, system)));
+  return list
+    .map((t) => ({ t, label: tokenLabel(t.name, system) }))
+    .sort((a, b) => ("px" in a.t && "px" in b.t ? b.t.px - a.t.px : 0))
+    .map(({ t, label }) =>
+      "px" in t
+        ? { value: t.name, label, short: shortName(label, common), detail: `${round(t.px)}px`, px: t.px }
+        : { value: t.name, label, short: shortName(label, common), swatch: t.raw },
+    );
 }
 
 /**
@@ -583,7 +952,15 @@ export function showStyle(element: Element, property: string, value: string, sys
     return before;
   }
   const before = element.style.getPropertyValue(property);
-  if (value) element.style.setProperty(property, value.startsWith("--") ? `var(${value})` : value);
+  // A theme value no class uses has no custom property on the page: its value stands in.
+  const css = value.startsWith("--")
+    ? getComputedStyle(element).getPropertyValue(value).trim()
+      ? `var(${value})`
+      : (declaredTheme.get(value) ?? "")
+    : value.startsWith(THEME)
+      ? (themeValues.get(value) ?? "")
+      : value;
+  if (css) element.style.setProperty(property, css);
   else element.style.removeProperty(property);
   return before;
 }

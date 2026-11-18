@@ -38,11 +38,18 @@ Public variables (`NEXT_PUBLIC_*`, `VITE_*`) from the app's `.env` files reach t
 
 ## 6. Framework-only modules
 
-For Next.js apps, `next/link`, `next/image`, `next/navigation`, and `next/font` are swapped for stand-ins in `mocks/` automatically. Router calls such as `router.push` stay on the canvas with a notice.
+For Next.js apps these are swapped for the shell's stand-ins (`canvas/stand-ins/`) automatically, also in a canvas installed before them once it is updated:
+- `next/link`, `next/image`, `next/navigation` (with the query and `[param]` values of the item's screen), `next/dynamic`, `next/script`, and `next/head`.
+- `next/cache`, `next/headers`, and `server-only`, which do nothing on the canvas.
+- A file that starts with `"use server"`: each server action in it becomes a stand-in that saves nothing and resolves after a moment, so a client component that calls one (a form's `action`, a button's handler) still renders and shows its pending state.
 
-These cannot run on the canvas: server components, server actions, `next/headers`, `cookies()`, and route handlers. Render the client component beneath them and pass it props.
+Router calls such as `router.push` stay on the canvas with a notice.
 
-Other frameworks (React Router framework mode, Remix, Gatsby, Expo web): alias each framework-only module to a small mock in `mocks/` the same way. To make a mocked navigation stay on the canvas, dispatch `design-canvas:navigate` with the URL as `detail`, as `mocks/next-navigation.ts` does.
+A page that is a server component (an `async` page that loads its own data, `next/headers`, `cookies()`, route handlers) cannot render on the canvas. Put its few lines of page markup in the item, around the client components beneath it, and pass them the data as props from a file in the canvas folder (`items/contracts-data.ts`). Do not import the page itself.
+
+For React Router (6 or later) the installer gives each item its own router, driven by the canvas (`canvas/stand-ins/react-router.tsx`, set in `providers.tsx`): `<Link>`, `NavLink`, `useNavigate`, `useParams`, `useSearchParams`, and `useLocation` work, so a page component can be an item as it is. A data router's loaders and actions (`useLoaderData`, `useActionData`) do not run, since they reach the backend: render the component beneath them and pass the data as props, as for a Next.js server page.
+
+Other frameworks (Remix, Gatsby, Expo web): alias each framework-only module to a small mock in `mocks/` the same way (an alias of yours wins over a shell stand-in for the same module). To make a mocked navigation stay on the canvas, dispatch `design-canvas:navigate` with the URL as `detail`, as `canvas/stand-ins/next-navigation.ts` does.
 
 ## 7. Themes
 
@@ -56,14 +63,35 @@ Map the `--canvas-*` tokens in `theme.css` to the app's tokens so the canvas chr
 
 ## 7a. Design system (Inspect)
 
-The Inspect tool appears only when `design-system.ts` describes the app's design system. Fill it in when the app uses one:
+The Inspect tool appears only when `design-system.ts` describes the app's design system. Leave `designSystem` undefined when the app has none. Two or three fields are enough for most systems:
 
-- `components`: the package's React exports (`import * as Aegis from "@legalforce/aegis-react"`).
-- `package`: the package name. The dev server reads its type declarations to list each prop's values.
-- `tokenPrefix`: the prefix of its token custom properties (`--aegis-`), and `privateTokens` for names that are not public (`-internal-`).
-- `typographyAttribute`: the attribute its typography styles use, if it has one (`data-aegis-typography`).
+- `name`: shown in the panel.
+- `components`: the system's React components by name. For a package, its exports (`import * as Mui from "@mui/material"`). For components copied into the app, as shadcn/ui does, the app's own: `{ Button, Badge, ...CardParts }` from `src/components/ui`.
+- `package`: the package name, when there is one. The dev server reads its type declarations to list each prop's values (`variant: text | outlined | contained`).
 
-Leave `designSystem` undefined when the app has no design system.
+Without `package`, the dev server looks for each component in the app's source, and reads its props from the `cva(...)` call that builds its class names (`variant`, `size`, and their `defaultVariants`).
+
+The canvas then finds the tokens on its own:
+- Every custom property in the page's stylesheets is a color or a length by its value, and its kind by common names (`space`, `spacing`, `gap`; `radius`, `rounded`; `font-size`; `foreground`, `fg`, `contrastText`; `bg`, `surface`; `border`, `ring`). A color named for neither text nor border is a fill too, as `primary` and `muted` are in shadcn/ui.
+- When most custom properties start with the package's name (`--mui-`, `--chakra-`), only those are tokens; the rest are components' working values. Tailwind's `--tw-*` and names with a component in them (`--mui-palette-Tooltip-bg`) are never tokens.
+- A single spacing token is a base unit (Tailwind's `--spacing`, MUI's `--mui-spacing`): its steps are the scale (`spacing 4`, as `p-4` or `spacing(4)` write it). A `--radius` beside Tailwind's `radius-*` steps is shadcn/ui's base, and gives `radius-sm` to `radius-xl`.
+- In a Tailwind app, the dev server reads the whole theme: Tailwind's defaults and the app's `@theme` blocks. The lists then hold every color and size, also those no class uses yet; a preview of one of those uses its value.
+
+What the common systems need:
+- **MUI:** `name`, `components`, `package: "@mui/material"`. When its theme is made with `createTheme({ cssVariables: true })`, the tokens are its custom properties. Without it, add `tokens: { palette: theme.palette, shape: theme.shape, spacing: theme.spacing(1) }` from the app's theme.
+- **Chakra UI:** `name`, `components`, `package: "@chakra-ui/react"`. Props come from its recipes (`size`, `variant`), and each component with a recipe offers `colorPalette`.
+- **shadcn/ui:** `name` and `components` only, from the app's `components/ui`.
+- **Radix Themes:** `name`, `components`, `package`, and `propTypes` (below).
+- **Aegis:** the full example in the kit's `design-system.ts`.
+
+Check the result in the canvas: select a component and something the app built, and open its prop lists, Padding, Fill, and Text. Where it does not fit, read the system's docs and token files, and set:
+
+- `propTypes`: each component's props and values, when the declarations do not list them, as for a system that keeps them at runtime. Radix Themes, for one: map its `*PropDefs` (`@radix-ui/themes/components/button.props`) to `{ name, options, boolean, default }`.
+- `tokenPrefix` and `privateTokens`: which custom properties are the system's (`--aegis-`), and which of those are private (`-internal-`), when the package's name does not say.
+- `tokenLabel`: a token's name as the system's people write it, from its custom property. Default: without the prefix (`space-3`). Aegis writes dots: `space.medium`.
+- `tokenKinds`: regular expressions, matched against a name without `--`, for kinds whose names the defaults miss or catch too widely. Aegis names one component's tokens with the same words (`button.background.color`), so it pins its colors to `^aegis-color-foreground`, `^aegis-color-background`, `^aegis-color-border`.
+- `typographyAttribute`: the attribute its typography styles key on, if it has one (`data-aegis-typography`). Without one, type is read as font-size tokens.
+- `tokens`: the tokens as a theme object, for a system whose styles carry its values but not their names (MUI without `cssVariables`, a styled-components theme). Each string is a token by its path (`palette.primary.main`); a number is a length in px where its path says so (`shape.borderRadius`). Given, these are the tokens, and custom properties are not read.
 
 ## 8. Fonts
 
@@ -76,6 +104,7 @@ Files in the app's `public/` folder are served from `/`, as in the app. Imported
 ## 10. Check
 
 - Typecheck: `npx tsc --noEmit -p design-canvas/<name>/tsconfig.json`.
+- The app's own checks still pass: its type check, lint, or build (`next build`). If they read the canvas folder, ask the user to leave it out (the installer says how).
 - The console shows no errors, and one item matches the app side by side. Compare it as "Match the current product first" in `SKILL.md` says. A difference in type, color, or spacing usually means a step above is not done yet, most often fonts or global styles.
 
 ## Save the fit as a private kit

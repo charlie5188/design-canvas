@@ -104,3 +104,19 @@ if [[ "$tailwind_version" =~ ^[^0-9]*4 ]] &&
     note "Tailwind 4 builds outside PostCSS here. Ask the user before adding the canvas build plugin with: npm i -D @tailwindcss/vite@${installed:-4}"
   fi
 fi
+
+# The app's own checks must leave the canvas out (scripts/check-app.mjs says why and how).
+parent="$(rel "$(dirname "$CANVAS_DIR")" "$APP_DIR")"
+node "$(dirname "${BASH_SOURCE[0]}")/../../scripts/check-app.mjs" "$APP_DIR" "${parent%%/*}" | while IFS= read -r line; do if [[ -n "$line" ]]; then note "$line"; fi; done
+
+# React Router (6 or later): its <Link> and hooks need a router around each screen. The shell's
+# stand-in drives one per item from the canvas (canvas/stand-ins/react-router.tsx); providers.tsx sets it.
+router_pkg="$(node -e 'const p = require(process.argv[1]); const d = { ...p.devDependencies, ...p.dependencies }; for (const name of ["react-router", "react-router-dom"]) { const v = String(d[name] || "").replace(/[^0-9.]/g, ""); if (v && Number(v.split(".")[0]) >= 6) { console.log(name); break; } }' "$APP_DIR/package.json")"
+if [[ -n "$router_pkg" ]]; then
+  if grep -q 'return <>{children}</>;' "$CANVAS_DIR/providers.tsx"; then
+    perl -0pi -e 's|(import "\./theme\.css";\n)|$1import { ScreenRouter } from "./canvas/routes";\nimport { CanvasRouter } from "./canvas/stand-ins/react-router";\n|; s|return <>\{children\}</>;|// Each item gets its own router, driven by the canvas (canvas/stand-ins/react-router.tsx).\n  return <ScreenRouter.Provider value={CanvasRouter}>{children}</ScreenRouter.Provider>;|' "$CANVAS_DIR/providers.tsx"
+    note "found $router_pkg; each item gets a router driven by the canvas (canvas/stand-ins/react-router.tsx)"
+  else
+    note "found $router_pkg; set ScreenRouter to CanvasRouter in providers.tsx (see canvas/stand-ins/react-router.tsx)"
+  fi
+fi

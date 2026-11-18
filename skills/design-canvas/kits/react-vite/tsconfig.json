@@ -5,5 +5,7 @@
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "include": ["./**/*.ts", "./**/*.mts", "./**/*.tsx"]
+  "include": ["./**/*.ts", "./**/*.mts", "./**/*.tsx"],
+  // Its own list, not the app's: the app leaves the canvas folder out of its own checks.
+  "exclude": ["./node_modules"]
 }

@@ -39,7 +39,7 @@ body,
   --canvas-fast: 120ms;
   --canvas-slow: 200ms;
 }
-/* A background the viewer chose for the board (BackgroundPicker in Canvas.tsx).
+/* A background the viewer chose for the board (SettingsMenu in Canvas.tsx).
    Each preset brings a whole set of chrome colors, so the words on the board and
    the bars over it stay readable on it, whatever the project's theme is. */
 .canvas-root[data-background="white"] {
@@ -445,9 +445,10 @@ body,
   pointer-events: none;
 }
 /* Fixed controls in four groups, each where a design tool puts it: tools at the
-   bottom centre, the view bottom right, trash bottom left, the file's own
-   controls top right, and the changes waiting for the agent top centre. Notices
-   sit just above the tools. */
+   bottom centre, the view bottom right, and the file's own controls (trash,
+   share, settings, help) top right. The bottom holds only controls. What the canvas tells the
+   person is at the top centre (.canvas-messages): the changes waiting for the
+   agent, and notices. */
 .canvas-toolbar,
 .canvas-toast {
   position: fixed;
@@ -460,24 +461,47 @@ body,
   background: var(--canvas-surface-color);
   box-shadow: var(--canvas-shadow-raised);
 }
+/* Above the Inspect panel (z-index 5), so a bar's hints and menus (help, settings) that open
+   over the panel are never hidden under it, nor under a list the panel opens. */
 .canvas-toolbar {
-  z-index: 5;
+  z-index: 6;
   inset-block-end: 16px;
 }
-.canvas-toolbar[data-place="tools"],
-.canvas-toolbar[data-place="pending"] {
+.canvas-toolbar[data-place="tools"] {
   inset-inline-start: 50%;
   translate: -50% 0;
 }
 .canvas-toolbar[data-place="view"] {
   inset-inline-end: 16px;
 }
-.canvas-toolbar[data-place="trash"] {
-  inset-inline-start: 16px;
-}
-.canvas-toolbar[data-place="top"],
-.canvas-toolbar[data-place="pending"] {
+.canvas-toolbar[data-place="top"] {
   inset-block: 16px auto;
+}
+/* The canvas speaks in one place, the top centre: the changes waiting for the agent, and
+   under them a notice for a few seconds ("Copied 2 for the agent", "Moved … to the trash ·
+   Undo"). A notice often answers the bar ("1 isn't sent yet" points at Copy), so the bar
+   stays and the notice takes the row under it; with no bar, the notice takes its place. */
+.canvas-messages {
+  position: fixed;
+  z-index: 6;
+  inset-block-start: 16px;
+  inset-inline-start: 50%;
+  translate: -50% 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  inline-size: max-content;
+  max-inline-size: calc(100vw - 32px);
+  /* Only its bars take the pointer, not the room between them. */
+  pointer-events: none;
+}
+.canvas-messages > .canvas-toolbar,
+.canvas-messages > .canvas-toast {
+  position: relative;
+  inset: auto;
+  translate: none;
+  pointer-events: auto;
 }
 .canvas-toolbar[data-place="top"] {
   inset-inline-end: 16px;
@@ -489,14 +513,16 @@ body,
 .canvas-toolbar[data-place="top"] [data-tip]:focus-visible::after {
   inset-inline: auto 0;
 }
-.canvas-toolbar[data-place="top"] .canvas-icon-button[data-tip]::after,
+.canvas-toolbar[data-place="top"] [data-tip]::after,
 .canvas-toolbar[data-place="pending"] [data-tip]::after {
   inset-block: calc(100% + 8px) auto;
 }
+/* Alone, as on an item's own page, a notice sits at the top centre too. */
 .canvas-toast {
+  z-index: 6;
   inset-inline-start: 50%;
   translate: -50% 0;
-  inset-block-end: 68px;
+  inset-block-start: 16px;
   gap: 8px;
   padding: 6px 12px;
   /* The canvas's size, also on an item's own page, which leaves the app's text size alone. */
@@ -699,17 +725,14 @@ body,
   margin: 16px;
   font-size: 14px;
 }
-/* Narrow windows: the view stacks above the tools, the waiting changes drop under
-   the top bar, and notices clear both. */
+/* Narrow windows: the view stacks above the tools, and the waiting changes and
+   notices drop under the top bar. */
 @media (max-width: 640px) {
   .canvas-toolbar[data-place="view"] {
     inset-block-end: 64px;
   }
-  .canvas-toolbar[data-place="pending"] {
+  .canvas-messages {
     inset-block-start: 64px;
-  }
-  .canvas-toast {
-    inset-block-end: 116px;
   }
 }
 /* Narrower still keeps every control; the text labels go first. */
@@ -1103,23 +1126,29 @@ html[data-canvas-alt] .canvas-frame-root * {
   inline-size: 360px;
   user-select: all;
 }
-/* Trash: opens above the toolbar like a Dock stack. Each entry is a live,
-   scaled-down preview of the trashed item with its name; the whole entry puts
-   it back. */
+/* Trash: opens under its button in the top bar, where the share panel opens. Each
+   entry is a live, scaled-down preview of the trashed item with its name; the whole
+   entry puts it back. */
 /* Its hint would sit on the open trash. */
 .canvas-trash-button[aria-expanded="true"]::after {
   content: none;
 }
+.canvas-trash-popover,
+.canvas-share-popover {
+  /* Over the Inspect panel (z-index 5), which takes the same corner. */
+  z-index: 6;
+}
 .canvas-trash-popover {
   position: fixed;
-  inset-block-end: 64px;
-  inset-inline-start: 16px;
+  inset-block-start: 64px;
+  inset-inline-end: 16px;
   display: flex;
   flex-direction: column;
   gap: 8px;
   box-sizing: border-box;
   max-inline-size: calc(100vw - 32px);
-  max-block-size: min(480px, calc(100vh - 96px));
+  /* Clear of the bars at the bottom. */
+  max-block-size: min(480px, calc(100vh - 64px - 76px));
   padding: 10px;
   border: 1px solid var(--canvas-border-color);
   border-radius: var(--canvas-radius-l);
@@ -1222,22 +1251,23 @@ html[data-canvas-alt] .canvas-frame-root * {
   }
 }
 
-/* After Share: the file's name and the ways to pass it on, under the Share button. */
+/* Share: what goes in the file, under the Share button, before it downloads. */
 .canvas-share-popover {
   position: fixed;
   inset-block-start: 64px;
   inset-inline-end: 16px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   box-sizing: border-box;
-  inline-size: min(400px, calc(100vw - 32px));
+  inline-size: min(360px, calc(100vw - 32px));
   padding: 10px 10px 14px 16px;
   border: 1px solid var(--canvas-border-color);
   border-radius: var(--canvas-radius-l);
   background: var(--canvas-surface-color);
   box-shadow: var(--canvas-shadow-overlay);
   color: var(--canvas-text-color);
+  font-size: 14px;
 }
 .canvas-share-head {
   display: flex;
@@ -1249,27 +1279,61 @@ html[data-canvas-alt] .canvas-frame-root * {
   font-weight: 600;
   overflow-wrap: anywhere;
 }
-.canvas-share-missing {
-  margin: 0;
+/* A label column, then the field. */
+.canvas-share-row {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding-inline-end: 6px;
+}
+.canvas-share-label {
   color: var(--canvas-subtle-color);
   font-size: 13px;
-  overflow-wrap: anywhere;
 }
-.canvas-share-ways {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
+.canvas-share-select {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-inline-size: 0;
 }
-.canvas-share-ways li {
-  display: grid;
-  grid-template-columns: 52px 1fr;
-  gap: 8px;
-  line-height: 1.4;
+.canvas-share-select select {
+  appearance: none;
+  inline-size: 100%;
+  block-size: 30px;
+  padding: 0 28px 0 10px;
+  border: 0;
+  border-radius: var(--canvas-radius-m);
+  background: var(--canvas-hover-color);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  cursor: pointer;
 }
-.canvas-share-way {
+.canvas-share-select select:focus-visible {
+  outline: 2px solid var(--canvas-focus-color);
+  outline-offset: 1px;
+}
+.canvas-share-select svg {
+  position: absolute;
+  inset-inline-end: 8px;
+  inline-size: 14px;
+  block-size: 14px;
   color: var(--canvas-subtle-color);
+  pointer-events: none;
+}
+.canvas-share-hint {
+  margin: 0;
+  padding-inline-end: 6px;
+  color: var(--canvas-subtle-color);
+  font-size: 13px;
+  text-wrap: pretty;
+}
+/* Last in the panel, the width of the panel's content. */
+.canvas-share-download {
+  justify-content: center;
+  margin-inline-end: 6px;
 }
 
 /* Notes and sections.
@@ -2308,9 +2372,18 @@ html[data-canvas-alt] .canvas-frame-root * {
 .canvas-trash-popover,
 .canvas-share-popover,
 .canvas-help-popover,
-.canvas-item-menu,
-.canvas-toast {
+.canvas-item-menu {
   animation: canvas-rise-in var(--canvas-slow) var(--canvas-ease);
+}
+/* A notice comes down from the top, where it shows. */
+.canvas-toast {
+  animation: canvas-drop-in var(--canvas-slow) var(--canvas-ease);
+}
+@keyframes canvas-drop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
 }
 /* The note for the agent only fades: it opens at its pin, which has just grown from the
    point, and the person may take hold of it at once. */
@@ -2393,11 +2466,12 @@ html[data-canvas-alt] .canvas-frame-root * {
   z-index: 5;
   display: flex;
   flex-direction: column;
-  /* As tall as its content, down to the window's bottom margin; as wide as its left edge was dragged. */
+  /* As tall as its content, down to just above the view controls, which stay where they always
+     are; as wide as its left edge was dragged. */
   inset-block-start: 64px;
   inset-inline-end: 16px;
-  inline-size: var(--canvas-inspect-width, 272px);
-  max-block-size: calc(100% - 64px - 16px);
+  inline-size: var(--canvas-inspect-width, 300px);
+  max-block-size: calc(100% - 64px - 68px);
   box-sizing: border-box;
   overflow: hidden;
   border: 1px solid var(--canvas-border-color);
@@ -2405,6 +2479,9 @@ html[data-canvas-alt] .canvas-frame-root * {
   background: var(--canvas-surface-color);
   box-shadow: var(--canvas-shadow-raised);
   font: 12px/1.4 var(--canvas-font, system-ui, -apple-system, "Segoe UI", sans-serif);
+  /* Sizes and px values keep their place as they change. */
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
 }
 .canvas-inspect-empty {
   margin: 0;
@@ -2442,7 +2519,7 @@ html[data-canvas-alt] .canvas-frame-root * {
   font-weight: 600;
 }
 .canvas-inspect-section {
-  padding: 10px 12px 12px;
+  padding: 10px 12px 14px;
 }
 .canvas-inspect-section + .canvas-inspect-section {
   border-block-start: 1px solid var(--canvas-border-color);
@@ -2461,44 +2538,58 @@ html[data-canvas-alt] .canvas-frame-root * {
 .canvas-inspect-section p {
   margin: 0;
 }
+/* Rows as in a design tool's inspector: a label column, and fields that fill the rest, so
+   values line up in one column whatever their length. */
 .canvas-inspect-rows {
   display: grid;
-  gap: 6px;
+  gap: 4px;
   margin: 0;
 }
 .canvas-inspect-rows > div {
+  position: relative;
   display: grid;
-  grid-template-columns: 64px minmax(0, 1fr);
-  align-items: baseline;
+  grid-template-columns: 72px minmax(0, 1fr);
+  align-items: center;
   gap: 8px;
+  min-block-size: 26px;
 }
 .canvas-inspect-rows dt {
+  overflow: hidden;
   color: var(--canvas-subtle-color);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .canvas-inspect-rows dd {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 4px;
   margin: 0;
   min-inline-size: 0;
 }
-/* Token names can be long (color.background.accent.yellow.subtle): they wrap rather than hide their end. */
-.canvas-inspect-value {
-  max-inline-size: 100%;
-  padding: 2px 6px;
-  border-radius: var(--canvas-radius-s);
-  background: var(--canvas-hover-color);
-  overflow-wrap: break-word;
+/* Two values share the row; four (one per side or corner) go two by two. */
+.canvas-inspect-rows dd > .canvas-inspect-pick,
+.canvas-inspect-rows dd > .canvas-inspect-select {
+  flex: 1 1 0;
 }
-/* A value outside the design system: the same amber the sections use for "set aside". */
-.canvas-inspect-value[data-off] {
-  background: color-mix(in srgb, #b87c00 14%, transparent);
-  color: color-mix(in srgb, #b87c00 70%, var(--canvas-text-color));
+.canvas-inspect-rows dd[data-count="4"] > * {
+  flex-basis: calc(50% - 2px);
 }
-/* The selected element, outlined on itself so the outline follows every camera move. */
-[data-canvas-inspected] {
-  outline: 2px solid var(--canvas-focus, #2f6fed) !important;
-  outline-offset: 1px !important;
+/* Fields that share a row are narrow: no arrow, so the value has the room (the field still opens). */
+.canvas-inspect-rows dd[data-count]:not([data-count="1"]) .canvas-inspect-select > svg {
+  display: none;
+}
+/* A changed row: a dot in the margin before its label, which moves nothing. */
+.canvas-inspect-rows > div[data-changed]::before {
+  content: "";
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: -9px;
+  inline-size: 5px;
+  block-size: 5px;
+  border-radius: 50%;
+  background: var(--canvas-focus-color);
+  translate: 0 -50%;
 }
 .canvas-inspect .canvas-subtle {
   font-size: inherit;
@@ -2506,66 +2597,114 @@ html[data-canvas-alt] .canvas-frame-root * {
 /* Editing in the Inspect panel: a picker per value, chip-sized. A changed value carries a
    dot in the focus color until its note goes; "Reset to …" in its list puts back what the code had. */
 .canvas-inspect-pick {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  max-inline-size: 100%;
+  display: flex;
   min-inline-size: 0;
 }
+/* A field: one line, one height. A long token name ends in an ellipsis, and the whole name is
+   its hint; colors already go by their short name. */
 .canvas-inspect-select {
-  display: inline-flex;
+  display: flex;
+  flex: 1;
   align-items: center;
   gap: 6px;
+  box-sizing: border-box;
   min-inline-size: 0;
-  max-inline-size: 100%;
-  padding: 2px 6px;
+  block-size: 26px;
+  padding: 0 6px 0 8px;
   border: 1px solid transparent;
   border-radius: var(--canvas-radius-s);
   background: var(--canvas-hover-color);
   color: inherit;
   font: inherit;
+  line-height: 16px;
   text-align: start;
   cursor: pointer;
+  transition-property: border-color, background-color;
+  transition-duration: var(--canvas-fast);
+  transition-timing-function: var(--canvas-ease);
 }
 .canvas-inspect-select:hover,
 .canvas-inspect-select[aria-expanded="true"] {
   border-color: var(--canvas-border-color);
+}
+.canvas-inspect-select > svg {
+  flex: none;
+  inline-size: 12px;
+  block-size: 12px;
+  color: var(--canvas-subtle-color);
+}
+/* Read-only: the same field without a surface or a list. */
+.canvas-inspect-select[data-readonly] {
+  background: none;
+  cursor: default;
+}
+.canvas-inspect-select[data-readonly]:hover {
+  border-color: transparent;
+}
+.canvas-inspect-prefix {
+  flex: none;
+  color: var(--canvas-subtle-color);
 }
 .canvas-inspect-select:focus-visible {
   outline: 2px solid var(--canvas-focus-color);
   outline-offset: 1px;
 }
 .canvas-inspect-select-text {
+  flex: 1;
   min-inline-size: 0;
-  overflow-wrap: break-word;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.canvas-inspect-caret {
-  color: var(--canvas-subtle-color);
-  font-size: 10px;
-}
+/* A swatch keeps an edge on any color, light or dark, as an image outline does. */
 .canvas-inspect-swatch {
   flex: none;
-  inline-size: 12px;
-  block-size: 12px;
-  border-radius: 3px;
-  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 15%);
+  inline-size: 14px;
+  block-size: 14px;
+  border-radius: 4px;
+  outline: 1px solid oklch(0 0 0 / 0.1);
+  outline-offset: -1px;
+}
+.canvas-root[data-background="dark"] .canvas-inspect-swatch {
+  outline-color: oklch(1 0 0 / 0.12);
 }
 /* The list a picker opens: over everything, fixed to the window so the panel's scroll never clips it. */
 .canvas-inspect-popover {
   position: fixed;
   z-index: 7;
+  /* Placed by its outer box (Picker measures it so), border included. */
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--canvas-border-color);
-  border-radius: var(--canvas-radius-m);
+  /* Concentric: an option's 8px corner plus the list's 4px padding. */
+  border-radius: var(--canvas-radius-l);
   background: var(--canvas-surface-color);
   box-shadow: var(--canvas-shadow-overlay);
   font: 12px/1.4 var(--canvas-font, system-ui, -apple-system, "Segoe UI", sans-serif);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  animation: canvas-inspect-open var(--canvas-fast) var(--canvas-ease);
+}
+@keyframes canvas-inspect-open {
+  from {
+    opacity: 0;
+    translate: 0 -2px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .canvas-inspect-popover {
+    animation: none;
+  }
 }
 .canvas-inspect-search {
+  /* Its full height in a list held short: only the options scroll. */
+  flex: none;
+  box-sizing: border-box;
+  block-size: 28px;
   margin: 6px 6px 2px;
-  padding: 4px 8px;
+  padding: 0 8px;
   border: 1px solid var(--canvas-border-color);
   border-radius: var(--canvas-radius-s);
   background: transparent;
@@ -2591,9 +2730,13 @@ html[data-canvas-alt] .canvas-frame-root * {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 8px;
-  border-radius: var(--canvas-radius-s);
+  min-block-size: 28px;
+  padding: 0 8px;
+  border-radius: var(--canvas-radius-m);
   cursor: pointer;
+}
+.canvas-inspect-popover li .canvas-subtle {
+  flex: none;
 }
 .canvas-inspect-popover li[data-active] {
   background: var(--canvas-hover-color);
@@ -2604,23 +2747,74 @@ html[data-canvas-alt] .canvas-frame-root * {
 .canvas-inspect-option-text {
   flex: 1;
   min-inline-size: 0;
-  overflow-wrap: break-word;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .canvas-inspect-select[data-off] {
   background: color-mix(in srgb, #b87c00 14%, transparent);
   color: color-mix(in srgb, #b87c00 70%, var(--canvas-text-color));
 }
-.canvas-inspect-select[data-changed],
-.canvas-inspect-switch[data-changed] {
-  box-shadow: inset 3px 0 0 var(--canvas-focus-color);
-}
+/* On and off as a switch: the real checkbox stays for keys and screen readers, unseen. */
 .canvas-inspect-switch {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 1px 6px 1px 2px;
-  border-radius: var(--canvas-radius-s);
+  gap: 8px;
+  block-size: 26px;
   cursor: pointer;
+}
+.canvas-inspect-switch input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.canvas-inspect-switch-track {
+  position: relative;
+  inline-size: 26px;
+  block-size: 16px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--canvas-text-color) 22%, transparent);
+  transition: background-color var(--canvas-fast) var(--canvas-ease);
+}
+.canvas-inspect-switch-track::after {
+  content: "";
+  position: absolute;
+  inset-block-start: 2px;
+  inset-inline-start: 2px;
+  inline-size: 12px;
+  block-size: 12px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 20%);
+  transition: translate var(--canvas-fast) var(--canvas-ease);
+}
+.canvas-inspect-switch input:checked + .canvas-inspect-switch-track {
+  background: var(--canvas-fill-color);
+}
+.canvas-inspect-switch input:checked + .canvas-inspect-switch-track::after {
+  translate: 10px 0;
+}
+.canvas-inspect-switch input:focus-visible + .canvas-inspect-switch-track {
+  outline: 2px solid var(--canvas-focus-color);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .canvas-inspect-switch-track,
+  .canvas-inspect-switch-track::after {
+    transition: none;
+  }
+}
+/* Press feedback on the panel's small buttons. */
+.canvas-inspect-lock,
+.canvas-inspect-crumb button {
+  transition: scale var(--canvas-fast) var(--canvas-ease);
+}
+.canvas-inspect-lock:active,
+.canvas-inspect-crumb button:active {
+  scale: 0.96;
 }
 .canvas-inspect-hint {
   margin-block-start: 8px !important;
@@ -2658,9 +2852,10 @@ html[data-canvas-alt] .canvas-frame-root * {
 }
 .canvas-inspect-lock {
   display: inline-grid;
+  flex: none;
   place-items: center;
-  inline-size: 22px;
-  block-size: 22px;
+  inline-size: 24px;
+  block-size: 24px;
   padding: 0;
   border: 0;
   border-radius: var(--canvas-radius-s);
@@ -2701,21 +2896,10 @@ html[data-canvas-alt] .canvas-frame-root * {
   box-shadow: inset 2px 0 0 var(--canvas-focus-color);
   outline: none;
 }
-/* With the panel open, the canvas is the area to its left: the view controls sit beside the
-   panel rather than under it, and the centred bars and notices centre in that area, so a wide
-   panel never pushes one bar into another. */
-:root[data-canvas-inspecting] .canvas-toolbar[data-place="view"] {
-  inset-inline-end: calc(var(--canvas-inspect-width, 272px) + 24px);
-}
-:root[data-canvas-inspecting] .canvas-toolbar[data-place="tools"],
-:root[data-canvas-inspecting] .canvas-toolbar[data-place="pending"],
-:root[data-canvas-inspecting] .canvas-toast {
-  inset-inline-start: calc((100% - var(--canvas-inspect-width, 272px) - 32px) / 2);
-}
 /* Section headings keep one height whatever buttons they show (a reset comes and goes), so
    nothing below moves when a value changes. The title takes the room the buttons leave. */
 .canvas-inspect-section h3 {
-  min-block-size: 22px;
+  min-block-size: 24px;
 }
 .canvas-inspect-heading {
   flex: 1;
@@ -2730,4 +2914,20 @@ html[data-canvas-alt] .canvas-frame-root * {
   flex: none;
   inline-size: 14px;
   block-size: 14px;
+}
+/* Hints in the Inspect panel open under their button and end at its right edge: the panel
+   clips what passes its sides, and its buttons sit at its right edge. */
+.canvas-inspect [data-tip]:hover::after,
+.canvas-inspect [data-tip]:focus-visible::after {
+  inset-block: calc(100% + 6px) auto;
+  inset-inline: auto 0;
+  z-index: 1;
+}
+.canvas-inspect [data-tip] {
+  position: relative;
+}
+.canvas-settings-heading {
+  padding: 4px 8px 2px;
+  color: var(--canvas-subtle-color);
+  font-size: 12px;
 }

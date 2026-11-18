@@ -121,7 +121,7 @@ test("text in a preview has the app's color, on any background and opened alone,
     await expect(phone).toHaveCSS('color', APP_TEXT)
     await expect(item.locator('.canvas-name')).toHaveCSS('color', CHROME_TEXT)
     // A dark board turns the chrome light; the previews stay as the app draws them.
-    await page.getByRole('button', { name: 'Background' }).click()
+    await page.getByRole('button', { name: 'Canvas settings' }).click()
     await page.getByRole('button', { name: 'Dark', exact: true }).click()
     await expect(item.locator('.canvas-name')).toHaveCSS('color', DARK_CHROME_TEXT)
     await expect(item.locator('h2')).toHaveCSS('color', APP_TEXT)
@@ -2899,17 +2899,24 @@ test('Share downloads the canvas as one file, without reloading the canvas', asy
   await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toContainText('Canvas is ready')
   // The build runs inside the dev server; a page reload during it would lose this.
   await page.evaluate(() => Object.assign(window, { kept: true }))
-  const download = page.waitForEvent('download')
+  // Share opens a panel first. Escape closes it.
   await page.getByRole('button', { name: 'Share as an HTML file' }).click()
-  const file = await download
-  expect(file.suggestedFilename()).toMatch(/^smoke-\d{4}-\d{2}-\d{2}\.html$/)
-  // A panel confirms the download and says how to pass the file on; Escape closes it.
-  const panel = page.getByRole('dialog', { name: `Downloaded ${file.suggestedFilename()}` })
-  await expect(panel).toContainText('Figma')
-  await expect(panel).toContainText('Notion')
+  const panel = page.getByRole('dialog', { name: 'Share as a file' })
+  await expect(panel).toContainText('Opens in any browser.')
+  // A canvas without sections has nothing to choose.
+  await expect(panel.locator('select')).toHaveCount(0)
+  await expect(panel.getByRole('button', { name: 'Download' })).toBeFocused()
   await page.keyboard.press('Escape')
   await expect(panel).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Share as an HTML file' })).toBeFocused()
+  await page.getByRole('button', { name: 'Share as an HTML file' }).click()
+  const download = page.waitForEvent('download')
+  await panel.getByRole('button', { name: 'Download' }).click()
+  const file = await download
+  // Named for the canvas's title, with the day.
+  expect(file.suggestedFilename()).toMatch(/^Smoke \d{4}-\d{2}-\d{2}\.html$/)
+  await expect(page.locator('.canvas-toast')).toContainText(`Downloaded ${file.suggestedFilename()}`)
+  await expect(panel).toHaveCount(0)
   expect(await page.evaluate(() => 'kept' in window)).toBe(true)
   const path = join(mkdtempSync(join(tmpdir(), 'design-canvas-share-')), file.suggestedFilename())
   await file.saveAs(path)
@@ -2917,6 +2924,38 @@ test('Share downloads the canvas as one file, without reloading the canvas', asy
   await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toContainText('Canvas is ready')
   await expect(page.getByRole('button', { name: 'Share as an HTML file' })).toHaveCount(0)
   expect(errors).toEqual([])
+})
+
+test('Share can share one section: the rest is not in the file at all', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    // A section away from the example item, with a note in it.
+    writeFileSync(
+      REGISTRY,
+      original
+        .replace('export const notes: CanvasNote[] = [];', 'export const notes: CanvasNote[] = [\n  { id: "corner-note", text: "Only this corner", x: 3050, y: 3050 },\n];')
+        .replace('export const sections: CanvasSection[] = [];', 'export const sections: CanvasSection[] = [\n  { id: "corner", title: "Corner", x: 3000, y: 3000, width: 500, height: 400 },\n];'),
+    )
+    await expect.poll(async () => (await (await page.request.get('/registry.tsx')).text()).includes('Only this corner')).toBe(true)
+    await page.goto('/')
+    await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toContainText('Canvas is ready')
+    await page.getByRole('button', { name: 'Share as an HTML file' }).click()
+    const panel = page.getByRole('dialog', { name: 'Share as a file' })
+    await expect(panel.locator('select option')).toHaveText(['Whole canvas · 1 item', 'Corner · 0 items'])
+    await panel.locator('select').selectOption('corner')
+    const download = page.waitForEvent('download')
+    await panel.getByRole('button', { name: 'Download' }).click()
+    const file = await download
+    expect(file.suggestedFilename()).toMatch(/^Smoke · Corner \d{4}-\d{2}-\d{2}\.html$/)
+    const html = readFileSync((await file.path())!, 'utf8')
+    expect(html).toContain('Only this corner')
+    // The example item's own words are not in the file, not only hidden.
+    expect(html).not.toContain('Canvas is ready')
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
 })
 
 test('only the canvas page can build a shared file', async ({ request }) => {

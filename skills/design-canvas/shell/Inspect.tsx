@@ -2,12 +2,15 @@ import type React from "react";
 import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { PROPS_PATH } from "./channel.ts";
 import {
+  bySize,
   choices,
+  loadTheme,
   designProps,
   type DesignSystem,
   pathOf,
   placedComponent,
   PROBE,
+  shortName,
   type Row,
   styleRows,
   type Value,
@@ -91,6 +94,14 @@ export function InspectPanel({
   // After a change (or its reset), read again once React has drawn it: a prop such as `fill` on a
   // Button outside a group changes nothing on the page, so no watcher would notice it.
   useEffect(() => setVersion((n) => n + 1), [changed]);
+  // A Tailwind app's theme comes from the dev server; read again once it is here, so the lists hold it all.
+  useEffect(() => {
+    let live = true;
+    void loadTheme().then(() => live && setVersion((n) => n + 1));
+    return () => {
+      live = false;
+    };
+  }, []);
   useEffect(() => {
     if (!selection) return;
     let timer = 0;
@@ -301,9 +312,9 @@ function usePanelWidth() {
   const [width, setWidth] = useState(() => {
     try {
       const saved = Number(localStorage.getItem(PANEL_WIDTH_KEY));
-      return saved >= PANEL_MIN && saved <= PANEL_MAX ? saved : 272;
+      return saved >= PANEL_MIN && saved <= PANEL_MAX ? saved : 300;
     } catch {
-      return 272;
+      return 300;
     }
   });
   useLayoutEffect(() => {
@@ -356,12 +367,15 @@ function usePanelWidth() {
 const typeRequests = new Map<string, Promise<PropType[] | null>>();
 function usePropTypes(system: DesignSystem, component: string | undefined) {
   const [types, setTypes] = useState<Record<string, PropType[] | null>>({});
+  // The system's own prop definitions (design-system.ts) come first; the type declarations, else.
+  const own = component ? system.propTypes?.(component) : undefined;
   useEffect(() => {
-    if (!component || !system.package || component in types) return;
-    const key = `${system.package}:${component}`;
+    if (own || !component || component in types) return;
+    const key = `${system.package ?? ""}:${component}`;
     let request = typeRequests.get(key);
     if (!request) {
-      const query = new URLSearchParams({ package: system.package, component: component.split(".")[0]! });
+      // Without a package, the dev server looks for the component in the app's own source (shadcn/ui).
+      const query = new URLSearchParams({ ...(system.package ? { package: system.package } : {}), component });
       request = fetch(`${PROPS_PATH}?${query}`)
         .then((response) => (response.ok ? response.json() : { props: null }))
         .then((body: { props: PropType[] | null }) => body.props)
@@ -373,8 +387,8 @@ function usePropTypes(system: DesignSystem, component: string | undefined) {
     return () => {
       live = false;
     };
-  }, [component, system.package, types]);
-  return component ? types[component] : undefined;
+  }, [component, own, system.package, types]);
+  return own ?? (component ? types[component] : undefined);
 }
 
 // Props that are not design: what the component renders as, and plumbing. Shown nowhere.
@@ -401,22 +415,21 @@ function Props({
 }) {
   const set = placed.props;
   const editable = (types ?? []).filter((p) => !PLUMBING.test(p.name) && (p.options.length > 0 || p.boolean));
+  // What the code set that no picker covers (a value the types leave open, such as Chakra's
+  // `colorPalette` or MUI Chip's `label`): shown as it is, so nothing the code says goes missing.
+  const fixed = designProps(set).filter(([name]) => !editable.some((p) => p.name === name));
+  const readOnly = fixed.map(([name, value]) => (
+    <div key={name}>
+      <dt>{name}</dt>
+      <dd>
+        <span className="canvas-inspect-select" data-readonly="">
+          <span className="canvas-inspect-select-text">{String(value)}</span>
+        </span>
+      </dd>
+    </div>
+  ));
   if (!editable.length) {
-    const shown = designProps(set);
-    return shown.length ? (
-      <dl className="canvas-inspect-rows">
-        {shown.map(([name, value]) => (
-          <div key={name}>
-            <dt>{name}</dt>
-            <dd>
-              <span className="canvas-inspect-value">{String(value)}</span>
-            </dd>
-          </div>
-        ))}
-      </dl>
-    ) : (
-      <p className="canvas-subtle">{labels.inspectDefaults}</p>
-    );
+    return fixed.length ? <dl className="canvas-inspect-rows">{readOnly}</dl> : <p className="canvas-subtle">{labels.inspectDefaults}</p>;
   }
   const edit = (prop: PropType, value: unknown, preview = false) => {
     const current = set[prop.name] ?? prop.default;
@@ -436,7 +449,7 @@ function Props({
         const own = set[prop.name];
         const current = own ?? (prop.boolean ? prop.default === "true" : prop.default);
         return (
-          <div key={prop.name}>
+          <div key={prop.name} data-changed={changed.has(prop.name) ? "" : undefined}>
             <dt>{prop.name}</dt>
             <dd>
               {prop.options.length ? (
@@ -445,15 +458,20 @@ function Props({
                   current={current === undefined ? labels.inspectUnset : String(current)}
                   selected={current === undefined ? undefined : String(current)}
                   changed={changed.has(prop.name)}
-                  options={prop.options.map((option) => ({ value: option, label: option, detail: option === prop.default ? labels.inspectDefaultMark : undefined }))}
+                  options={bySize(prop.options, (option) => option).map((option) => ({
+                    value: option,
+                    label: option,
+                    detail: option === prop.default ? labels.inspectDefaultMark : undefined,
+                  }))}
                   resetTo={changed.get(prop.name)}
                   onPreview={(value) => (value === null ? onPreview(null) : edit(prop, value, true))}
                   onChoose={(value) => edit(prop, value)}
                   onOpen={onHold}
                 />
               ) : (
-                <label className="canvas-inspect-switch" data-changed={changed.has(prop.name) ? "" : undefined}>
-                  <input type="checkbox" checked={!!current} onChange={(event) => edit(prop, event.currentTarget.checked)} />
+                <label className="canvas-inspect-switch">
+                  <input type="checkbox" role="switch" checked={!!current} onChange={(event) => edit(prop, event.currentTarget.checked)} />
+                  <span className="canvas-inspect-switch-track" aria-hidden="true" />
                   {current ? labels.inspectOn : labels.inspectOff}
                 </label>
               )}
@@ -463,6 +481,7 @@ function Props({
           </div>
         );
       })}
+      {readOnly}
     </dl>
   );
 }
@@ -505,7 +524,8 @@ function StyleRow({
       : value.nearest.length
         ? labels.inspectNearest(system.name, value.nearest.map((n) => `${n.token} (${n.value})`))
         : labels.inspectNotToken(system.name);
-  const options = useMemo(() => (editable ? choices(element, system, row.category) : []), [editable, element, system, row.category]);
+  // Again with each read of the row: the theme may have arrived since (loadTheme).
+  const options = useMemo(() => (editable ? choices(element, system, row.category) : []), [editable, element, system, row]);
   const lengths = row.category === "space" || row.category === "radius";
   const paints = row.category === "text" || row.category === "fill" || row.category === "border";
   const none = lengths ? "0" : labels.inspectNone;
@@ -519,32 +539,55 @@ function StyleRow({
     value: chosen === RESET ? RESET : chosen || (lengths ? "0" : "transparent"),
     ...(override ? { override } : {}),
   });
+  // The field shows a color by its short name (the row says the kind); its hint, the whole name.
+  const shown = (value: Value) =>
+    value.kind === "token" ? shortName(value.token, row.common) : value.kind === "off" ? value.value : none;
+  const full = (value: Value) =>
+    value.kind === "token"
+      ? [value.token, value.value, value.others.length ? labels.inspectAlso(value.others) : ""].filter(Boolean).join("\n")
+      : undefined;
+  // A value's list, in the order of its tokens (biggest first for lengths). A length outside the
+  // system sits where its size puts it, between its nearest tokens; 0 is the smallest. A color
+  // outside the system, and "none", come first: colors have no order to place them in.
+  const listFor = (value: Value): PickerOption[] => {
+    const list: PickerOption[] = options.map((option) =>
+      // Its nearest tokens say so, where the choice is made.
+      value.kind === "off" && value.nearest.some((n) => n.token === option.label)
+        ? { ...option, detail: [option.detail, labels.inspectNearestMark].filter(Boolean).join(" · ") }
+        : option,
+    );
+    const sized = options.length > 0 && options.every((option) => option.px !== undefined);
+    // Text always has a size: no "none" for type.
+    if (row.category !== "typography" && row.category !== "fontSize") {
+      const nothing = { value: "", label: none };
+      if (sized) list.push(nothing);
+      else list.unshift(nothing);
+    }
+    if (value.kind === "off") {
+      const own = { value: "current", label: value.value, detail: labels.inspectNotToken(system.name), swatch: paints ? value.value : undefined };
+      const px = parseFloat(value.value);
+      const at = sized && Number.isFinite(px) ? options.findIndex((option) => option.px! < px) : 0;
+      list.splice(at < 0 ? options.length : at, 0, own);
+    }
+    return list;
+  };
   return (
-    <div>
+    <div data-changed={row.values.some((value) => changed.has(value.property)) ? "" : undefined}>
       <dt>{row.label}</dt>
-      <dd>
+      <dd data-count={row.values.length}>
         {row.values.map((value, index) =>
           editable ? (
             <span key={index} className="canvas-inspect-pick">
-              {value.side && <span className="canvas-subtle">{value.side}</span>}
               <Picker
                 label={[row.label, value.side].filter(Boolean).join(" ")}
-                current={value.kind === "token" ? value.token : value.kind === "off" ? value.value : none}
+                prefix={value.side}
+                current={shown(value)}
                 swatch={paints ? (value.kind === "token" ? options.find((o) => o.value === value.name)?.swatch : value.kind === "off" ? value.value : undefined) : undefined}
                 selected={value.kind === "token" ? value.name : value.kind === "off" ? "current" : ""}
                 off={flag && value.kind === "off"}
-                note={flag ? offNote(value) : undefined}
+                note={flag ? offNote(value) : full(value)}
                 changed={changed.has(value.property)}
-                options={[
-                  ...(value.kind === "off" ? [{ value: "current", label: value.value, detail: labels.inspectNotToken(system.name), swatch: paints ? value.value : undefined }] : []),
-                  ...(row.category !== "typography" ? [{ value: "", label: none }] : []),
-                  // Its nearest tokens say so, where the choice is made.
-                  ...options.map((option) =>
-                    value.kind === "off" && value.nearest.some((n) => n.token === option.label)
-                      ? { ...option, detail: [option.detail, labels.inspectNearestMark].filter(Boolean).join(" · ") }
-                      : option,
-                  ),
-                ]}
+                options={listFor(value)}
                 resetTo={changed.get(value.property)}
                 onPreview={(chosen) => {
                   // The value outside the system is what the element shows without a preview.
@@ -556,7 +599,7 @@ function StyleRow({
               />
             </span>
           ) : (
-            <ValueChip key={index} value={value} />
+            <ValueChip key={index} value={value} shown={shown(value)} hint={full(value)} />
           ),
         )}
       </dd>
@@ -564,24 +607,13 @@ function StyleRow({
   );
 }
 
-/** A token by its name, its value on hover. */
-function ValueChip({ value }: { value: Value }) {
-  const side = value.side && <span className="canvas-subtle">{value.side} </span>;
-  if (value.kind === "none") return <span className="canvas-inspect-value canvas-subtle">{side}0</span>;
-  if (value.kind === "token") {
-    const title = [value.value, value.others.length ? labels.inspectAlso(value.others) : ""].filter(Boolean).join("\n");
-    return (
-      <span className="canvas-inspect-value" title={title}>
-        {side}
-        {breakable(value.token)}
-        {value.others.length > 0 && <span className="canvas-subtle"> +{value.others.length}</span>}
-      </span>
-    );
-  }
+/** A read-only value: the same field as a picker, without its list. The whole name on hover. */
+function ValueChip({ value, shown, hint }: { value: Value; shown: string; hint?: string }) {
   return (
-    <span className="canvas-inspect-value">
-      {side}
-      {value.value}
+    <span className="canvas-inspect-select" data-readonly="" title={hint}>
+      {value.side && <span className="canvas-inspect-prefix">{value.side}</span>}
+      <span className="canvas-inspect-select-text">{breakable(shown)}</span>
+      {value.kind === "token" && value.others.length > 0 && <span className="canvas-subtle">+{value.others.length}</span>}
     </span>
   );
 }
@@ -614,6 +646,7 @@ function Picker({
   changed,
   resetTo,
   note,
+  prefix,
   onPreview,
   onChoose,
   onOpen,
@@ -627,8 +660,10 @@ function Picker({
   changed?: boolean;
   /** What the code had, when the value has changed: the list starts with "Reset to …" it. */
   resetTo?: string;
-  /** Said on hover and to screen readers: why the value is marked. */
+  /** Said on hover and to screen readers: why the value is marked, or the whole token name. */
   note?: string;
+  /** A side or axis inside the field, before the value: "↕", "Top". */
+  prefix?: string;
   onPreview: (value: string | null) => void;
   onChoose: (value: string) => void;
   onOpen: (open: boolean) => void;
@@ -636,7 +671,7 @@ function Picker({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(-1);
-  const [place, setPlace] = useState<{ left: number; width: number; top?: number; bottom?: number; height: number } | null>(null);
+  const [place, setPlace] = useState<{ left: number; width: number; top: number; height: number; scroll: number } | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const popover = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLUListElement>(null);
@@ -656,6 +691,9 @@ function Picker({
     if (focus) trigger.current?.focus({ preventScroll: true });
   };
   const choose = (value: string) => {
+    // The value it has already: the list opens with it under the pointer, so a second click
+    // on the field lands on it. That closes the list; it is not a change.
+    if (value === selected) return close();
     setOpen(false);
     setQuery("");
     onOpen(false);
@@ -671,19 +709,61 @@ function Picker({
     if (option) onPreview(option.value);
   };
 
-  // Below the trigger, or above it when the room is below is short; never past the window's edge.
+  // The list opens over its field, with the current value on the field's own line and its text
+  // where the field's text is (as a macOS pop-up menu does): the pointer that opened it rests on
+  // the current value, and the values a step bigger and smaller sit just above and below it, a
+  // small move away to compare. It renders hidden first, to be measured, then placed before it paints.
+  // Where the room above or below is short, the list scrolls to keep the value on its line, down
+  // to a list of about seven rows; shorter than that, it gives up the line and stays usable.
+  const armed = useRef(false);
   useLayoutEffect(() => {
-    if (!open || !trigger.current) return;
-    const box = trigger.current.getBoundingClientRect();
-    const width = Math.max(box.width, 260);
-    const left = Math.max(8, Math.min(box.left, window.innerWidth - width - 8));
-    const below = window.innerHeight - box.bottom - 12;
-    const above = box.top - 12;
-    const height = Math.min(320, Math.max(below, above));
-    setPlace(below >= Math.min(240, above) ? { left, width, top: box.bottom + 4, height } : { left, width, bottom: window.innerHeight - box.top + 4, height });
-    const at = options.findIndex((o) => o.value === selected);
-    setActive(at);
+    if (!open) return setPlace(null);
+    const field = trigger.current?.getBoundingClientRect();
+    const frame = popover.current?.getBoundingClientRect();
+    if (!field || !frame || !list.current) return;
+    armed.current = false;
+    const found = shown.findIndex((o) => o.value === selected);
+    const item = list.current.querySelector<HTMLElement>(`[data-index="${Math.max(0, found)}"]`);
+    const row = item?.getBoundingClientRect();
+    const offset = row ? row.top - frame.top : 0;
+    const rowHeight = row?.height ?? 28;
+    const fieldText = trigger.current!.querySelector(".canvas-inspect-select-text")?.getBoundingClientRect();
+    const optionText = item?.querySelector(".canvas-inspect-option-text")?.getBoundingClientRect();
+    const left = fieldText && optionText ? fieldText.left - (optionText.left - frame.left) : field.left;
+    // As wide as the room right of the text allows (the panel sits at the window's edge),
+    // so the text stays in line; only a field too near the edge for a usable list gives that up.
+    const width = Math.max(Math.min(Math.max(field.width, 260), window.innerWidth - 8 - left), 200);
+    // Clear of the bars at the top and bottom, which sit above the panel and its lists.
+    const minTop = 64;
+    const maxBottom = window.innerHeight - 76;
+    const natural = frame.height;
+    const full = Math.min(natural, 360, maxBottom - minTop);
+    const floor = Math.min(full, 204);
+    // Where the list's top would be, unscrolled, for the value to sit on the field's line.
+    const top0 = field.top + field.height / 2 - rowHeight / 2 - offset;
+    // The scroll that puts the value in the middle of the list, when there is more than shows.
+    const middle = offset + rowHeight / 2;
+    const clamp = (n: number, low: number, high: number) => Math.max(low, Math.min(high, n));
+    // The tallest list that keeps the value on the line.
+    const aligned = Math.min(full, natural - Math.max(0, minTop - top0), maxBottom - Math.max(top0, minTop));
+    let height: number;
+    let scroll: number;
+    let top: number;
+    if (aligned >= floor) {
+      height = aligned;
+      scroll = clamp(middle - height / 2, Math.max(0, minTop - top0), Math.min(natural - height, maxBottom - height - top0));
+      top = top0 + scroll;
+    } else {
+      height = floor;
+      scroll = clamp(middle - height / 2, 0, natural - height);
+      top = clamp(top0 + scroll, minTop, maxBottom - height);
+    }
+    setPlace({ left: clamp(left, 8, window.innerWidth - width - 8), width, top, height, scroll });
+    setActive(found);
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => {
+    if (place && list.current) list.current.scrollTop = place.scroll;
+  }, [place]);
 
   // The search field, or else the list, takes the keys once it opens.
   useEffect(() => {
@@ -729,15 +809,20 @@ function Picker({
           onOpen(true);
         }}
       >
+        {prefix && <span className="canvas-inspect-prefix">{prefix}</span>}
         {swatch && <span className="canvas-inspect-swatch" style={{ background: swatch }} aria-hidden="true" />}
         <span className="canvas-inspect-select-text">{typeof current === "string" ? breakable(current) : current}</span>
-        <span className="canvas-inspect-caret" aria-hidden="true">▾</span>
+        <Icon name="chevron-down" />
       </button>
-      {open && place && (
+      {open && (
         <div
           ref={popover}
           className="canvas-inspect-popover"
-          style={{ left: place.left, width: place.width, top: place.top, bottom: place.bottom, maxHeight: place.height }}
+          style={
+            place
+              ? { left: place.left, width: place.width, top: place.top, maxHeight: place.height }
+              : { left: 0, top: 0, width: 260, visibility: "hidden" }
+          }
           onKeyDown={(event) => {
             // The canvas's keys (Escape lets go of the element, arrows pan) stay out while the list has them.
             event.stopPropagation();
@@ -778,6 +863,14 @@ function Picker({
             aria-label={label}
             tabIndex={-1}
             aria-activedescendant={active >= 0 ? `${id}-${active}` : undefined}
+            // The list opens under a pointer that has not moved: the option it lands on is not
+            // pointed at until the pointer moves (as in a menu), so opening shows nothing new.
+            onPointerMove={(event) => {
+              if (armed.current) return;
+              armed.current = true;
+              const over = (event.target as Element).closest<HTMLElement>("li[data-index]");
+              if (over) show(Number(over.dataset.index));
+            }}
             onPointerLeave={() => {
               setActive(-1);
               onPreview(null);
@@ -792,7 +885,7 @@ function Picker({
                 role="option"
                 aria-selected={option.value === selected}
                 data-active={index === active ? "" : undefined}
-                onPointerEnter={() => show(index)}
+                onPointerEnter={() => armed.current && show(index)}
                 onClick={() => choose(option.value)}
               >
                 {option.swatch !== undefined && <span className="canvas-inspect-swatch" style={{ background: option.swatch }} aria-hidden="true" />}

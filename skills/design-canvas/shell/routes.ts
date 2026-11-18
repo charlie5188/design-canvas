@@ -24,16 +24,48 @@
 // an item to its first screen. Nothing here is saved: a reload starts every item at its start.
 // An item opened alone (frame.html?item=<id>) follows the same rules: FrameHost.tsx shows its
 // screens, and its page says what the item could not show, since no canvas is there to.
-import { type ComponentType, createContext } from "react";
+import { type ComponentType, createContext, type ReactNode } from "react";
 import type { CanvasItem } from "./types";
 
 /**
  * The path that the item around a component shows now, for a router stand-in's
- * `usePathname` (kits/react-vite/mocks/next-navigation.ts). Null where the item names no path.
+ * `usePathname` (stand-ins/next-navigation.ts). Null where the item names no path.
  */
 export const RouteContext = createContext<string | null>(null);
 
+/**
+ * Where the item around a component is now, for a router stand-in's `useSearchParams` and
+ * `useParams`: its path, its query (`status=signed`, without "?"), and the values its screen's
+ * `[param]` parts matched (`{ id: "msa-acme" }` for `/contracts/[id]`). Null where the item names no path.
+ */
+export type Location = { path: string; search: string; params: Record<string, string>; pattern: string };
+export const LocationContext = createContext<Location | null>(null);
+
+/**
+ * A router the app's components need around them (React Router's `<Link>` and hooks throw
+ * outside one), set by the kit's providers.tsx: each screen of an item is rendered inside it,
+ * inside the item's location (stand-ins/react-router.tsx). Null for none.
+ */
+export const ScreenRouter = createContext<ComponentType<{ children: ReactNode }> | null>(null);
+
 const tidy = (path: string) => path.replace(/\/+$/, "") || "/";
+
+/**
+ * Where a link goes on this site, as an item remembers it: its path and its query, without the
+ * hash (`/contracts?status=signed`). A query alone (`?status=signed`) stays where `current` is.
+ * Null where pathOf is.
+ */
+export function locationOf(href: string, current?: string): string | null {
+  const base = href.startsWith("?") ? `${pathPart(current ?? "/")}${href}` : href;
+  const path = pathOf(base);
+  if (path === null) return null;
+  const search = new URL(base, "http://canvas.invalid/").search;
+  return `${path}${search === "?" ? "" : search}`;
+}
+/** A location's path, without its query. */
+export const pathPart = (location: string) => location.split("?")[0]!;
+/** A location's query, without "?". */
+export const searchPart = (location: string) => location.split("?").slice(1).join("?");
 
 /** Whether the product would open this link in a new browser tab. */
 export const opensNewTab = (anchor: Element) => {
@@ -102,8 +134,9 @@ export function screensOf(item: CanvasItem): Screen[] {
   ];
 }
 
-/** Which of `screensOf(item)` shows `path`, or -1. A path written out wins over one with a `[param]` in it. */
-export function screenIndex(item: CanvasItem, path: string): number {
+/** Which of `screensOf(item)` shows `path` (a location: its query does not count), or -1. A path written out wins over one with a `[param]` in it. */
+export function screenIndex(item: CanvasItem, location: string): number {
+  const path = pathPart(location);
   const all = screensOf(item);
   const match = (exact: boolean) => all.findIndex((screen) => screen.path !== "" && names(screen.path, path, exact));
   const exact = match(true);
@@ -116,6 +149,20 @@ export function screenIndex(item: CanvasItem, path: string): number {
  */
 export function screenAt(item: CanvasItem, path: string): ComponentType | undefined {
   return screensOf(item)[screenIndex(item, path)]?.component;
+}
+
+/** Where `item` is at `location`, for LocationContext: the `[param]` values come from the screen that shows it. */
+export function locationIn(item: CanvasItem, location: string): Location {
+  const path = pathPart(location);
+  const pattern = screensOf(item)[screenIndex(item, path)]?.path ?? "";
+  const params: Record<string, string> = {};
+  const want = tidy(pattern).split("/");
+  const have = tidy(path).split("/");
+  want.forEach((part, index) => {
+    const name = /^\[(?:\.\.\.)?([^\]]+)\]$/.exec(part)?.[1] ?? (part.startsWith(":") ? part.slice(1) : undefined);
+    if (name && have[index] !== undefined) params[name] = have[index]!;
+  });
+  return { path, search: searchPart(location), params, pattern };
 }
 
 /** How many states an item has beside its screens' first ones. */

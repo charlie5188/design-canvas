@@ -100,7 +100,7 @@ import { Icon } from "./icons";
 import { type InspectChanged, type InspectEdit, InspectPanel, RESET } from "./Inspect";
 import { type DesignSystem, pathOf as inspectPath, selectable, showProp, showStyle } from "./inspect-read";
 import { controlWords, type FlowStep, FlowView } from "./FlowView";
-import { linkName, opensNewTab, pathOf, RouteContext, screenAt, screenIndex, screensOf, stateCount } from "./routes";
+import { LocationContext, linkName, locationIn, locationOf, opensNewTab, pathPart, RouteContext, ScreenRouter, screenAt, screenIndex, screensOf, searchPart, stateCount } from "./routes";
 import { labels } from "./labels";
 import {
   type Bounds,
@@ -142,8 +142,8 @@ const TOAST_ACTION_MS = 8000;
 const FLIP_MARGIN = 16;
 const ADD_GAP = 96;
 const REVEAL_MARGIN = 48;
-/** The notice row that opens just above the toolbar. */
-const TOAST_ROW = 64;
+/** The notice row that opens under the top bars, at the top centre. */
+const TOAST_ROW = 48;
 const MIN_FIT_SIZE = 100;
 /** Room the top bars take, so a revealed or fitted item never sits under them. */
 const CHROME_TOP = 72;
@@ -267,7 +267,7 @@ const MoonIcon = () => <Icon name="moon" />;
 const THEME_ICONS: Partial<Record<string, () => ReactNode>> = { light: SunIcon, dark: MoonIcon };
 
 const AnnotateIcon = () => <Icon name="message-circle" />;
-const SelectIcon = () => <Icon name="pointer" />;
+const SelectIcon = () => <Icon name="click" />;
 const HandIcon = () => <Icon name="hand" />;
 // A pointer with code brackets: picking an element to see and change what it is made of in code.
 const InspectIcon = () => <Icon name="pointer-code" />;
@@ -962,6 +962,8 @@ function CanvasItemView({
   };
   // The screen shown: the item's own component, or the one a link inside it led to.
   const Shown = (route && screenAt(item, route)) || item.component;
+  // The app's router around it, when its components need one (routes.ts ScreenRouter).
+  const Router = useContext(ScreenRouter);
   const screenCount = screensOf(item).length;
   const states = stateCount(item);
 
@@ -1100,9 +1102,18 @@ function CanvasItemView({
           {item.viewport ? (
             <ItemFrame key={run} item={item} />
           ) : (
-            // The path is there for a router stand-in's `usePathname`. A frame provides its own.
-            <RouteContext.Provider value={route ?? item.path ?? null}>
-              <Preview key={run} component={Shown} />
+            // The path, query, and params are there for a router stand-in's `usePathname`,
+            // `useSearchParams`, and `useParams`. A frame provides its own.
+            <RouteContext.Provider value={route ? pathPart(route) : (item.path ?? null)}>
+              <LocationContext.Provider value={route || item.path ? locationIn(item, route ?? item.path ?? "") : null}>
+                {Router ? (
+                  <Router>
+                    <Preview key={run} component={Shown} />
+                  </Router>
+                ) : (
+                  <Preview key={run} component={Shown} />
+                )}
+              </LocationContext.Provider>
             </RouteContext.Provider>
           )}
         </div>
@@ -1224,18 +1235,36 @@ function TrashPopover({
   );
 }
 
+/** What a share puts in the file: how many items, and the registry ids the file leaves out. */
+type ShareContents = { items: number; leaveOut: { items: string[]; notes: string[]; sections: string[] } };
+
 /**
- * After Share downloads the file: its name, any file it could not hold, and the
- * ways to pass it on. It confirms the download too, so no notice shows.
+ * Before Share downloads the file: what goes in it. A canvas collects many explorations, and the
+ * reader often needs one, so a canvas with sections offers the whole canvas or one section; one
+ * without sections offers no choice. The download then says so in a notice.
  */
-function SharePanel({ file, missing, onClose }: { file: string; missing: string[]; onClose: () => void }) {
-  const closeRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => closeRef.current?.focus({ preventScroll: true }), []);
+function SharePanel({
+  scopes,
+  whole,
+  busy,
+  onDownload,
+  onClose,
+}: {
+  scopes: { id: string; title: string; items: number }[];
+  whole: number;
+  busy: boolean;
+  /** `section`: the id of the one section to share, or null for the whole canvas. */
+  onDownload: (section: string | null) => void;
+  onClose: () => void;
+}) {
+  const [section, setSection] = useState<string | null>(null);
+  const downloadRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => downloadRef.current?.focus({ preventScroll: true }), []);
   return (
     <div
       className="canvas-share-popover"
       role="dialog"
-      aria-label={labels.shared(file)}
+      aria-label={labels.shareTitle}
       onKeyDown={(event) => {
         if (event.key !== "Escape") return;
         event.preventDefault();
@@ -1244,26 +1273,36 @@ function SharePanel({ file, missing, onClose }: { file: string; missing: string[
       }}
     >
       <div className="canvas-share-head">
-        <span className="canvas-share-title">{labels.shared(file)}</span>
-        <button
-          ref={closeRef}
-          type="button"
-          className="canvas-button canvas-icon-button"
-          aria-label={labels.dismiss}
-          onClick={onClose}
-        >
+        <span className="canvas-share-title">{labels.shareTitle}</span>
+        <button type="button" className="canvas-button canvas-icon-button" aria-label={labels.dismiss} onClick={onClose}>
           <CloseIcon />
         </button>
       </div>
-      {missing.length > 0 && <p className="canvas-share-missing">{labels.sharedMissing(missing)}</p>}
-      <ul className="canvas-share-ways">
-        {labels.shareWays.map(([way, how]) => (
-          <li key={way}>
-            <span className="canvas-share-way">{way}</span>
-            <span>{how}</span>
-          </li>
-        ))}
-      </ul>
+      {scopes.length > 0 && (
+        <label className="canvas-share-row">
+          <span className="canvas-share-label">{labels.shareScope}</span>
+          <span className="canvas-share-select">
+            <select value={section ?? ""} onChange={(event) => setSection(event.currentTarget.value || null)}>
+              <option value="">{`${labels.shareWhole} · ${labels.shareCount(whole)}`}</option>
+              {scopes.map((scope) => (
+                <option key={scope.id} value={scope.id}>{`${scope.title} · ${labels.shareCount(scope.items)}`}</option>
+              ))}
+            </select>
+            <Icon name="chevron-down" />
+          </span>
+        </label>
+      )}
+      <p className="canvas-share-hint">{labels.shareHint}</p>
+      <button
+        ref={downloadRef}
+        type="button"
+        className="canvas-button canvas-button-primary canvas-share-download"
+        disabled={busy}
+        aria-busy={busy}
+        onClick={() => onDownload(section)}
+      >
+        {busy ? labels.sharing : labels.shareDownload}
+      </button>
     </div>
   );
 }
@@ -1375,7 +1414,12 @@ function saveBackground(storageKey: string, value: Background) {
 }
 
 /** The background button: a swatch of the board's color, opening the presets under it. */
-function BackgroundPicker({ value, onChange }: { value: Background; onChange: (value: Background) => void }) {
+/**
+ * The canvas's own settings, behind a gear at the top right: how the board looks to the
+ * person viewing it, which is seldom changed and changes nothing in the work. For now, its
+ * background. The product's light and dark theme stays outside, since reviewing it is the work.
+ */
+function SettingsMenu({ value, onChange }: { value: Background; onChange: (value: Background) => void }) {
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLSpanElement>(null);
   useEffect(() => {
@@ -1398,16 +1442,19 @@ function BackgroundPicker({ value, onChange }: { value: Background; onChange: (v
       <button
         type="button"
         className="canvas-button canvas-icon-button"
-        aria-label={labels.background}
+        aria-label={labels.canvasSettings}
         aria-expanded={open}
-        aria-controls="canvas-backgrounds"
+        aria-controls="canvas-settings"
         aria-pressed={open}
-        data-tip={open ? undefined : labels.background}
+        data-tip={open ? undefined : labels.canvasSettings}
         onClick={() => setOpen((was) => !was)}
       >
-        <span className="canvas-swatch" data-background={value} aria-hidden="true" />
+        <Icon name="settings" />
       </button>
-      <div id="canvas-backgrounds" role="dialog" aria-label={labels.background} className="canvas-backgrounds" hidden={!open}>
+      <div id="canvas-settings" role="dialog" aria-label={labels.canvasSettings} className="canvas-backgrounds" hidden={!open}>
+        <span className="canvas-settings-heading" id="canvas-settings-background">
+          {labels.background}
+        </span>
         {BACKGROUNDS.map((id) => (
           <button
             key={id}
@@ -1831,26 +1878,74 @@ function CanvasBoard({
       })
       .catch(() => {});
   }, [shared, items, notify]);
-  // Share: the dev server builds the canvas into one HTML file and the browser downloads it.
+  // Share: the panel says what goes in the file (SharePanel); the dev server builds the canvas
+  // into one HTML file without the rest, and the browser downloads it.
   const [sharing, setSharing] = useState(false);
-  const [sharedFile, setSharedFile] = useState<{ name: string; missing: string[] } | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
   const shareButtonRef = useRef<HTMLButtonElement>(null);
-  const share = useCallback(async () => {
-    setSharing(true);
-    try {
-      const file = await downloadSharedFile();
-      // The panel opens where notices and the trash show.
-      window.clearTimeout(toastTimer.current);
-      setToast(null);
-      setTrashOpen(false);
-      setSharedFile(file);
-    } catch (error) {
-      const reason = (error instanceof Error ? error.message : String(error)).split("\n")[0].slice(0, 160);
-      notify(labels.shareFailed(reason), undefined, true);
-    } finally {
-      setSharing(false);
-    }
-  }, [notify]);
+  // What is inside a frame is what the person sees inside it: by the centre, at the positions
+  // they have now, as a section's own notes and moves count it.
+  const shareCentres = useMemo(() => {
+    const centre = (x: number, y: number, w: number, h: number) => ({ x: x + w / 2, y: y + h / 2 });
+    return {
+      items: new Map(items.map((item) => {
+        const at = positions[item.id] ?? item;
+        return [item.id, centre(at.x, at.y, item.width, ITEM_HEAD + item.height)];
+      })),
+      notes: new Map(notes.map((note) => [note.id, centre(note.x, note.y, note.width ?? 220, note.height ?? 80)])),
+      sections: new Map(sections.map((section) => [section.id, centre(section.x, section.y, section.width, section.height)])),
+    };
+  }, [items, notes, sections, positions]);
+  const shareContents = useCallback(
+    (section: string | null): ShareContents => {
+      const holds = (frame: CanvasSection, at: { x: number; y: number } | undefined) =>
+        !!at && at.x >= frame.x && at.x <= frame.x + frame.width && at.y >= frame.y && at.y <= frame.y + frame.height;
+      const scope = section ? sections.find((s) => s.id === section) : undefined;
+      const inScope = (at: { x: number; y: number } | undefined) => !scope || holds(scope, at);
+      const keptItems = items.filter((item) => !trash.includes(item.id) && inScope(shareCentres.items.get(item.id)));
+      const keptNotes = notes.filter((note) => inScope(shareCentres.notes.get(note.id)));
+      const keptSections = sections.filter((s) => s === scope || inScope(shareCentres.sections.get(s.id)));
+      const out = <T extends { id: string }>(all: T[], keep: T[]) => all.filter((entry) => !keep.includes(entry)).map((entry) => entry.id);
+      return {
+        items: keptItems.length,
+        leaveOut: { items: out(items, keptItems), notes: out(notes, keptNotes), sections: out(sections, keptSections) },
+      };
+    },
+    [items, notes, sections, trash, shareCentres],
+  );
+  // Each titled section a person may share alone, in reading order. Set-aside frames are not offered:
+  // they are the losing side of a decision, and go with the canvas or the section they sit in.
+  const shareScopes = useMemo(
+    () =>
+      sections
+        .filter((section) => section.title.trim() && !isSetAside(section))
+        .sort((a, b) => a.y - b.y || a.x - b.x)
+        .map((section) => ({ id: section.id, title: section.title.trim(), items: shareContents(section.id).items })),
+    [sections, shareContents],
+  );
+  const share = useCallback(
+    async (only: string | null) => {
+      setSharing(true);
+      try {
+        // The file is named for the canvas (and the section shared), not its folder, with the day it was made.
+        const now = new Date();
+        const date = [now.getFullYear(), now.getMonth() + 1, now.getDate()].map((n) => String(n).padStart(2, "0")).join("-");
+        const title = document.title.replace(/\s*·\s*canvas\s*$/, "").trim() || "canvas";
+        const section = only ? sections.find((s) => s.id === only)?.title.trim() : undefined;
+        const name = `${[title, section].filter(Boolean).join(" · ")} ${date}`.replace(/[\\/:*?"<>|]+/g, "-");
+        const file = await downloadSharedFile(shareContents(only).leaveOut, `${name}.html`);
+        setShareOpen(false);
+        shareButtonRef.current?.focus({ preventScroll: true });
+        notify(file.missing.length ? `${labels.shared(file.name)}. ${labels.sharedMissing(file.missing)}` : labels.shared(file.name), undefined, file.missing.length > 0);
+      } catch (error) {
+        const reason = (error instanceof Error ? error.message : String(error)).split("\n")[0].slice(0, 160);
+        notify(labels.shareFailed(reason), undefined, true);
+      } finally {
+        setSharing(false);
+      }
+    },
+    [notify, sections, shareContents],
+  );
   useEffect(() => () => window.clearTimeout(toastTimer.current), []);
 
   // Annotations. Annotate mode turns clicks in previews into numbered pins. The
@@ -2768,7 +2863,10 @@ function CanvasBoard({
    */
   const [handTool, setHandTool] = useState(false);
   // Inspect (prototype): a click in a preview selects an element and the panel at the right reads it
-  // (Inspect.tsx). The element itself carries the selection outline, so it follows every camera move.
+  // (Inspect.tsx). As in a browser's element picker, the box marks what is being chosen, not what is
+  // chosen: the element under the pointer, a breadcrumb level hovered, or a new selection made from
+  // the keyboard or a double-click. It goes once the pointer works in the panel or a value shows, so it
+  // never sits on the edges being judged. The breadcrumb names the selection; hovering it shows it again.
   const inspectable = !!designSystem && !shared;
   const [inspectTool, setInspectTool] = useState(false);
   const inspectToolRef = useRef(false);
@@ -2776,11 +2874,6 @@ function CanvasBoard({
   const [inspected, setInspected] = useState<{ element: Element; preview: Element; itemId: string } | null>(null);
   const inspectedRef = useRef(inspected);
   inspectedRef.current = inspected;
-  useEffect(() => {
-    if (!inspected) return;
-    inspected.element.setAttribute("data-canvas-inspected", "");
-    return () => inspected.element.removeAttribute("data-canvas-inspected");
-  }, [inspected]);
   useEffect(() => {
     if (!inspectTool) setInspected(null);
   }, [inspectTool]);
@@ -2816,6 +2909,11 @@ function CanvasBoard({
     Object.assign(box.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
     box.hidden = false;
   }, []);
+  // A new selection shows where it is: after a click the box is there already; after Arrow Up or
+  // Down, a double-click, or a breadcrumb press, nothing else would show it.
+  useEffect(() => {
+    inspectHighlight(inspected?.element ?? null);
+  }, [inspected, inspectHighlight]);
   /**
    * A value shown for a moment, while the pointer is over it in a picker (Inspect.tsx). It
    * changes nothing that is saved: `null`, or the next one, puts back what was there.
@@ -2827,6 +2925,8 @@ function CanvasBoard({
       previewing.current = null;
       const current = inspectedRef.current;
       if (!edit || !current || !designSystem) return;
+      // A value on show is judged by its edges: no box over them (also when the keys chose it).
+      if (pickRef.current) pickRef.current.hidden = true;
       const { element } = current;
       // "Reset to …" in a picker: what the code had, shown until the pointer moves on.
       if (edit.value === RESET) {
@@ -3793,11 +3893,11 @@ function CanvasBoard({
       const w = viewport.clientWidth;
       const h = viewport.clientHeight;
       const m = REVEAL_MARGIN;
-      // Revealed items stop above the toolbar and its notices, which would
-      // otherwise cover a new version just as it arrives.
+      // Revealed items stop above the toolbar, and below the top bars and the notice
+      // under them, which would otherwise cover a new version just as it arrives.
       const toolbar = viewport.parentElement?.querySelector(".canvas-toolbar")?.getBoundingClientRect();
-      const bottom = toolbar ? Math.max(m, viewport.getBoundingClientRect().bottom - toolbar.top + TOAST_ROW) : m;
-      const top = Math.max(m, CHROME_TOP);
+      const bottom = toolbar ? Math.max(m, viewport.getBoundingClientRect().bottom - toolbar.top + 16) : m;
+      const top = Math.max(m, CHROME_TOP + TOAST_ROW);
       const visible =
         bounds.minX * z + x >= m &&
         bounds.minY * z + y >= top &&
@@ -4424,19 +4524,19 @@ function CanvasBoard({
   }, [items, restore, setTrash, trashChecks]);
 
   const closeSharePanel = useCallback(() => {
-    setSharedFile(null);
+    setShareOpen(false);
     shareButtonRef.current?.focus({ preventScroll: true });
   }, []);
   // Like the trash, the share panel closes on a press outside it.
   useEffect(() => {
-    if (!sharedFile) return;
+    if (!shareOpen) return;
     const onDown = (event: PointerEvent) => {
       if (event.target instanceof Element && event.target.closest(".canvas-share-popover, .canvas-share-button")) return;
-      setSharedFile(null);
+      setShareOpen(false);
     };
     window.addEventListener("pointerdown", onDown, true);
     return () => window.removeEventListener("pointerdown", onDown, true);
-  }, [sharedFile]);
+  }, [shareOpen]);
 
   const closeTrash = useCallback(() => {
     setTrashOpen(false);
@@ -4490,16 +4590,21 @@ function CanvasBoard({
       }
       const named = linkName(href);
       if (named === null) return;
-      const path = pathOf(href);
       const from = shown.find((item) => item.id === (fromId ?? frontIdRef.current));
-      if (!path) return notify(blank ? labels.newTabBlocked(named) : labels.linkBlocked(named));
-      // An item at its first screen that is sent to its first screen has gone nowhere:
-      // nothing is noted, so it does not offer Restart for it.
+      // Where the link goes, with its query (`?status=signed`), as the item will remember it.
+      // A query alone (`router.push("?status=signed")`) stays on the screen the item shows.
+      const here = from ? (routesRef.current[from.id]?.[routesRef.current[from.id]!.length - 1] ?? from.path ?? "/") : "/";
+      const location = locationOf(href, here);
+      const path = location && pathPart(location);
+      if (!location || !path) return notify(blank ? labels.newTabBlocked(named) : labels.linkBlocked(named));
+      // An item at its first screen that is sent to its first screen, with no query, has gone
+      // nowhere: nothing is noted, so it does not offer Restart for it.
       const push = (item: CanvasItem) =>
         setRoutes((was) => {
           const stack = was[item.id] ?? [];
-          if (stack[stack.length - 1] === path || (!stack.length && screenAt(item, path) === item.component)) return was;
-          return { ...was, [item.id]: [...stack, path] };
+          const first = !stack.length && screenAt(item, path) === item.component && !searchPart(location);
+          if (stack[stack.length - 1] === location || first) return was;
+          return { ...was, [item.id]: [...stack, location] };
         });
       if (!blank) {
         // The same tab: a screen of this item, in place. A frame shows its own screens itself,
@@ -4538,7 +4643,7 @@ function CanvasBoard({
       push(target);
       if (!target.viewport) return;
       const frame = worldRef.current?.querySelector<HTMLIFrameElement>(`iframe[data-canvas-frame="${CSS.escape(target.id)}"]`);
-      if (frame?.contentWindow) postToFrame(frame.contentWindow, { type: "screen", path });
+      if (frame?.contentWindow) postToFrame(frame.contentWindow, { type: "screen", path: location });
     },
     [arrive, notify, reveal, shown],
   );
@@ -5283,8 +5388,12 @@ function CanvasBoard({
       if (inTextEdit(event.target)) return hidePick();
       if (moveDraw(event)) return;
       if (inspectToolRef.current) {
-        // Over the panel, its breadcrumb owns the box (inspectHighlight).
-        if (event.target instanceof Element && event.target.closest(".canvas-inspect, .canvas-inspect-popover")) return;
+        // Over the panel, its breadcrumb owns the box (inspectHighlight); anywhere else there,
+        // the person is working on the selection, and the box would cover the edges they judge.
+        if (event.target instanceof Element && event.target.closest(".canvas-inspect, .canvas-inspect-popover")) {
+          if (!event.target.closest(".canvas-inspect-path")) hidePick();
+          return;
+        }
         const target = gesture.current ? null : inspectTarget(event.target);
         if (target) placeBox(pickRef.current, target.element.getBoundingClientRect());
         else hidePick();
@@ -5996,60 +6105,9 @@ function CanvasBoard({
       <div ref={pickRef} className="canvas-pick" hidden aria-hidden="true" />
       <div ref={drawRef} className="canvas-draw" hidden aria-hidden="true" />
       <div ref={sizeTipRef} className="canvas-size-tip" hidden aria-hidden="true" />
-      {toast && (
-        <div className="canvas-toast">
-          {toast.kind === "copied" ? (
-            <span>{labels.copiedText(toast.text)}</span>
-          ) : toast.kind === "notice" ? (
-            <>
-              <span>{toast.text}</span>
-              {toast.action && (
-                <button
-                  type="button"
-                  className="canvas-button"
-                  onClick={() => {
-                    toast.action?.run();
-                    setToast(null);
-                  }}
-                >
-                  {toast.action.label}
-                </button>
-              )}
-            </>
-          ) : (
-            <>
-              <span className="canvas-subtle">{labels.copyFailed}</span>
-              {/* A list of annotations keeps its lines; one reference fits a field. */}
-              {toast.text.includes("\n") ? (
-                <textarea
-                  readOnly
-                  rows={4}
-                  value={toast.text}
-                  aria-label={labels.copyFailed}
-                  onFocus={(event) => event.currentTarget.select()}
-                  // biome-ignore lint/a11y/noAutofocus: the fallback appears only after a copy attempt.
-                  autoFocus
-                />
-              ) : (
-                <input
-                  readOnly
-                  value={toast.text}
-                  aria-label={labels.copyFailed}
-                  onFocus={(event) => event.currentTarget.select()}
-                  // biome-ignore lint/a11y/noAutofocus: the fallback appears only after a copy attempt.
-                  autoFocus
-                />
-              )}
-              <button type="button" className="canvas-button" onClick={() => setToast(null)}>
-                {labels.dismiss}
-              </button>
-            </>
-          )}
-        </div>
-      )}
-      {/* Four groups, each where designers expect it: tools at the bottom centre, the view bottom right, the
-          file's own controls top right, and the changes waiting for the agent, only when there are any, top
-          centre. The tools bar comes first: item reveals measure the first bar for the bottom margin. */}
+      {/* Controls where designers expect them: tools at the bottom centre, the view bottom right, the
+          file's own controls top right. What the canvas tells the person is at the top centre (see
+          canvas-messages below). The tools bar comes first: item reveals measure the first bar for the bottom margin. */}
       <div className="canvas-toolbar" data-place="tools" role="toolbar" aria-label={labels.toolsBar}>
           {/* One tool at a time. Interact is the default; Escape or V returns to it. */}
           <button
@@ -6159,28 +6217,9 @@ function CanvasBoard({
           <ResetIcon />
         </button>
       </div>
-      {!shared && trashedItems.length > 0 && (
-        <div className="canvas-toolbar" data-place="trash" role="toolbar" aria-label={labels.trashHeading}>
-          <button
-            ref={trashButtonRef}
-            type="button"
-            className="canvas-button canvas-trash-button"
-            aria-label={labels.trash(trashedItems.length)}
-            aria-expanded={trashOpen}
-            aria-controls={trashOpen ? "canvas-trash" : undefined}
-            data-tip={labels.trashHeading}
-            onClick={() => {
-              // The trash opens where notices and the share panel show.
-              setToast(null);
-              setSharedFile(null);
-              setTrashOpen((open) => !open);
-            }}
-          >
-            <TrashIcon />
-            {trashedItems.length}
-          </button>
-        </div>
-      )}
+      {/* The file's own controls, top right, in two groups: what is in the file (the trash, while it
+          holds something, and share), then the canvas itself (settings, help). The trash comes and goes
+          at the group's left end, so nothing under the pointer moves. */}
       <div className="canvas-toolbar" data-place="top" role="toolbar" aria-label={labels.canvasBar}>
         {theme && theme.options.length > 1 && (
           <>
@@ -6205,50 +6244,142 @@ function CanvasBoard({
             <span className="canvas-separator" aria-hidden="true" />
           </>
         )}
-        <BackgroundPicker value={background} onChange={setBackground} />
         {!shared && (
           <>
+            {trashedItems.length > 0 && (
+              <button
+                ref={trashButtonRef}
+                type="button"
+                className="canvas-button canvas-trash-button"
+                aria-label={labels.trash(trashedItems.length)}
+                aria-expanded={trashOpen}
+                aria-controls={trashOpen ? "canvas-trash" : undefined}
+                data-tip={labels.trashHeading}
+                onClick={() => {
+                  // One of the trash, the share panel, and a notice at a time: they open in the same corner.
+                  setToast(null);
+                  setShareOpen(false);
+                  setTrashOpen((open) => !open);
+                }}
+              >
+                <TrashIcon />
+                {trashedItems.length}
+              </button>
+            )}
             {/* While the file builds, the icon pulses and the button takes no second click. */}
             <button
               ref={shareButtonRef}
               type="button"
               className="canvas-button canvas-icon-button canvas-share-button"
-              disabled={sharing}
               aria-busy={sharing}
+              aria-expanded={shareOpen}
               aria-label={sharing ? labels.sharing : labels.share}
               data-tip={sharing ? labels.sharing : labels.share}
-              onClick={() => void share()}
+              onClick={() => {
+                // One of the share panel, the trash, and a notice at a time: they open in the same corner.
+                if (!shareOpen) {
+                  window.clearTimeout(toastTimer.current);
+                  setToast(null);
+                  setTrashOpen(false);
+                }
+                setShareOpen((open) => !open);
+              }}
             >
               <ShareIcon />
             </button>
             <span className="canvas-separator" aria-hidden="true" />
           </>
         )}
+        <SettingsMenu value={background} onChange={setBackground} />
         <Help />
       </div>
-      {/* Only while something is still to apply: the one place to apply or drop every change, so it is hard to miss.
-          What the agent is working on says so with a tag on each object instead. */}
-      {!shared && unsentCount > 0 && (
-        <div className="canvas-toolbar" data-place="pending" role="group" aria-label={labels.changesBar}>
-          {hasChanges && (
-            <button
-              type="button"
-              className="canvas-button"
-              aria-label={labels.discardChanges}
-              data-tip={labels.discardChanges}
-              onClick={discardChanges}
-            >
-              <EraserIcon />
-              {labels.discardShort}
+      {/* The one place the canvas tells the person something: the changes waiting for the agent, and
+          under them a notice for a few seconds. A notice never hides the bar: it often points at it
+          ("1 isn't sent yet"), and "Copied" then shows right under the button that copied. */}
+      <div className="canvas-messages">
+        {/* Only while something is still to apply: the one place to apply or drop every change, so it is hard to miss.
+            What the agent is working on says so with a tag on each object instead. */}
+        {!shared && unsentCount > 0 && (
+          <div className="canvas-toolbar" data-place="pending" role="group" aria-label={labels.changesBar}>
+            {hasChanges && (
+              <button
+                type="button"
+                className="canvas-button"
+                aria-label={labels.discardChanges}
+                data-tip={labels.discardChanges}
+                onClick={discardChanges}
+              >
+                <EraserIcon />
+                {labels.discardShort}
+              </button>
+            )}
+            <button type="button" className="canvas-button canvas-button-primary" onClick={() => void sendAnnotations()}>
+              {agentOn ? <SendIcon /> : <CopyIcon />}
+              {agentOn ? labels.sendAnnotations(unsentCount) : labels.copyAnnotations(unsentCount)}
             </button>
-          )}
-          <button type="button" className="canvas-button canvas-button-primary" onClick={() => void sendAnnotations()}>
-            {agentOn ? <SendIcon /> : <CopyIcon />}
-            {agentOn ? labels.sendAnnotations(unsentCount) : labels.copyAnnotations(unsentCount)}
-          </button>
-        </div>
+          </div>
+        )}
+        {toast && (
+          <div className="canvas-toast">
+            {toast.kind === "copied" ? (
+              <span>{labels.copiedText(toast.text)}</span>
+            ) : toast.kind === "notice" ? (
+              <>
+                <span>{toast.text}</span>
+                {toast.action && (
+                  <button
+                    type="button"
+                    className="canvas-button"
+                    onClick={() => {
+                      toast.action?.run();
+                      setToast(null);
+                    }}
+                  >
+                    {toast.action.label}
+                  </button>
+                )}
+              </>
+            ) : (
+              <>
+                <span className="canvas-subtle">{labels.copyFailed}</span>
+                {/* A list of annotations keeps its lines; one reference fits a field. */}
+                {toast.text.includes("\n") ? (
+                  <textarea
+                    readOnly
+                    rows={4}
+                    value={toast.text}
+                    aria-label={labels.copyFailed}
+                    onFocus={(event) => event.currentTarget.select()}
+                    // biome-ignore lint/a11y/noAutofocus: the fallback appears only after a copy attempt.
+                    autoFocus
+                  />
+                ) : (
+                  <input
+                    readOnly
+                    value={toast.text}
+                    aria-label={labels.copyFailed}
+                    onFocus={(event) => event.currentTarget.select()}
+                    // biome-ignore lint/a11y/noAutofocus: the fallback appears only after a copy attempt.
+                    autoFocus
+                  />
+                )}
+                <button type="button" className="canvas-button" onClick={() => setToast(null)}>
+                  {labels.dismiss}
+                </button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+      {shareOpen && (
+        <SharePanel
+          scopes={shareScopes}
+          whole={shareContents(null).items}
+          busy={sharing}
+          onDownload={(section) => void share(section)}
+          onClose={closeSharePanel}
+        />
       )}
-      {sharedFile && <SharePanel file={sharedFile.name} missing={sharedFile.missing} onClose={closeSharePanel} />}
       {flowItem && (
         <FlowView
           item={flowItem}

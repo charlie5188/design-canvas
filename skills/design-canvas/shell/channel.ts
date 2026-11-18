@@ -18,3 +18,5 @@ export const SHARE_PATH = "/__design-canvas/share";
 export const EDIT_PATH = "/__design-canvas/edit";
 /** Inspect: the props a design-system component takes, read from its type declarations (props-types.ts). */
 export const PROPS_PATH = "/__design-canvas/props";
+/** Inspect: the Tailwind theme the app builds with, its tokens whether the page uses them or not (tailwind-theme.ts). */
+export const THEME_PATH = "/__design-canvas/theme";

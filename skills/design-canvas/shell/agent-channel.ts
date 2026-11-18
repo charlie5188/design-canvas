@@ -32,8 +32,10 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { access, chmod, constants, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import type { Plugin } from "vite";
-import { AGENT_EVENT, AGENT_PATH, type AgentReply, EDIT_PATH, MAX_REPLY, NOTE_ID, PROPS_PATH, REPLY_EVENT, SHARE_PATH, VERSION_PATH } from "./channel.ts";
-import { componentProps } from "./props-types.ts";
+import { AGENT_EVENT, AGENT_PATH, type AgentReply, EDIT_PATH, MAX_REPLY, NOTE_ID, PROPS_PATH, REPLY_EVENT, SHARE_PATH, THEME_PATH, VERSION_PATH } from "./channel.ts";
+import { componentProps, sourceProps } from "./props-types.ts";
+import { standIns } from "./stand-ins.ts";
+import { readStylesheet, tailwindTheme } from "./tailwind-theme.ts";
 import { addEntry, applyEdits, type DirectAdd, type DirectEdit, type DirectRemove, placeableItems, removeEntry, validAdd, validEdit, validRemove } from "./registry-edit.ts";
 
 export type AgentState = "off" | "listening" | "working";
@@ -129,10 +131,46 @@ function readBody(request: IncomingMessage): Promise<string> {
 // name at run time, where no bundler follows them into the page.
 const load = (name: string): Promise<unknown> => import(/* @vite-ignore */ name);
 
+/** What a shared file leaves out, by registry id: the trash, and what lies outside what the person chose to share. */
+export type LeaveOut = { items: string[]; notes: string[]; sections: string[] };
+const SHARE_ID = /^[a-z0-9][a-z0-9-]{0,79}$/i;
+/** A leave-out list from the browser, checked before it goes near the build. */
+function validLeaveOut(value: unknown): LeaveOut | undefined {
+  const ids = (list: unknown) => (Array.isArray(list) && list.every((id) => typeof id === "string" && SHARE_ID.test(id)) ? (list as string[]) : undefined);
+  const raw = (value ?? {}) as Record<string, unknown>;
+  const items = ids(raw.items ?? []);
+  const notes = ids(raw.notes ?? []);
+  const sections = ids(raw.sections ?? []);
+  return items && notes && sections ? { items, notes, sections } : undefined;
+}
+
+/**
+ * Takes entries out of registry.tsx as the shared file is built, never on disk: what the file
+ * leaves out is then not in it at all (its component's code included), not only hidden.
+ */
+function leaveOutOfRegistry(root: string, leave: LeaveOut): Plugin {
+  const registry = join(root, "registry.tsx").replace(/\\/g, "/");
+  return {
+    name: "design-canvas:leave-out",
+    enforce: "pre",
+    transform(code, id) {
+      if (id.split("?")[0]!.replace(/\\/g, "/") !== registry) return undefined;
+      let source = code;
+      const kinds = [["item", leave.items], ["note", leave.notes], ["section", leave.sections]] as const;
+      for (const [kind, ids] of kinds) for (const entry of ids) source = removeEntry(source, kind, entry) ?? source;
+      return { code: source, map: null };
+    },
+  };
+}
+
 /** Builds the canvas at `root` into one HTML file with its share.config.mts, in memory. */
-async function buildSharedFile(root: string): Promise<SharedFile> {
+async function buildSharedFile(root: string, leave?: LeaveOut): Promise<SharedFile> {
   const vite = (await load("vite")) as typeof import("vite");
-  const result = await vite.build({ configFile: `${root}/canvas/share.config.mts`, build: { write: false } });
+  const result = await vite.build({
+    configFile: `${root}/canvas/share.config.mts`,
+    build: { write: false },
+    ...(leave ? { plugins: [leaveOutOfRegistry(root, leave)] } : {}),
+  });
   const files = (Array.isArray(result) ? result : [result]).flatMap(
     (entry) => (entry as { output?: { fileName: string; source?: unknown }[] }).output ?? [],
   );
@@ -210,7 +248,13 @@ const DEVTOOLS_HOOK = `if (!window.__REACT_DEVTOOLS_GLOBAL_HOOK__) {
   };
 }`;
 
-export function agentChannel(): Plugin {
+// With it, the framework stand-ins (stand-ins.ts): every canvas's vite config already loads
+// agentChannel(), so a shell update brings them to canvases installed before they existed.
+export function agentChannel(): Plugin[] {
+  return [channel(), standIns()];
+}
+
+function channel(): Plugin {
   let root = "";
   return {
     name: "design-canvas:agent",
@@ -221,6 +265,8 @@ export function agentChannel(): Plugin {
       root = config.root;
     },
     transform(code, id) {
+      // The app's stylesheets, as written: their Tailwind theme, for Inspect (tailwind-theme.ts).
+      if (/\.css(?:$|\?)/.test(id)) readStylesheet(id.split("?")[0]!, code);
       return renderInPlace(code, id, root);
     },
     // Inspect previews a prop change live through the hook React's dev build reports to (as React
@@ -468,12 +514,19 @@ export function agentChannel(): Plugin {
         const query = new URL(request.url ?? "/", "http://canvas").searchParams;
         const pkg = query.get("package") ?? "";
         const component = query.get("component") ?? "";
-        if (!/^(@[\w.-]+\/)?[\w.-]+$/.test(pkg)) return send(response, 400, "Bad package");
+        if (pkg && !/^(@[\w.-]+\/)?[\w.-]+$/.test(pkg)) return send(response, 400, "Bad package");
         try {
-          sendJson(response, { props: componentProps(server.config.root, pkg, component) });
+          // A system with no package (shadcn/ui) has its components in the app's own source.
+          const props = pkg ? componentProps(server.config.root, pkg, component) : sourceProps(server.config.root, component);
+          sendJson(response, { props });
         } catch (error) {
           send(response, 500, error instanceof Error ? error.message : String(error));
         }
+      });
+      server.middlewares.use(THEME_PATH, (request, response, next) => {
+        if (request.method !== "GET") return next();
+        if (!localHost(request)) return send(response, 403, "Not allowed");
+        sendJson(response, { theme: tailwindTheme(server.config.root) });
       });
       server.middlewares.use(VERSION_PATH, (request, response, next) => {
         if (request.method !== "GET" || (request.url ?? "/") !== "/") return next();
@@ -488,17 +541,32 @@ export function agentChannel(): Plugin {
         );
       });
 
-      // One build at a time: a second click while it runs gets the same file.
-      let sharing: Promise<SharedFile> | undefined;
+      // One build per choice at a time: a second click while it runs gets the same file.
+      const sharing = new Map<string, Promise<SharedFile>>();
       server.middlewares.use(SHARE_PATH, (request, response, next) => {
         if (request.method !== "POST" || (request.url ?? "/") !== "/") return next();
         if (!fromCanvasPage(request)) return send(response, 403, "Not allowed");
-        sharing ??= buildSharedFile(server.config.root).finally(() => {
-          sharing = undefined;
-        });
-        sharing.then(
-          (file) => sendJson(response, file),
-          (error: unknown) => send(response, 500, error instanceof Error ? error.message : String(error)),
+        readBody(request).then(
+          (body) => {
+            let leave: LeaveOut | undefined;
+            try {
+              leave = validLeaveOut(body.trim() ? (JSON.parse(body) as { leaveOut?: unknown }).leaveOut : undefined);
+            } catch {
+              leave = undefined;
+            }
+            if (!leave) return send(response, 400, "Bad request");
+            const key = JSON.stringify(leave);
+            let build = sharing.get(key);
+            if (!build) {
+              build = buildSharedFile(server.config.root, leave).finally(() => sharing.delete(key));
+              sharing.set(key, build);
+            }
+            build.then(
+              (file) => sendJson(response, file),
+              (error: unknown) => send(response, 500, error instanceof Error ? error.message : String(error)),
+            );
+          },
+          () => send(response, 400, "Bad request"),
         );
       });
     },
