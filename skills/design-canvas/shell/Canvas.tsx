@@ -71,7 +71,6 @@ import {
   clearPending,
   describeArea,
   describeElement,
-  findDescribed,
   editText,
   isEditable,
   nestedCanScroll,
@@ -89,10 +88,12 @@ import { CanvasItemView, type ResizeEdge } from "./Item";
 import { InspectPanel } from "./Inspect";
 import { type InspectRecord, useInspect } from "./inspect-edit";
 import { type DesignSystem, selectable, showProp, showStyle } from "./inspect-read";
-import { controlWords, type FlowStep, FlowView } from "./FlowView";
-import { linkName, locationOf, opensNewTab, pathPart, screenAt, screenIndex, screensOf, searchPart } from "./routes";
+import { type FlowStep, FlowView } from "./FlowView";
+import { opensNewTab, screenIndex, screensOf } from "./routes";
 import { labels } from "./labels";
+import { useLinks } from "./links";
 import { planPick } from "./pick";
+import { usePinAnchors } from "./pin-anchors";
 import {
   type Bounds,
   type Camera,
@@ -115,16 +116,14 @@ import { type ThemeStore, useThemeId } from "./theme";
 import { TrashButton, TrashPopover, useTrash, useTrashList } from "./Trash";
 import { type Box, type Guide, SNAP_DISTANCE, type Snap, snapBox } from "./snap";
 import { type CanvasItem, type CanvasNote, type CanvasSection, isSetAside } from "./types";
+import { DEFAULT_CAMERA, useCamera } from "./camera";
 import { EDIT_PATH } from "./channel.ts";
 import type { DirectAdd, DirectEdit, DirectRemove } from "./registry-edit.ts";
 import "./canvas.css";
 
-const DEFAULT_CAMERA: Camera = { x: 48, y: 120, z: 1 };
 const WHEEL_ZOOM = 0.0025;
 const KEY_PAN = 48;
 const DRAG_THRESHOLD = 3;
-const SAVE_DELAY = 400;
-const SAVE_MAX_WAIT = 2000;
 const ADD_GAP = 96;
 const REVEAL_MARGIN = 48;
 /** The notice row that opens under the top bars, at the top centre. */
@@ -137,9 +136,6 @@ const FIT_PADDING = 72;
 const DOUBLE_TAP_MS = 400;
 /** Room a section's title takes above its frame, in canvas units. */
 const SECTION_TITLE_ROOM = 32;
-// How long until a pin's element is looked for again, and how many times in a row.
-const ANCHOR_RETRY_MS = 400;
-const ANCHOR_RETRIES = 6;
 
 /** How much of each note a section note's reference quotes. */
 const MAX_NOTE_QUOTE = 120;
@@ -286,7 +282,6 @@ function CanvasBoard({
     setBackgroundState(value);
     saveBackground(storageKey, value);
   };
-  const camera = useRef<Camera>(saved.camera ?? DEFAULT_CAMERA);
   const [positions, setPositions] = useState<Record<string, Position>>(() =>
     Object.fromEntries(items.map((item) => [item.id, saved.positions[item.id] ?? { x: item.x, y: item.y }])),
   );
@@ -309,19 +304,8 @@ function CanvasBoard({
   // The item last touched: where a router call came from, since the call itself does not say.
   const frontIdRef = useRef(frontId);
   frontIdRef.current = frontId;
-  // The paths each plain item went through, newest last (routes.ts). An item with no entry,
-  // or an empty one, shows its first screen. A `viewport` item keeps its own, in its frame.
-  const [routes, setRoutes] = useState<Record<string, string[]>>({});
-  const restartRoute = useCallback((id: string) => setRoutes((was) => (was[id]?.length ? { ...was, [id]: [] } : was)), []);
-  const routesRef = useRef(routes);
-  routesRef.current = routes;
-  // The flow view (FlowView.tsx): the item it shows, and the steps the person made in each item,
-  // which give arrows that a screen's links cannot (a router call in a click handler).
+  // The flow view (FlowView.tsx): the item it shows.
   const [flowId, setFlowId] = useState<string | null>(null);
-  const [steps, setSteps] = useState<Record<string, FlowStep[]>>({});
-  // The control last pressed in an item, so a step it makes can be named on its arrow: click "Pay".
-  // A router call does not say what started it; a press just before it did.
-  const lastPress = useRef<{ id: string; words?: string; at: number } | null>(null);
   const openFlow = useCallback((item: CanvasItem) => setFlowId(item.id), []);
   const closeFlow = useCallback(() => setFlowId(null), []);
   // Items the saved layout already knows. Anything else is new and gets
@@ -333,124 +317,24 @@ function CanvasBoard({
   // Set for one tick after a pan or move, so the click it ends on stays silent.
   const clickSuppressed = useRef(false);
 
-  const frame = useRef(0);
-  // Puts the camera on the page: the world's place and size, and the zoom label.
-  const paint = useCallback(() => {
-    const { x, y, z } = camera.current;
-    // Each frame of a pan or zoom touches the page as little as it can. Adding or
-    // removing any node (setting textContent does both) makes the browser re-check
-    // `:has()` rules up the whole tree, and an item's or the app's CSS often has some:
-    // on a canvas of plain items that meant restyling every element on every frame
-    // (~35 ms). So nothing is written that did not change, and the zoom label edits
-    // its text node in place instead of replacing it.
-    if (worldRef.current) {
-      worldRef.current.style.transform = `translate(${x}px, ${y}px) scale(${z})`;
-      // Annotation pins counter-scale with this, so they keep one size on screen.
-      const unzoom = String(1 / z);
-      if (worldRef.current.style.getPropertyValue("--canvas-unzoom") !== unzoom) worldRef.current.style.setProperty("--canvas-unzoom", unzoom);
-    }
-    // The outline is drawn in screen space; after the camera moves it would
-    // point at the wrong place, so it waits for the next pointer move.
-    if (pickRef.current && !pickRef.current.hidden) pickRef.current.hidden = true;
-    const label = zoomLabelRef.current?.firstChild;
-    const zoomText = `${Math.round(z * 100)}%`;
-    if (label instanceof Text) {
-      if (label.data !== zoomText) label.data = zoomText;
-    } else if (zoomLabelRef.current) zoomLabelRef.current.textContent = zoomText;
-  }, []);
-  const render = useCallback(() => {
-    if (frame.current) return;
-    frame.current = requestAnimationFrame(() => {
-      frame.current = 0;
-      paint();
-    });
-  }, [paint]);
-  // The saved camera is on the page before the first paint. Left to render(), it came a
-  // frame or two after the items: on every reload the canvas showed at the default view
-  // and then jumped to the saved one, for longer on a slow machine or a large canvas.
-  useLayoutEffect(paint, [paint]);
-
-  // Items glide to a place the canvas moved them to by itself (a pick sets the others
-  // aside; Undo brings things back), so the person sees where each one went. Only for
-  // that moment: a drag, a resize, and a hot update set positions too, and must not
-  // trail the pointer or animate on load. The motion itself is in canvas.css ("Motion").
-  const glideTimer = useRef(0);
-  const glide = useCallback(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-    viewport.setAttribute("data-glide", "");
-    window.clearTimeout(glideTimer.current);
-    glideTimer.current = window.setTimeout(() => viewport.removeAttribute("data-glide"), 400);
-  }, []);
-
-  const saveTimer = useRef(0);
-  const firstQueued = useRef(0);
-  const flushSave = useCallback(() => {
-    window.clearTimeout(saveTimer.current);
-    saveTimer.current = 0;
-    firstQueued.current = 0;
-    saveLayout(storageKey, camera.current, positionsRef.current, theme?.get(), {
-      ids: trashRef.current,
-      kept: [...trashKept.current],
-      inRegistry: !shared,
-    });
-  }, [storageKey, theme]);
-  const queueSave = useCallback(() => {
-    const now = performance.now();
-    if (!firstQueued.current) firstQueued.current = now;
-    window.clearTimeout(saveTimer.current);
-    const wait = Math.max(0, Math.min(SAVE_DELAY, SAVE_MAX_WAIT - (now - firstQueued.current)));
-    saveTimer.current = window.setTimeout(flushSave, wait);
-  }, [flushSave]);
-
-  // A glide of the camera in progress (flyTo), as its animation frame; 0 when there is none.
-  const flight = useRef(0);
-  const setCamera = useCallback(
-    (next: Camera) => {
-      // Anything else that sets the camera takes over from a glide.
-      cancelAnimationFrame(flight.current);
-      flight.current = 0;
-      camera.current = sanitizeCamera(next);
-      render();
-      queueSave();
-    },
-    [render, queueSave],
+  // The camera (camera.ts). It decides when the layout is written; what is in it is here.
+  const writeLayout = useCallback(
+    (now: Camera) =>
+      saveLayout(storageKey, now, positionsRef.current, theme?.get(), {
+        ids: trashRef.current,
+        kept: [...trashKept.current],
+        inRegistry: !shared,
+      }),
+    [storageKey, theme],
   );
-  // Glides the camera to `to` in about a quarter of a second, so the person sees where the
-  // view came from. Used when a link that opens a new tab takes the view to another item: a
-  // jump there would leave them not knowing where the first item went. The person is never
-  // held by it: a press, a wheel turn, or a key stops the glide where it is, and they go on
-  // from there. With reduced motion the camera is set at once.
-  const flyTo = useCallback(
-    (to: Camera) => {
-      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return setCamera(to);
-      cancelAnimationFrame(flight.current);
-      const from = camera.current;
-      const start = performance.now();
-      const events = ["pointerdown", "wheel", "keydown"] as const;
-      const stop = () => {
-        cancelAnimationFrame(flight.current);
-        flight.current = 0;
-        for (const type of events) window.removeEventListener(type, stop, true);
-        queueSave();
-      };
-      for (const type of events) window.addEventListener(type, stop, true);
-      const step = (now: number) => {
-        const part = Math.min(1, (now - start) / 260);
-        const eased = 1 - (1 - part) ** 3;
-        camera.current = sanitizeCamera({
-          x: from.x + (to.x - from.x) * eased,
-          y: from.y + (to.y - from.y) * eased,
-          z: from.z + (to.z - from.z) * eased,
-        });
-        render();
-        if (part < 1) flight.current = requestAnimationFrame(step);
-        else stop();
-      };
-      flight.current = requestAnimationFrame(step);
-    },
-    [queueSave, render, setCamera],
-  );
+  const { camera, frame, saveTimer, render, glide, flushSave, queueSave, setCamera, flyTo } = useCamera({
+    initial: saved.camera,
+    worldRef,
+    pickRef,
+    zoomLabelRef,
+    viewportRef,
+    writeLayout,
+  });
 
   useOpeningChecks(items, notify);
   // Share (Share.tsx): what goes in the file, and the download.
@@ -2276,100 +2160,8 @@ function CanvasBoard({
     viewportRef,
   });
 
-  // A pin is placed at a point in its item, but it is about an element. When the
-  // item is resized the layout moves, and the element with it, while the point
-  // stays: the pin ends up on something else. So each pin is kept on its element,
-  // at the same place within it. The element is found from the pin's reference
-  // (dom.ts findDescribed), once, while the layout still matches the point, and
-  // followed from then on. A whole-item note keeps covering the whole item. A
-  // drawn area, and a pin whose element can no longer be found (its words
-  // changed), stay where they are, as before.
-  const anchors = useRef(new Map<string, { element: Element; fx: number; fy: number }>());
-  // A pin whose element is not there yet (its frame is still loading) or is gone. Each look
-  // reads the whole item, so it is tried again a few times, and after that only now and then.
-  const misses = useRef(new Map<string, { at: number; count: number }>());
-  const anchoredItems = useRef<CanvasItem[] | null>(null);
-  const [settle, setSettle] = useState(0);
-  useLayoutEffect(() => {
-    const world = worldRef.current;
-    if (!world || shared) return;
-    const live = new Set(annotations.map((a) => a.id));
-    for (const id of anchors.current.keys()) if (!live.has(id)) anchors.current.delete(id);
-    for (const id of misses.current.keys()) if (!live.has(id)) misses.current.delete(id);
-    const now = performance.now();
-    // A framed item lays out again a moment after its new size is saved, in its own
-    // document, and nothing here hears of it: so every change of the items is followed by one more look.
-    let again = anchoredItems.current !== items;
-    anchoredItems.current = items;
-    let moved = false;
-    const next = annotations.map((a) => {
-      if (sectionOf(a) !== null) return a;
-      const item = items.find((entry) => entry.id === a.itemId);
-      const preview = world.querySelector<HTMLElement>(`[data-canvas-preview="${CSS.escape(a.itemId)}"]`);
-      if (!item || !preview) return a;
-      if (a.w && a.h) {
-        if (a.ref !== item.name) return a;
-        const [w, h] = [preview.offsetWidth, preview.offsetHeight];
-        if (Math.abs(a.w - w) < 1 && Math.abs(a.h - h) < 1) return a;
-        moved = true;
-        return { ...a, w, h };
-      }
-      const prefix = `${item.name} › `;
-      if (!a.ref.startsWith(prefix)) return a;
-      // Where the item's content is, and how client pixels turn into the item's own units.
-      // A frame's own pixels already are those units (see the "annotate" message).
-      const frame = preview.querySelector<HTMLIFrameElement>("iframe[data-canvas-frame]");
-      let root: Element | null = preview;
-      let origin = { x: 0, y: 0 };
-      let scale = 1;
-      if (frame) {
-        try {
-          root = frame.contentDocument?.querySelector(".canvas-frame-root") ?? null;
-        } catch {
-          root = null;
-        }
-      } else {
-        const box = preview.getBoundingClientRect();
-        origin = { x: box.left, y: box.top };
-        scale = box.width / Math.max(1, preview.offsetWidth);
-      }
-      const boxOf = (element: Element) => {
-        const r = element.getBoundingClientRect();
-        return { x: (r.left - origin.x) / scale, y: (r.top - origin.y) / scale, w: r.width / scale, h: r.height / scale };
-      };
-      let anchor = anchors.current.get(a.id);
-      if (anchor && !root?.contains(anchor.element)) anchor = undefined;
-      if (!anchor) {
-        const miss = misses.current.get(a.id);
-        const fresh = !!miss && now - miss.at < ANCHOR_RETRY_MS - 50;
-        const element = root && !fresh ? findDescribed(root, a.ref.slice(prefix.length)) : null;
-        if (!element) {
-          const count = fresh ? miss.count : (miss?.count ?? 0) + 1;
-          if (!fresh) misses.current.set(a.id, { at: now, count });
-          if (count < ANCHOR_RETRIES) again = true;
-          return a;
-        }
-        misses.current.delete(a.id);
-        const box = boxOf(element);
-        // Where in its element the pin sits. One found outside it (the layout moved before anyone looked) goes to its middle.
-        const inside = a.x >= box.x - 2 && a.x <= box.x + box.w + 2 && a.y >= box.y - 2 && a.y <= box.y + box.h + 2;
-        anchor = { element, fx: inside && box.w ? (a.x - box.x) / box.w : 0.5, fy: inside && box.h ? (a.y - box.y) / box.h : 0.5 };
-        anchors.current.set(a.id, anchor);
-      }
-      const box = boxOf(anchor.element);
-      const x = Math.round(box.x + anchor.fx * box.w);
-      const y = Math.round(box.y + anchor.fy * box.h);
-      if (Math.abs(x - a.x) <= 1 && Math.abs(y - a.y) <= 1) return a;
-      moved = true;
-      return { ...a, x, y };
-    });
-    const timer = again ? window.setTimeout(() => setSettle((n) => n + 1), ANCHOR_RETRY_MS) : 0;
-    if (moved) {
-      annotationsRef.current = next;
-      setAnnotations(next);
-    }
-    return () => window.clearTimeout(timer);
-  }, [annotations, items, settle]);
+  // Each pin stays on the element it is about when the layout moves (pin-anchors.ts).
+  usePinAnchors({ annotations, annotationsRef, setAnnotations, items, worldRef });
 
   // The agent's answer to a note (scripts/reply.sh) lands on that note. Questions
   // are asked on the canvas, at the thing they are about, so that is where the
@@ -2595,112 +2387,8 @@ function CanvasBoard({
     [notify],
   );
 
-  // The item a link led to shows a ring for a moment. When that item is already in view the
-  // camera does not move, and without this nothing on the canvas would say where the link went.
-  // Set on the element itself: it is over in a second, and no state needs to follow it.
-  const arrive = useCallback((id: string) => {
-    const element = worldRef.current?.querySelector<HTMLElement>(`[data-canvas-item="${CSS.escape(id)}"]`);
-    if (!element) return;
-    element.removeAttribute("data-arrived");
-    // Read once, so a second arrival starts the ring again.
-    void element.offsetWidth;
-    element.setAttribute("data-arrived", "");
-    window.setTimeout(() => element.removeAttribute("data-arrived"), 1000);
-  }, []);
-
-  /**
-   * Where a link or a router call goes (routes.ts). `#<id>` reveals that item. A path stays
-   * in the item it came from: one of that item's screens shows in place, and any other path
-   * shows a notice. Only a link that opens a new tab in the product (`blank`) leaves the
-   * item: the view goes to the nearest other item that shows the path.
-   * `fromId` is the item the link was in; a router call does not say, so the item last
-   * touched stands for it.
-   */
-  const followLink = useCallback(
-    (href: string, fromId?: string, blank = false) => {
-      if (href.startsWith("#")) {
-        const target = shown.find((item) => item.id === decodeURIComponent(href.slice(1)));
-        if (target) {
-          setFrontId(target.id);
-          reveal([target]);
-        }
-        return;
-      }
-      const named = linkName(href);
-      if (named === null) return;
-      const from = shown.find((item) => item.id === (fromId ?? frontIdRef.current));
-      // Where the link goes, with its query (`?status=signed`), as the item will remember it.
-      // A query alone (`router.push("?status=signed")`) stays on the screen the item shows.
-      const here = from ? (routesRef.current[from.id]?.[routesRef.current[from.id]!.length - 1] ?? from.path ?? "/") : "/";
-      const location = locationOf(href, here);
-      const path = location && pathPart(location);
-      if (!location || !path) return notify(blank ? labels.newTabBlocked(named) : labels.linkBlocked(named));
-      // An item at its first screen that is sent to its first screen, with no query, has gone
-      // nowhere: nothing is noted, so it does not offer Restart for it.
-      const push = (item: CanvasItem) =>
-        setRoutes((was) => {
-          const stack = was[item.id] ?? [];
-          const first = !stack.length && screenAt(item, path) === item.component && !searchPart(location);
-          if (stack[stack.length - 1] === location || first) return was;
-          return { ...was, [item.id]: [...stack, location] };
-        });
-      if (!blank) {
-        // The same tab: a screen of this item, in place. A frame shows its own screens itself,
-        // so a path that reaches here from one is not its own.
-        if (from && !from.viewport && screenAt(from, path)) {
-          const stack = routesRef.current[from.id] ?? [];
-          const was = Math.max(0, screenIndex(from, stack[stack.length - 1] ?? from.path ?? ""));
-          const to = screenIndex(from, path);
-          const press = lastPress.current;
-          const label = press && press.id === from.id && performance.now() - press.at < 1500 ? press.words : undefined;
-          if (to !== was)
-            setSteps((all) => {
-              const list = all[from.id] ?? [];
-              const known = list.find((s) => s.from === was && s.to === to);
-              if (known && (known.label || !label)) return all;
-              return { ...all, [from.id]: [...list.filter((s) => s !== known), { from: was, to, label }] };
-            });
-          return push(from);
-        }
-        return notify(from && (from.path || from.screens) ? labels.screenMissing(named) : labels.linkBlocked(named));
-      }
-      // A new tab: another item that shows the path, the nearest one, since several versions
-      // of a flow can each show the same path, and the one meant is the one beside the link.
-      const centre = (item: CanvasItem) => {
-        const at = positionsRef.current[item.id] ?? item;
-        return { x: at.x + item.width / 2, y: at.y + item.height / 2 };
-      };
-      const origin = from && centre(from);
-      const away = (item: CanvasItem) => (origin ? Math.hypot(centre(item).x - origin.x, centre(item).y - origin.y) : 0);
-      const target = shown.filter((item) => item.id !== from?.id && screenAt(item, path)).sort((a, b) => away(a) - away(b))[0];
-      if (!target) return notify(labels.newTabBlocked(named));
-      setFrontId(target.id);
-      reveal([target], true);
-      arrive(target.id);
-      // Noted for a frame too, though the frame shows its screens itself: it is how the item knows to offer Restart.
-      push(target);
-      if (!target.viewport) return;
-      const frame = worldRef.current?.querySelector<HTMLIFrameElement>(`iframe[data-canvas-frame="${CSS.escape(target.id)}"]`);
-      if (frame?.contentWindow) postToFrame(frame.contentWindow, { type: "screen", path: location });
-    },
-    [arrive, notify, reveal, shown],
-  );
-
-  useEffect(() => {
-    const world = worldRef.current;
-    if (!world) return;
-    const onPress = (event: MouseEvent) => {
-      const target = event.target instanceof Element ? event.target : null;
-      if (!target || !world.contains(target)) return;
-      const id = target.closest<HTMLElement>("[data-canvas-item]")?.dataset.canvasItem;
-      if (id) lastPress.current = { id, words: controlWords(target), at: performance.now() };
-    };
-    // Capture on window, registered before the link handler below (also window capture):
-    // a link's step is made in that handler, so the press must be noted first. On the
-    // world it ran after it, and a link step took the words of the press before it.
-    window.addEventListener("click", onPress, true);
-    return () => window.removeEventListener("click", onPress, true);
-  }, []);
+  // Links and router calls inside items (links.ts).
+  const { routes, setRoutes, restartRoute, steps, followLink } = useLinks({ shown, setFrontId, frontIdRef, positionsRef, worldRef, reveal, notify });
   /** How a note about one screen of an item (its index), or about its whole flow (null), is named. */
   const flowRefOf = useCallback((item: CanvasItem, index: number | null, state?: string) => {
     const screens = screensOf(item);
