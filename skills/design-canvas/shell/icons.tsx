@@ -263,3 +263,35 @@ export function Icon({ name, size = 16, className }: { name: IconName; size?: nu
     </svg>
   );
 }
+
+// Every icon comes from icons.tsx: one set, one weight. Toolbar and title icons are 16 px,
+// and the marks inside a pin are 14 px.
+export const GripIcon = () => <Icon name="grip-vertical" />;
+export const OpenIcon = () => <Icon name="external-link" />;
+export const MinusIcon = () => <Icon name="minus" />;
+export const PlusIcon = () => <Icon name="plus" />;
+export const FitIcon = () => <Icon name="maximize" />;
+export const ResetIcon = () => <Icon name="zoom-reset" />;
+export const SunIcon = () => <Icon name="sun" />;
+export const MoonIcon = () => <Icon name="moon" />;
+export const AnnotateIcon = () => <Icon name="message-circle" />;
+export const SelectIcon = () => <Icon name="click" />;
+export const HandIcon = () => <Icon name="hand" />;
+// A pointer with code brackets: picking an element to see and change what it is made of in code.
+export const InspectIcon = () => <Icon name="pointer-code" />;
+export const NoteIcon = () => <Icon name="note" />;
+export const SectionIcon = () => <Icon name="folder" />;
+export const CopyIcon = () => <Icon name="copy" />;
+export const SendIcon = () => <Icon name="arrow-up" />;
+export const PickIcon = () => <Icon name="check" />;
+export const TrashIcon = () => <Icon name="trash" />;
+export const EraserIcon = () => <Icon name="eraser" />;
+export const SentIcon = () => <Icon name="check" size={14} />;
+/** On a pin whose note the agent answered. */
+export const ReplyIcon = () => <Icon name="message-circle" size={14} />;
+export const QueuedIcon = () => <Icon name="clock" size={14} />;
+export const HelpIcon = () => <Icon name="help" />;
+export const RestartIcon = () => <Icon name="player-skip-back" />;
+export const MoreIcon = () => <Icon name="dots" />;
+export const RouteIcon = () => <Icon name="route" size={14} />;
+export const StatesIcon = () => <Icon name="stack-2" size={14} />;
