@@ -10,7 +10,7 @@ import {
   readCanvasMessage,
   readFrameMessage,
 } from "./bridge";
-import { linkName, opensNewTab, pathOf, RouteContext, screenAt } from "./routes";
+import { LocationContext, linkName, locationIn, locationOf, opensNewTab, pathOf, pathPart, RouteContext, screenAt } from "./routes";
 import {
   clearPending,
   describeArea,
@@ -92,6 +92,8 @@ export function FrameHost({
   });
   const itemRef = useRef(item);
   itemRef.current = item;
+  const stackRef = useRef(stack);
+  stackRef.current = stack;
   const pickRef = useRef<HTMLDivElement>(null);
   const drawRef = useRef<HTMLDivElement>(null);
   // Annotate mode, which the canvas turns on and off: a click then places an annotation.
@@ -158,11 +160,14 @@ export function FrameHost({
   useEffect(() => {
     if (!follows) return;
     const report = alone ? say : postToCanvas;
+    // A screen is kept with its query (`/contracts?status=signed`), for useSearchParams; a query
+    // alone (`?status=signed`) stays on the screen shown.
     const inside = (href: string) => {
-      const path = pathOf(href);
       const current = itemRef.current;
-      if (!path || !current || !screenAt(current, path)) return false;
-      setStack((was) => (was[was.length - 1] === path ? was : [...was, path]));
+      const location = locationOf(href, stackRef.current[stackRef.current.length - 1] ?? current?.path ?? "/");
+      const path = location && pathPart(location);
+      if (!location || !path || !current || !screenAt(current, path)) return false;
+      setStack((was) => (was[was.length - 1] === location ? was : [...was, location]));
       return true;
     };
     const onLinkClick = (event: MouseEvent) => {
@@ -497,11 +502,13 @@ export function FrameHost({
   const route = stack[stack.length - 1];
   // The flow view shows one state of a screen in a frame of its own (types.ts `states`).
   const state = params.get("state");
-  const Component = (state && item.states?.[route ?? item.path ?? ""]?.[state]) || (route && screenAt(item, route)) || item.component;
+  const Component = (state && item.states?.[route ? pathPart(route) : (item.path ?? "")]?.[state]) || (route && screenAt(item, route)) || item.component;
   const body = (
     <div ref={rootRef} className="canvas-frame-root" style={{ inlineSize: item.width, blockSize: item.height }}>
-      <RouteContext.Provider value={route ?? item.path ?? null}>
-        <Component />
+      <RouteContext.Provider value={route ? pathPart(route) : (item.path ?? null)}>
+        <LocationContext.Provider value={route || item.path ? locationIn(item, route ?? item.path ?? "") : null}>
+          <Component />
+        </LocationContext.Provider>
       </RouteContext.Provider>
     </div>
   );

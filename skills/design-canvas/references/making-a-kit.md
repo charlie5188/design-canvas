@@ -38,9 +38,14 @@ Public variables (`NEXT_PUBLIC_*`, `VITE_*`) from the app's `.env` files reach t
 
 ## 6. Framework-only modules
 
-For Next.js apps, `next/link`, `next/image`, `next/navigation`, and `next/font` are swapped for stand-ins in `mocks/` automatically. Router calls such as `router.push` stay on the canvas with a notice.
+For Next.js apps these are swapped for stand-ins in `mocks/` automatically:
+- `next/link`, `next/image`, `next/navigation` (with the query and `[param]` values of the item's screen), `next/dynamic`, `next/script`, and `next/head`.
+- `next/cache`, `next/headers`, and `server-only`, which do nothing on the canvas.
+- A file that starts with `"use server"`: each server action in it becomes a stand-in that saves nothing and resolves after a moment, so a client component that calls one (a form's `action`, a button's handler) still renders and shows its pending state.
 
-These cannot run on the canvas: server components, server actions, `next/headers`, `cookies()`, and route handlers. Render the client component beneath them and pass it props.
+Router calls such as `router.push` stay on the canvas with a notice.
+
+A page that is a server component (an `async` page that loads its own data, `next/headers`, `cookies()`, route handlers) cannot render on the canvas. Put its few lines of page markup in the item, around the client components beneath it, and pass them the data as props from a file in the canvas folder (`items/contracts-data.ts`). Do not import the page itself.
 
 Other frameworks (React Router framework mode, Remix, Gatsby, Expo web): alias each framework-only module to a small mock in `mocks/` the same way. To make a mocked navigation stay on the canvas, dispatch `design-canvas:navigate` with the URL as `detail`, as `mocks/next-navigation.ts` does.
 
@@ -97,6 +102,7 @@ Files in the app's `public/` folder are served from `/`, as in the app. Imported
 ## 10. Check
 
 - Typecheck: `npx tsc --noEmit -p design-canvas/<name>/tsconfig.json`.
+- The app's own checks still pass: its type check, lint, or build (`next build`). If they read the canvas folder, ask the user to leave it out (the installer says how).
 - The console shows no errors, and one item matches the app side by side. Compare it as "Match the current product first" in `SKILL.md` says. A difference in type, color, or spacing usually means a step above is not done yet, most often fonts or global styles.
 
 ## Save the fit as a private kit

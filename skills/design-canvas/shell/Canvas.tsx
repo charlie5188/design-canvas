@@ -100,7 +100,7 @@ import { Icon } from "./icons";
 import { type InspectChanged, type InspectEdit, InspectPanel, RESET } from "./Inspect";
 import { type DesignSystem, pathOf as inspectPath, selectable, showProp, showStyle } from "./inspect-read";
 import { controlWords, type FlowStep, FlowView } from "./FlowView";
-import { linkName, opensNewTab, pathOf, RouteContext, screenAt, screenIndex, screensOf, stateCount } from "./routes";
+import { LocationContext, linkName, locationIn, locationOf, opensNewTab, pathPart, RouteContext, screenAt, screenIndex, screensOf, searchPart, stateCount } from "./routes";
 import { labels } from "./labels";
 import {
   type Bounds,
@@ -1100,9 +1100,12 @@ function CanvasItemView({
           {item.viewport ? (
             <ItemFrame key={run} item={item} />
           ) : (
-            // The path is there for a router stand-in's `usePathname`. A frame provides its own.
-            <RouteContext.Provider value={route ?? item.path ?? null}>
-              <Preview key={run} component={Shown} />
+            // The path, query, and params are there for a router stand-in's `usePathname`,
+            // `useSearchParams`, and `useParams`. A frame provides its own.
+            <RouteContext.Provider value={route ? pathPart(route) : (item.path ?? null)}>
+              <LocationContext.Provider value={route || item.path ? locationIn(item, route ?? item.path ?? "") : null}>
+                <Preview key={run} component={Shown} />
+              </LocationContext.Provider>
             </RouteContext.Provider>
           )}
         </div>
@@ -4579,16 +4582,21 @@ function CanvasBoard({
       }
       const named = linkName(href);
       if (named === null) return;
-      const path = pathOf(href);
       const from = shown.find((item) => item.id === (fromId ?? frontIdRef.current));
-      if (!path) return notify(blank ? labels.newTabBlocked(named) : labels.linkBlocked(named));
-      // An item at its first screen that is sent to its first screen has gone nowhere:
-      // nothing is noted, so it does not offer Restart for it.
+      // Where the link goes, with its query (`?status=signed`), as the item will remember it.
+      // A query alone (`router.push("?status=signed")`) stays on the screen the item shows.
+      const here = from ? (routesRef.current[from.id]?.[routesRef.current[from.id]!.length - 1] ?? from.path ?? "/") : "/";
+      const location = locationOf(href, here);
+      const path = location && pathPart(location);
+      if (!location || !path) return notify(blank ? labels.newTabBlocked(named) : labels.linkBlocked(named));
+      // An item at its first screen that is sent to its first screen, with no query, has gone
+      // nowhere: nothing is noted, so it does not offer Restart for it.
       const push = (item: CanvasItem) =>
         setRoutes((was) => {
           const stack = was[item.id] ?? [];
-          if (stack[stack.length - 1] === path || (!stack.length && screenAt(item, path) === item.component)) return was;
-          return { ...was, [item.id]: [...stack, path] };
+          const first = !stack.length && screenAt(item, path) === item.component && !searchPart(location);
+          if (stack[stack.length - 1] === location || first) return was;
+          return { ...was, [item.id]: [...stack, location] };
         });
       if (!blank) {
         // The same tab: a screen of this item, in place. A frame shows its own screens itself,
@@ -4627,7 +4635,7 @@ function CanvasBoard({
       push(target);
       if (!target.viewport) return;
       const frame = worldRef.current?.querySelector<HTMLIFrameElement>(`iframe[data-canvas-frame="${CSS.escape(target.id)}"]`);
-      if (frame?.contentWindow) postToFrame(frame.contentWindow, { type: "screen", path });
+      if (frame?.contentWindow) postToFrame(frame.contentWindow, { type: "screen", path: location });
     },
     [arrive, notify, reveal, shown],
   );

@@ -1,0 +1,4 @@
+{
+  "//": "The canvas shell is ES modules, also in an app whose own package.json does not say so (Vite loads its server files with Node).",
+  "type": "module"
+}

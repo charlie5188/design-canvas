@@ -61,6 +61,7 @@ a device or input you do not have.
 - A link to `#<item-id>` moves the camera to that item and brings it to the front, zooming out only as far as it needs.
 - A native form submit is cancelled with a notice; a form that cancels its own submit shows nothing.
 - A pan or move that ends on a link shows no notice.
+- A link or router call with a query (`/contracts?status=signed`, or `?status=signed` alone) keeps it on the item: the path decides the screen, `useSearchParams()` in the stand-in reads the query, and Back returns to the screen before with its query. `useParams()` gives the values the screen's `[param]` parts matched. Restart clears both. The same holds inside a `viewport` frame.
 
 ## Toolbar
 
