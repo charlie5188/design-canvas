@@ -115,9 +115,10 @@ import { ShareButton, SharePanel, useShare } from "./Share";
 import { type ThemeStore, useThemeId } from "./theme";
 import { TrashButton, TrashDialog, useTrash, useTrashList } from "./Trash";
 import { type Box, type Guide, SNAP_DISTANCE, type Snap, snapBox } from "./snap";
-import { type CanvasItem, type CanvasNote, type CanvasSection, isSetAside } from "./types";
+import { type CanvasImage, type CanvasItem, type CanvasNote, type CanvasSection, isSetAside } from "./types";
+import { refreshImages, useCanvasImages } from "./images";
 import { DEFAULT_CAMERA, useCamera } from "./camera";
-import { EDIT_PATH } from "./channel.ts";
+import { EDIT_PATH, IMAGE_PATH, MAX_IMAGE_BYTES } from "./channel.ts";
 import type { DirectAdd, DirectEdit, DirectRemove } from "./registry-edit.ts";
 import "./canvas.css";
 
@@ -159,6 +160,76 @@ const SECTION_MIN_H = 60;
  * registry note, which gets a mark once it actually moves.
  */
 type CarriedNote = { id: string; ghost: boolean; x: number; y: number };
+/** Where an image is and how large, in canvas units. */
+type ImageBox = { x: number; y: number; w: number; h: number };
+const IMAGE_CORNERS = ["nw", "ne", "sw", "se"] as const;
+/** The longest side a new image is shown at; the person resizes it from there. */
+const IMAGE_SHOWN = 640;
+/** A picture larger than this on its longest side, in its own pixels, is made smaller before it is kept. */
+const IMAGE_SIDE = 2400;
+const IMAGE_MIN = 40;
+/** How much of the picture a stored WebP or JPEG keeps: text in a screenshot stays sharp at this. */
+const IMAGE_QUALITY = 0.9;
+
+/**
+ * A pasted or dropped picture as the data URL the dev server stores, with its size in its
+ * own pixels. Every picture is stored again as WebP, drawn smaller when it is very large:
+ * a screenshot is several times smaller that way, and the canvas folder and the shared
+ * file, which holds every image inside it, stay light. Two exceptions:
+ *
+ * - A GIF goes as it is. It may move, and a browser can only write one frame of a
+ *   picture, so storing it again would stop it.
+ * - The file as it came is kept when storing it again would not make it smaller.
+ *
+ * A browser that cannot write WebP (Safari) writes a JPEG, which is also lossy, or a PNG
+ * when the picture has see-through parts, which a JPEG would fill in.
+ * Throws when the browser cannot read the picture.
+ */
+async function prepareImage(file: Blob): Promise<{ data: string; width: number; height: number }> {
+  const bitmap = await createImageBitmap(file);
+  const { width, height } = bitmap;
+  try {
+    const asIs = () =>
+      new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+    const fits = Math.max(width, height) <= IMAGE_SIDE && file.size <= MAX_IMAGE_BYTES;
+    if (file.type === "image/gif" && fits) return { data: await asIs(), width, height };
+    for (let side = IMAGE_SIDE; side >= 300; side = Math.round(side / 2)) {
+      const scale = Math.min(1, side / Math.max(width, height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(width * scale));
+      canvas.height = Math.max(1, Math.round(height * scale));
+      const context = canvas.getContext("2d");
+      if (!context) break;
+      context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      let data = canvas.toDataURL("image/webp", IMAGE_QUALITY);
+      // A browser that cannot write WebP answers with a PNG.
+      if (!data.startsWith("data:image/webp")) {
+        const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+        let opaque = true;
+        for (let i = 3; i < pixels.length; i += 4) {
+          if (pixels[i]! < 255) {
+            opaque = false;
+            break;
+          }
+        }
+        if (opaque) data = canvas.toDataURL("image/jpeg", IMAGE_QUALITY);
+      }
+      if (data.length > MAX_IMAGE_BYTES * 1.3) continue;
+      // Base64 is a third longer than the bytes it carries.
+      const smaller = data.length * 0.75 < file.size;
+      const kept = scale === 1 && fits && !smaller && ["image/png", "image/jpeg", "image/webp"].includes(file.type);
+      return kept ? { data: await asIs(), width, height } : { data, width: canvas.width, height: canvas.height };
+    }
+    throw new Error("too large");
+  } finally {
+    bitmap.close();
+  }
+}
 /** One saved change and what undoes it. `positions` are items' places in the browser, which go back with their registry values. */
 type SavedChange = { edits: DirectEdit[]; removes: DirectRemove[]; adds: DirectAdd[]; positions: Record<string, { x: number; y: number }> };
 const HISTORY_LIMIT = 30;
@@ -789,6 +860,39 @@ function CanvasBoard({
   movedItemsRef.current = movedItems;
   // The size last sent for each resized item, so one resize is one write.
   const sentSizes = useRef<Record<string, string>>({});
+  // Reference images (images.ts). The registry says where each one is. A move or resize
+  // shows from `imageBoxes` at once and is written to the registry once the person pauses,
+  // like an item's (flushDirect); its entry here goes once the registry says the same.
+  const { images: listedImages, urls: imageUrls } = useCanvasImages();
+  const listedImagesRef = useRef(listedImages);
+  listedImagesRef.current = listedImages;
+  // Asked again whenever the registry changes: its arrays as main.tsx passes them are new
+  // objects each time the file is read, also when only an image changed (`items`, `notes`,
+  // and `sections` are kept the same object while their content is, so they would not tell).
+  useEffect(() => {
+    void refreshImages();
+  }, [itemsProp, notesProp, sectionsProp]);
+  const [imageBoxes, setImageBoxesState] = useState<Record<string, ImageBox>>({});
+  const imageBoxesRef = useRef(imageBoxes);
+  const setImageBoxes = useCallback((next: Record<string, ImageBox>) => {
+    imageBoxesRef.current = next;
+    setImageBoxesState(next);
+  }, []);
+  // The box last sent for each image, so one move is one write.
+  const sentImages = useRef<Record<string, string>>({});
+  useEffect(() => {
+    const kept = Object.entries(imageBoxesRef.current).filter(([id, box]) => {
+      const image = listedImages.find((entry) => entry.id === id);
+      return image && !(image.x === box.x && image.y === box.y && image.width === box.w && image.height === box.h);
+    });
+    if (kept.length === Object.keys(imageBoxesRef.current).length) return;
+    for (const id of Object.keys(sentImages.current)) if (!kept.some(([keptId]) => keptId === id)) delete sentImages.current[id];
+    setImageBoxes(Object.fromEntries(kept));
+  }, [listedImages, imageBoxes, setImageBoxes]);
+  // Filled in further down, where the images' own handlers are; the selection reads them.
+  const imageBoxRef = useRef<(id: string) => ImageBox | undefined>(() => undefined);
+  const imagesInsideRef = useRef<(bounds: ImageBox) => { id: string; x: number; y: number }[]>(() => []);
+  const shiftImagesRef = useRef<(list: { id: string; x: number; y: number }[], dx: number, dy: number) => void>(() => {});
 
   // Moves, resizes, and text changes of existing notes, sections, and items, and
   // new notes and sections once they have text, are written into registry.tsx
@@ -840,6 +944,12 @@ function CanvasBoard({
     }
     // A resized item is pending until its size has been sent once.
     const pendingSizes = Object.entries(sizesRef.current).filter(([id, s]) => sentSizes.current[id] !== `${s.w}x${s.h}`);
+    // A moved or resized image is pending until its box has been sent once.
+    const pendingImages = Object.entries(imageBoxesRef.current).flatMap(([id, box]) => {
+      const image = listedImagesRef.current.find((entry) => entry.id === id);
+      const print = `${box.x},${box.y},${box.w},${box.h}`;
+      return image && sentImages.current[id] !== print ? [{ image, box, print }] : [];
+    });
     const edits: DirectEdit[] = [];
     const markIds = new Set<string>();
     // The edit that puts each entry back as it was, and where items go back to in the browser.
@@ -883,6 +993,11 @@ function CanvasBoard({
       if (back) back.set = { ...back.set, width: s.bw, height: s.bh };
       else inverse.set(id, { kind: "item", id, set: { width: s.bw, height: s.bh } });
     }
+    for (const { image, box, print } of pendingImages) {
+      sentImages.current[image.id] = print;
+      edits.push({ kind: "image", id: image.id, set: { x: box.x, y: box.y, width: box.w, height: box.h } });
+      inverse.set(image.id, { kind: "image", id: image.id, set: { x: image.x, y: image.y, width: image.width, height: image.height } });
+    }
     const adds: DirectAdd[] = pendingNew.map((m) => ({
       kind: m.kind,
       text: m.text,
@@ -891,7 +1006,7 @@ function CanvasBoard({
       ...(m.w ? { width: m.w } : {}),
       ...(m.h ? { height: m.h } : {}),
     }));
-    if (!markIds.size && !pendingNew.length && !pendingMoves.length && !pendingSizes.length) return;
+    if (!markIds.size && !pendingNew.length && !pendingMoves.length && !pendingSizes.length && !pendingImages.length) return;
     // A new mark is applied once the registry holds one more entry of its kind, in request order.
     const targets = sentTargets(pendingNew, countsRef.current);
     // Marked in flight first, so a second save does not start for the same change.
@@ -968,7 +1083,7 @@ function CanvasBoard({
   useEffect(() => {
     const timer = window.setTimeout(() => void flushTracked(), 300);
     return () => window.clearTimeout(timer);
-  }, [flushTracked, marks, positions, sizes, dragEnds]);
+  }, [flushTracked, marks, positions, sizes, imageBoxes, dragEnds]);
   // An item whose position matches the registry again is applied, or was put back.
   useEffect(() => {
     const moved = new Set(movedItems.map((m) => m.id));
@@ -1006,11 +1121,27 @@ function CanvasBoard({
     [closeAnnotation, closeMark, setMarkOpen],
   );
   const keyOfRef = (ref: BoardRef) => `${ref.ghost ? "g" : "e"}:${ref.kind}:${ref.id}`;
-  const select = useCallback((ref: BoardRef | null) => {
-    const key = ref ? keyOfRef(ref) : null;
-    selectedRef.current = key;
-    setSelected(key);
+  // Several things selected at once, or an item: a box drawn on empty canvas, a click on an
+  // item's name, or Shift + click. They move together and are deleted together. Kept apart
+  // from `selected`, which stays the one note or section with its resize grips: either that
+  // is set, or this holds keys, never both. A key is "item:<id>", "image:<id>", a note's or
+  // section's registry id as "note:<id>" or "section:<id>" (the same before and after its
+  // first move makes it a ghost), or "mark:<id>" for one that is not in the registry yet.
+  const [multi, setMultiState] = useState<readonly string[]>([]);
+  const multiRef = useRef(multi);
+  const setMulti = useCallback((keys: readonly string[]) => {
+    multiRef.current = keys;
+    setMultiState(keys);
   }, []);
+  const select = useCallback(
+    (ref: BoardRef | null) => {
+      const key = ref ? keyOfRef(ref) : null;
+      selectedRef.current = key;
+      setSelected(key);
+      if (multiRef.current.length) setMulti([]);
+    },
+    [setMulti],
+  );
   /**
    * The mark that changes a real note or section, made from the entry as it is
    * now the first time something changes. Until then nothing is pending.
@@ -1080,11 +1211,14 @@ function CanvasBoard({
   useEffect(() => {
     setRemoved((prev) => {
       const next = new Set(
-        [...prev].filter((key) => notes.some((n) => `note:${n.id}` === key) || sections.some((s) => `section:${s.id}` === key)),
+        [...prev].filter(
+          (key) => notes.some((n) => `note:${n.id}` === key) || sections.some((s) => `section:${s.id}` === key) || listedImages.some((i) => `image:${i.id}` === key),
+        ),
       );
       return next.size === prev.size ? prev : next;
     });
-  }, [notes, sections]);
+  }, [notes, sections, listedImages]);
+  const images = useMemo(() => listedImages.filter((image) => !removed.has(`image:${image.id}`)), [listedImages, removed]);
   const postRegistry = async (body: { edits?: unknown[]; removes?: unknown[]; adds?: unknown[] }) => {
     try {
       const response = await fetch(EDIT_PATH, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -1159,9 +1293,67 @@ function CanvasBoard({
       },
     });
   };
+  // Several at once: items go to the trash, notes, sections, and images leave the registry, in
+  // one write, with one notice whose Undo brings all of it back. A section's contents stay,
+  // as when it is deleted alone, unless they were selected too.
+  const deleteGroup = async (keys: readonly string[]) => {
+    const trashed = keys.flatMap((key) => (key.startsWith("item:") ? (itemsRef.current.find((item) => item.id === key.slice(5)) ?? []) : []));
+    const snapshots: DirectAdd[] = [];
+    const drafts: string[] = [];
+    for (const key of keys) {
+      const at = key.indexOf(":");
+      const [type, id] = [key.slice(0, at), key.slice(at + 1)];
+      const note = type === "note" ? notes.find((n) => n.id === id) : undefined;
+      const section = type === "section" ? sections.find((entry) => entry.id === id) : undefined;
+      const image = type === "image" ? images.find((entry) => entry.id === id) : undefined;
+      if (note) snapshots.push({ kind: "note", id, text: note.text, x: note.x, y: note.y, ...(note.width ? { width: note.width } : {}), ...(note.height ? { height: note.height } : {}) });
+      else if (section) snapshots.push({ kind: "section", id, text: section.title, x: section.x, y: section.y, width: section.width, height: section.height });
+      else if (image) {
+        // As it is drawn now: a move or resize made a moment ago may not have come back from the registry yet.
+        const box = imageBoxRef.current(id) ?? { x: image.x, y: image.y, w: image.width, h: image.height };
+        snapshots.push({ kind: "image", id, file: image.file, x: box.x, y: box.y, width: box.w, height: box.h });
+      }
+      else if (type === "mark") drafts.push(id);
+    }
+    const gone = snapshots.map((entry) => `${entry.kind}:${entry.id}`);
+    select(null);
+    setRemoved((prev) => new Set([...prev, ...gone]));
+    // A change waiting on an entry means nothing once it is gone; a new note or section is just dropped.
+    setMarks((prev) => prev.filter((m) => !(m.target ? gone.includes(`${m.kind}:${m.target}`) : drafts.includes(m.id))));
+    if (drafts.includes(openMarkRef.current ?? "")) setMarkOpen(null);
+    const result = snapshots.length ? await postRegistry({ removes: snapshots.map((entry) => ({ kind: entry.kind, id: entry.id })) }) : {};
+    const left = new Set(result ? (result.unremoved ?? []) : snapshots.map((entry) => entry.id!));
+    if (left.size) {
+      setRemoved((prev) => new Set([...prev].filter((key) => !left.has(key.slice(key.indexOf(":") + 1)))));
+      notify(labels.deleteFailed);
+    }
+    const removedEntries = snapshots.filter((entry) => !left.has(entry.id!));
+    for (const item of trashed) moveToTrash(item, true);
+    const count = trashed.length + removedEntries.length + drafts.length;
+    if (!trashed.length && !removedEntries.length) return;
+    const entry: SavedChange | undefined = removedEntries.length ? { edits: [], removes: [], adds: removedEntries, positions: {} } : undefined;
+    if (entry) remember(entry);
+    notify(labels.deletedMany(count), {
+      label: labels.undo,
+      run: async () => {
+        for (const item of trashed) putBack(item);
+        if (!entry) return;
+        // This Undo and ⌘/Ctrl + Z are the same undo (see deleteBoard).
+        savedHistory.current = savedHistory.current.filter((change) => change !== entry);
+        setRemoved((prev) => new Set([...prev].filter((key) => !gone.includes(key))));
+        const back = await postRegistry({ adds: removedEntries });
+        if (!back || back.rejected?.length) notify(labels.restoreFailed);
+      },
+    });
+  };
   const deleteSelected = () => {
+    if (shared) return;
+    if (multiRef.current.length) {
+      void deleteGroup(multiRef.current);
+      return;
+    }
     const key = selectedRef.current;
-    if (!key || shared) return;
+    if (!key) return;
     const [side, kind, id] = key.split(":") as ["g" | "e", BoardKind, string];
     if (side === "e") {
       void deleteBoard(kind, id);
@@ -1216,6 +1408,16 @@ function CanvasBoard({
       positionsRef.current = next;
       setPositions(next);
       queueSave();
+    }
+    // An image goes back to what the registry will say: its own box here would be saved again.
+    const imageIds = change.edits.flatMap((edit) => (edit.kind === "image" ? [edit.id] : []));
+    if (imageIds.length) {
+      const next = { ...imageBoxesRef.current };
+      for (const id of imageIds) {
+        delete next[id];
+        delete sentImages.current[id];
+      }
+      setImageBoxes(next);
     }
     // An entry that comes back must not stay hidden as deleted.
     const returning = change.adds.flatMap((add) => (add.id ? [`${add.kind}:${add.id}`] : []));
@@ -1334,6 +1536,21 @@ function CanvasBoard({
     window.addEventListener("pointerdown", onDown, true);
     return () => window.removeEventListener("pointerdown", onDown, true);
   }, [select, selected]);
+  // The same for several selected, or an item or an image: a press on something that can be
+  // selected is that thing's to answer (it may start a move of them all), and a press
+  // anywhere else, in a preview or on a bar, lets go.
+  useEffect(() => {
+    if (!multi.length) return;
+    const onDown = (event: PointerEvent) => {
+      const kept = ".canvas-item-title, .canvas-image, .canvas-note-card, .canvas-section-tab, .canvas-board-edge, .canvas-resize";
+      if (event.target instanceof Element && event.target.closest(kept)) return;
+      if (event.target === viewportRef.current || event.target === worldRef.current) return;
+      if (event.button === 1 || spaceArmed.current || zoomArmed.current) return;
+      setMulti([]);
+    };
+    window.addEventListener("pointerdown", onDown, true);
+    return () => window.removeEventListener("pointerdown", onDown, true);
+  }, [multi, setMulti]);
   // A mark leaves once the registry shows it.
   useEffect(() => {
     const applied = marksRef.current.filter((m) => isApplied(m, counts, boardContext));
@@ -1700,7 +1917,7 @@ function CanvasBoard({
     return labels.sectionContents(mark?.text || section.title, inside, written);
   };
   /** Moves carried notes by the same step as their section, which they then belong to. Each registry note gets its mark on first move. */
-  const carryNotes = (carried: CarriedNote[], dx: number, dy: number, section: string) => {
+  const carryNotes = (carried: CarriedNote[], dx: number, dy: number, section?: string) => {
     for (const c of carried) {
       const id = c.ghost ? c.id : ensureMark("note", c.id);
       if (id) updateMark(id, { x: Math.round(c.x + dx), y: Math.round(c.y + dy) }, section);
@@ -1767,6 +1984,139 @@ function CanvasBoard({
   /** A change that ended where it began is no change. */
   const pruneUnchanged = () =>
     setMarks((prev) => prev.filter((m) => !(isUnchanged(m) && m.sent === undefined && m.id !== openMarkRef.current)));
+
+  // The selection (see `multi`).
+  /** A note's or section's key in the selection. */
+  const stableKey = (ref: BoardRef) => {
+    if (!ref.ghost) return `${ref.kind}:${ref.id}`;
+    const mark = marksRef.current.find((m) => m.id === ref.id);
+    return mark?.target ? `${ref.kind}:${mark.target}` : `mark:${ref.id}`;
+  };
+  /** The note or section a key names, as it is drawn now: its ghost once it has one. */
+  const boardOfKey = (key: string): BoardRef | undefined => {
+    const at = key.indexOf(":");
+    const type = key.slice(0, at);
+    const id = key.slice(at + 1);
+    if (type === "mark") {
+      const mark = marksRef.current.find((m) => m.id === id && !m.target);
+      return mark && { kind: mark.kind, id: mark.id, ghost: true };
+    }
+    if (type !== "note" && type !== "section") return undefined;
+    const mark = marksRef.current.find((m) => m.kind === type && m.target === id);
+    if (mark) return { kind: type, id: mark.id, ghost: true };
+    if (removed.has(key)) return undefined;
+    return (type === "note" ? notes : sections).some((entry) => entry.id === id) ? { kind: type, id, ghost: false } : undefined;
+  };
+  /** Everything selected, the one note or section with grips included. */
+  const selectionKeys = (): string[] => {
+    if (multiRef.current.length) return [...multiRef.current];
+    const key = selectedRef.current;
+    if (!key) return [];
+    const [side, kind, id] = key.split(":") as ["g" | "e", BoardKind, string];
+    return [stableKey({ kind, id, ghost: side === "g" })];
+  };
+  /** Selects exactly these. One note or section alone is the plain selection, with its grips. */
+  const chooseKeys = (keys: string[]) => {
+    const only = keys.length === 1 ? boardOfKey(keys[0]!) : undefined;
+    if (only) {
+      select(only);
+      return;
+    }
+    select(null);
+    setMulti(keys);
+  };
+  const toggleKey = (key: string) => {
+    const keys = selectionKeys();
+    chooseKeys(keys.includes(key) ? keys.filter((k) => k !== key) : [...keys, key]);
+  };
+  /**
+   * What moves with `primary` (the selected thing the person is dragging): the rest of the
+   * selection, and what a selected section holds, each once. The dragged thing itself is
+   * left out, since its own drag moves it.
+   */
+  const groupOf = (primary: string) => {
+    const groupItems = new Map<string, { id: string; x: number; y: number }>();
+    const groupNotes = new Map<string, CarriedNote>();
+    const groupSections = new Map<string, CarriedNote>();
+    const groupImages = new Map<string, { id: string; x: number; y: number }>();
+    for (const key of multiRef.current) {
+      if (key === primary) continue;
+      if (key.startsWith("item:")) {
+        const item = shown.find((entry) => entry.id === key.slice(5));
+        if (!item) continue;
+        const p = positionsRef.current[item.id] ?? { x: item.x, y: item.y };
+        groupItems.set(item.id, { id: item.id, x: p.x, y: p.y });
+        continue;
+      }
+      if (key.startsWith("image:")) {
+        const box = imageBoxRef.current(key.slice(6));
+        if (box) groupImages.set(key.slice(6), { id: key.slice(6), x: box.x, y: box.y });
+        continue;
+      }
+      const ref = boardOfKey(key);
+      const origin = ref && boardOrigin(ref);
+      if (!ref || !origin) continue;
+      const carried = { id: ref.id, ghost: ref.ghost, x: origin.x, y: origin.y };
+      if (ref.kind === "note") {
+        groupNotes.set(ref.id, carried);
+        continue;
+      }
+      groupSections.set(ref.id, carried);
+      if (!origin.w || !origin.h) continue;
+      const bounds = { x: origin.x, y: origin.y, w: origin.w, h: origin.h };
+      for (const inside of itemsInside(bounds)) groupItems.set(inside.id, inside);
+      for (const inside of notesInside(bounds)) groupNotes.set(inside.id, inside);
+      for (const inside of sectionsInside(bounds, ref)) groupSections.set(inside.id, inside);
+      for (const inside of imagesInsideRef.current(bounds)) groupImages.set(inside.id, inside);
+    }
+    if (primary.startsWith("item:")) groupItems.delete(primary.slice(5));
+    else if (primary.startsWith("image:")) groupImages.delete(primary.slice(6));
+    else {
+      const ref = boardOfKey(primary);
+      if (ref) {
+        groupNotes.delete(ref.id);
+        groupSections.delete(ref.id);
+      }
+    }
+    return { items: [...groupItems.values()], notes: [...groupNotes.values()], sections: [...groupSections.values()], images: [...groupImages.values()] };
+  };
+  type Group = ReturnType<typeof groupOf>;
+  const shiftGroup = (group: Group, dx: number, dy: number) => {
+    shiftItems(group.items, dx, dy);
+    carryNotes(group.notes, dx, dy);
+    carrySections(group.sections, dx, dy);
+    shiftImagesRef.current(group.images, dx, dy);
+  };
+  /** The keys of what a box on screen touches. A section only when the box holds all of it: a box drawn inside a section is for what is in it. */
+  const keysIn = (box: { left: number; top: number; right: number; bottom: number }) => {
+    const touches = (r: DOMRect) => r.left < box.right && r.right > box.left && r.top < box.bottom && r.bottom > box.top;
+    const holds = (r: DOMRect) => r.left >= box.left && r.right <= box.right && r.top >= box.top && r.bottom <= box.bottom;
+    const keys: string[] = [];
+    for (const [id, element] of elements.current) if (touches(element.getBoundingClientRect())) keys.push(`item:${id}`);
+    for (const element of worldRef.current?.querySelectorAll<HTMLElement>("[data-board-id], [data-board-ghost], [data-canvas-image]") ?? []) {
+      if (element.dataset.canvasImage) {
+        if (touches(element.getBoundingClientRect())) keys.push(`image:${element.dataset.canvasImage}`);
+        continue;
+      }
+      const section = element.classList.contains("canvas-section");
+      const rect = (section ? element.querySelector(".canvas-section-frame") : element)?.getBoundingClientRect();
+      if (!rect || !(section ? holds(rect) : touches(rect))) continue;
+      const ghost = element.dataset.boardGhost;
+      keys.push(stableKey({ kind: section ? "section" : "note", id: ghost ?? element.dataset.boardId!, ghost: ghost !== undefined }));
+    }
+    return [...new Set(keys)];
+  };
+  // For the handlers that are set up once (an item's name, the canvas's own presses).
+  const selection = useRef({ selectionKeys, chooseKeys, toggleKey, groupOf, shiftGroup, keysIn, pruneUnchanged });
+  selection.current = { selectionKeys, chooseKeys, toggleKey, groupOf, shiftGroup, keysIn, pruneUnchanged };
+  // A key whose thing is gone (deleted, trashed, or a new note now saved under its own id) leaves the selection.
+  useEffect(() => {
+    if (!multi.length) return;
+    const kept = multi.filter((key) =>
+      key.startsWith("item:") ? shown.some((item) => item.id === key.slice(5)) : key.startsWith("image:") ? !!imageBoxRef.current(key.slice(6)) : !!boardOfKey(key),
+    );
+    if (kept.length !== multi.length) setMulti(kept);
+  });
   // A double-click is two quick presses that never travel. The browser's own
   // dblclick goes to the viewport, which holds the pointer capture during a press,
   // so it never reaches a note or tab.
@@ -1818,6 +2168,189 @@ function CanvasBoard({
     viewport.addEventListener("pointerup", end);
     viewport.addEventListener("pointercancel", end);
   };
+  // Reference images: pasted or dropped, then moved, resized from a corner (the picture
+  // keeps its proportions), selected, and deleted like a note. They sit above sections and
+  // under items, and a section carries the ones whose centre is inside it.
+  const boxOfImage = (image: CanvasImage): ImageBox => imageBoxesRef.current[image.id] ?? { x: image.x, y: image.y, w: image.width, h: image.height };
+  imageBoxRef.current = (id) => {
+    const image = images.find((entry) => entry.id === id);
+    return image && boxOfImage(image);
+  };
+  imagesInsideRef.current = (bounds) =>
+    images.flatMap((image) => {
+      const box = boxOfImage(image);
+      const cx = box.x + box.w / 2;
+      const cy = box.y + box.h / 2;
+      return cx >= bounds.x && cx <= bounds.x + bounds.w && cy >= bounds.y && cy <= bounds.y + bounds.h ? [{ id: image.id, x: box.x, y: box.y }] : [];
+    });
+  shiftImagesRef.current = (list, dx, dy) => {
+    if (!list.length) return;
+    const next = { ...imageBoxesRef.current };
+    for (const entry of list) {
+      const image = images.find((candidate) => candidate.id === entry.id);
+      if (image) next[entry.id] = { ...boxOfImage(image), x: Math.round(entry.x + dx), y: Math.round(entry.y + dy) };
+    }
+    setImageBoxes(next);
+  };
+  const moveImage = (event: ReactPointerEvent<HTMLElement>, image: CanvasImage) => {
+    if (event.button !== 0 || spaceArmed.current || boardToolRef.current || annotatingRef.current) return;
+    event.stopPropagation();
+    event.preventDefault();
+    const key = `image:${image.id}`;
+    if (event.shiftKey) {
+      toggleKey(key);
+      return;
+    }
+    const group = multiRef.current.length > 1 && multiRef.current.includes(key) ? groupOf(key) : null;
+    if (!group) chooseKeys([key]);
+    const origin = boxOfImage(image);
+    dragBoard(
+      event,
+      () => {},
+      (dx, dy) => {
+        const x = Math.round(origin.x + dx);
+        const y = Math.round(origin.y + dy);
+        setImageBoxes({ ...imageBoxesRef.current, [image.id]: { ...origin, x, y } });
+        if (group) shiftGroup(group, x - origin.x, y - origin.y);
+      },
+      () => {
+        if (group?.items.length) queueSave();
+        pruneUnchanged();
+      },
+      () => {
+        if (group) chooseKeys([key]);
+      },
+    );
+  };
+  const resizeImage = (event: ReactPointerEvent<HTMLElement>, image: CanvasImage, corner: (typeof IMAGE_CORNERS)[number]) => {
+    if (event.button !== 0 || spaceArmed.current) return;
+    event.stopPropagation();
+    event.preventDefault();
+    const origin = boxOfImage(image);
+    const ratio = origin.w / origin.h;
+    const east = corner.endsWith("e");
+    const south = corner.startsWith("s");
+    dragBoard(
+      event,
+      () => {},
+      (dx, dy, e) => {
+        // The corner follows whichever way the pointer has gone further, and the other side keeps the proportions.
+        const byWidth = origin.w + (east ? dx : -dx);
+        const byHeight = (origin.h + (south ? dy : -dy)) * ratio;
+        const w = Math.round(Math.max(IMAGE_MIN, IMAGE_MIN * ratio, byWidth, byHeight));
+        const h = Math.round(w / ratio);
+        setImageBoxes({
+          ...imageBoxesRef.current,
+          [image.id]: { x: east ? origin.x : origin.x + origin.w - w, y: south ? origin.y : origin.y + origin.h - h, w, h },
+        });
+        sizeTip(e, w, h, corner);
+      },
+      () => sizeTip(null),
+    );
+  };
+  // A new image shows where it was put at once, from the picture itself, until the registry lists it.
+  const [placing, setPlacing] = useState<{ key: string; id?: string; url: string; box: ImageBox }[]>([]);
+  useEffect(() => {
+    setPlacing((prev) => {
+      const next = prev.filter((p) => !(p.id && listedImages.some((image) => image.id === p.id && imageUrls[image.file])));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [listedImages, imageUrls]);
+  const addImage = async (file: Blob, centre: { x: number; y: number }) => {
+    const picture = await prepareImage(file).catch(() => null);
+    if (!picture) {
+      notify(labels.imageUnreadable, undefined, true);
+      return;
+    }
+    const scale = Math.min(1, IMAGE_SHOWN / Math.max(picture.width, picture.height));
+    const w = Math.max(1, Math.round(picture.width * scale));
+    const h = Math.max(1, Math.round(picture.height * scale));
+    const box = { x: Math.round(centre.x - w / 2), y: Math.round(centre.y - h / 2), w, h };
+    const key = newMarkId();
+    setPlacing((prev) => [...prev, { key, url: picture.data, box }]);
+    let id: string | undefined;
+    try {
+      const response = await fetch(IMAGE_PATH, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data: picture.data, x: box.x, y: box.y, width: w, height: h }),
+      });
+      if (response.ok) id = ((await response.json()) as { id?: string }).id;
+    } catch {
+      // No dev server: said below.
+    }
+    if (!id) {
+      setPlacing((prev) => prev.filter((p) => p.key !== key));
+      notify(labels.imageNotSaved, undefined, true);
+      return;
+    }
+    const saved = id;
+    void refreshImages();
+    setPlacing((prev) => prev.map((p) => (p.key === key ? { ...p, id: saved } : p)));
+    // ⌘/Ctrl + Z takes it off the canvas again. Its file stays in images/.
+    remember({ edits: [], removes: [{ kind: "image", id: saved }], adds: [], positions: {} });
+  };
+  /** Several at once land a step apart, so none hides another. */
+  const addImagesRef = useRef<(files: Blob[], centre: { x: number; y: number }) => void>(() => {});
+  addImagesRef.current = (files, centre) => {
+    files.forEach((file, index) => void addImage(file, { x: centre.x + index * 32, y: centre.y + index * 32 }));
+  };
+  // Paste puts a copied picture at the pointer, or in the middle of the view when the
+  // pointer is elsewhere. A file dragged in from the desktop lands where it is dropped.
+  // Neither while typing in a field or with focus in a preview, where a paste or a drop
+  // belongs to the app being shown, and not in a shared file, which cannot save.
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (shared || !viewport) return;
+    const pictures = (data: DataTransfer | null) => [...(data?.files ?? [])].filter((file) => file.type.startsWith("image/"));
+    const toWorld = (clientX: number, clientY: number) => {
+      const rect = viewport.getBoundingClientRect();
+      const { x, y, z } = camera.current;
+      return { x: (clientX - rect.left - x) / z, y: (clientY - rect.top - y) / z };
+    };
+    let pointer: { x: number; y: number } | null = null;
+    const onMove = (event: PointerEvent) => {
+      pointer = { x: event.clientX, y: event.clientY };
+    };
+    const onLeave = () => {
+      pointer = null;
+    };
+    const inPreview = (target: EventTarget | null) => target instanceof Element && target.closest(".canvas-preview") !== null;
+    const onPaste = (event: ClipboardEvent) => {
+      const files = pictures(event.clipboardData);
+      const active = document.activeElement;
+      if (!files.length || (event.target instanceof Element && typingIn(event.target)) || inPreview(active)) return;
+      event.preventDefault();
+      const rect = viewport.getBoundingClientRect();
+      addImagesRef.current(files, pointer ? toWorld(pointer.x, pointer.y) : toWorld(rect.left + rect.width / 2, rect.top + rect.height / 2));
+    };
+    const hasFiles = (event: DragEvent) => !!event.dataTransfer?.types.includes("Files") && !inPreview(event.target);
+    const onDragOver = (event: DragEvent) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      event.dataTransfer!.dropEffect = "copy";
+    };
+    const onDrop = (event: DragEvent) => {
+      if (!hasFiles(event)) return;
+      // Also for a file that is no picture: the browser would leave the canvas to open it.
+      event.preventDefault();
+      const files = pictures(event.dataTransfer);
+      if (files.length) addImagesRef.current(files, toWorld(event.clientX, event.clientY));
+    };
+    viewport.addEventListener("pointermove", onMove);
+    viewport.addEventListener("pointerleave", onLeave);
+    window.addEventListener("paste", onPaste);
+    viewport.addEventListener("dragover", onDragOver);
+    viewport.addEventListener("drop", onDrop);
+    return () => {
+      viewport.removeEventListener("pointermove", onMove);
+      viewport.removeEventListener("pointerleave", onLeave);
+      window.removeEventListener("paste", onPaste);
+      viewport.removeEventListener("dragover", onDragOver);
+      viewport.removeEventListener("drop", onDrop);
+    };
+  }, []);
+
   boardImpl.current = {
     move: (event, ref) => {
       if (event.button !== 0 || spaceArmed.current || boardToolRef.current) return;
@@ -1836,12 +2369,30 @@ function CanvasBoard({
             ? marksRef.current.find((m) => m.id === ref.id)?.target
             : ref.id
           : undefined;
-      if (!annotated) select(ref);
+      // Shift + click adds it to the selection, or takes it out; it does not start a move.
+      const ownKey = stableKey(ref);
+      if (event.shiftKey && !annotated) {
+        toggleKey(ownKey);
+        return;
+      }
+      // One of several selected: a drag moves them all, and only a click that never travels selects it alone.
+      const group = !annotated && multiRef.current.includes(ownKey) ? groupOf(ownKey) : null;
+      if (!annotated && !group) select(ref);
       let id = ref.ghost ? ref.id : "";
       // A section carries the items inside it, so the frame never leaves its contents behind.
-      const carried = ref.kind === "section" && origin.w && origin.h ? itemsInside({ x: origin.x, y: origin.y, w: origin.w, h: origin.h }) : [];
-      const carriedNotes = ref.kind === "section" && origin.w && origin.h ? notesInside({ x: origin.x, y: origin.y, w: origin.w, h: origin.h }) : [];
-      const carriedSections = ref.kind === "section" && origin.w && origin.h ? sectionsInside({ x: origin.x, y: origin.y, w: origin.w, h: origin.h }, ref) : [];
+      const frame = ref.kind === "section" && origin.w && origin.h ? { x: origin.x, y: origin.y, w: origin.w, h: origin.h } : null;
+      const carried = frame ? itemsInside(frame) : [];
+      const carriedNotes = frame ? notesInside(frame) : [];
+      const carriedSections = frame ? sectionsInside(frame, ref) : [];
+      const carriedImages = frame ? imagesInsideRef.current(frame) : [];
+      // The rest of the selection, without what this section already carries: nothing moves twice.
+      const without = <T extends { id: string }>(list: T[], taken: { id: string }[]) => list.filter((entry) => !taken.some((t) => t.id === entry.id));
+      const rest = group && {
+        items: without(group.items, carried),
+        notes: without(group.notes, carriedNotes),
+        sections: without(group.sections, carriedSections),
+        images: without(group.images, carriedImages),
+      };
       // A dragged note outlines the section it will be in, as an item does.
       const noteSize =
         ref.kind === "note"
@@ -1858,7 +2409,8 @@ function CanvasBoard({
         () => {
           if (id) return;
           id = ensureMark(ref.kind, ref.id);
-          select({ kind: ref.kind, id, ghost: true });
+          // The selection names it by its registry id, so its new ghost needs no word here.
+          if (!group) select({ kind: ref.kind, id, ghost: true });
         },
         (dx, dy) => {
           if (!id) return;
@@ -1868,11 +2420,13 @@ function CanvasBoard({
           shiftItems(carried, x - origin.x, y - origin.y);
           carryNotes(carriedNotes, x - origin.x, y - origin.y, id);
           carrySections(carriedSections, x - origin.x, y - origin.y);
-          if (noteSize) dropTargetRef.current({ x, y, ...noteSize });
+          shiftImagesRef.current(carriedImages, x - origin.x, y - origin.y);
+          if (rest) shiftGroup(rest, x - origin.x, y - origin.y);
+          if (noteSize && !rest) dropTargetRef.current({ x, y, ...noteSize });
         },
         () => {
           if (noteSize) dropTargetRef.current(null);
-          if (carried.length) queueSave();
+          if (carried.length || rest?.items.length) queueSave();
           pruneUnchanged();
         },
         () => {
@@ -1881,6 +2435,7 @@ function CanvasBoard({
             startAnnotation(sectionKey(section.id), 0, 0, labels.sectionRef(section.title));
             return;
           }
+          if (group) select(ref);
           const key = `${ref.kind}:${ref.id}`;
           const now = performance.now();
           if (lastTap.current?.key === key && now - lastTap.current.time < DOUBLE_TAP_MS) {
@@ -2038,6 +2593,7 @@ function CanvasBoard({
     // Sections and notes belong to the picture too. A section's title sits above its frame.
     const extra: Bounds[] = [
       ...sections.map((s) => ({ minX: s.x, minY: s.y - SECTION_TITLE_ROOM, maxX: s.x + s.width, maxY: s.y + s.height })),
+      ...listedImagesRef.current.map((i) => ({ minX: i.x, minY: i.y, maxX: i.x + i.width, maxY: i.y + i.height })),
       ...notes.map((n) => {
         const height = worldRef.current?.querySelector<HTMLElement>(`[data-board-id="${CSS.escape(n.id)}"]`)?.offsetHeight ?? 80;
         return { minX: n.x, minY: n.y, maxX: n.x + (n.width ?? NOTE_WIDTH), maxY: n.y + height };
@@ -2582,6 +3138,37 @@ function CanvasBoard({
     },
     selection: () => {
       const viewport = viewportRef.current;
+      // Several selected, or an item or an image: the view fits them all.
+      if (viewport && multiRef.current.length) {
+        const view = viewport.getBoundingClientRect();
+        const { x, y, z } = camera.current;
+        const rects = multiRef.current.flatMap((entry) => {
+          const id = CSS.escape(entry.slice(entry.indexOf(":") + 1));
+          const ref = entry.startsWith("item:") || entry.startsWith("image:") ? undefined : boardOfKey(entry);
+          const element = entry.startsWith("item:")
+            ? elements.current.get(entry.slice(5))
+            : entry.startsWith("image:")
+              ? worldRef.current?.querySelector<HTMLElement>(`[data-canvas-image="${id}"]`)
+              : ref && worldRef.current?.querySelector<HTMLElement>(`[${ref.ghost ? "data-board-ghost" : "data-board-id"}="${CSS.escape(ref.id)}"]`);
+          return element ? [element.getBoundingClientRect()] : [];
+        });
+        if (!rects.length) return;
+        setCamera(
+          fitBounds(
+            {
+              minX: (Math.min(...rects.map((r) => r.left)) - view.left - x) / z,
+              minY: (Math.min(...rects.map((r) => r.top)) - view.top - y) / z,
+              maxX: (Math.max(...rects.map((r) => r.right)) - view.left - x) / z,
+              maxY: (Math.max(...rects.map((r) => r.bottom)) - view.top - y) / z,
+            },
+            viewport.clientWidth,
+            viewport.clientHeight,
+            FIT_PADDING,
+            ZOOM_MAX,
+          ),
+        );
+        return;
+      }
       const key = selectedRef.current;
       if (!viewport || !key) return;
       const [side, kind, id] = key.split(":") as ["g" | "e", BoardKind, string];
@@ -2814,10 +3401,67 @@ function CanvasBoard({
     viewport.addEventListener("pointercancel", end);
     return true;
   };
+  // A drag on empty canvas with the default tool selects what the box touches, as it is
+  // drawn; with Shift it adds to what was selected. A press that never travels is the click
+  // on empty canvas it always was. Not in a shared file (nothing there can move), and not
+  // with Ask agent or Inspect chosen, where empty canvas still pans.
+  const marqueeRef = useRef<(event: PointerEvent) => boolean>(() => false);
+  marqueeRef.current = (event) => {
+    const viewport = viewportRef.current;
+    const box = drawRef.current;
+    if (!viewport || !box || shared || annotatingRef.current || inspectToolRef.current || boardToolRef.current) return false;
+    const start = { x: event.clientX, y: event.clientY };
+    const base = event.shiftKey ? selection.current.selectionKeys() : [];
+    let moved = false;
+    let last = "";
+    try {
+      viewport.setPointerCapture(event.pointerId);
+    } catch {
+      // The pointer may already be gone.
+    }
+    const move = (e: PointerEvent) => {
+      if (e.pointerId !== event.pointerId) return;
+      if (!moved && Math.hypot(e.clientX - start.x, e.clientY - start.y) <= DRAG_THRESHOLD) return;
+      moved = true;
+      viewport.setAttribute("data-gesture", "select");
+      const r = { left: Math.min(start.x, e.clientX), top: Math.min(start.y, e.clientY), right: Math.max(start.x, e.clientX), bottom: Math.max(start.y, e.clientY) };
+      Object.assign(box.style, { left: `${r.left}px`, top: `${r.top}px`, width: `${r.right - r.left}px`, height: `${r.bottom - r.top}px` });
+      box.hidden = false;
+      const keys = [...new Set([...base, ...selection.current.keysIn(r)])];
+      // Only a change is set: the canvas draws again for each one.
+      if (keys.join("|") === last) return;
+      last = keys.join("|");
+      selection.current.chooseKeys(keys);
+    };
+    const end = (e: PointerEvent) => {
+      if (e.pointerId !== event.pointerId) return;
+      viewport.removeEventListener("pointermove", move);
+      viewport.removeEventListener("pointerup", end);
+      viewport.removeEventListener("pointercancel", end);
+      viewport.removeAttribute("data-gesture");
+      box.hidden = true;
+      if (moved) suppressNextClick();
+      else if (e.type === "pointerup" && !event.shiftKey) tapSurfaceRef.current(e.clientX, e.clientY);
+    };
+    viewport.addEventListener("pointermove", move);
+    viewport.addEventListener("pointerup", end);
+    viewport.addEventListener("pointercancel", end);
+    return true;
+  };
   // The tool turns previews and notes inert and the cursor into a crosshair (canvas.css).
   useEffect(() => {
-    viewportRef.current?.toggleAttribute("data-board-tool", !!boardTool);
+    // Its value is the tool: a note and a section have different pointers.
+    if (boardTool) viewportRef.current?.setAttribute("data-board-tool", boardTool);
+    else viewportRef.current?.removeAttribute("data-board-tool");
   }, [boardTool]);
+  // Several selected: each shows its outline, and none its resize grips (canvas.css).
+  useEffect(() => {
+    viewportRef.current?.toggleAttribute("data-multi", multi.length > 1);
+  }, [multi]);
+  // While a drag on empty canvas would select, the pointer there is the plain arrow, not the hand (canvas.css).
+  useEffect(() => {
+    viewportRef.current?.toggleAttribute("data-select", !shared && !annotating && !boardTool && !handTool && !inspectTool);
+  }, [annotating, boardTool, handTool, inspectTool]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -2959,6 +3603,9 @@ function CanvasBoard({
       event.preventDefault();
       if (middle || spacePan) event.stopPropagation();
       if (surface) viewport.focus({ preventScroll: true });
+      // With the default tool, a drag on empty canvas draws a selection box. Space, the middle
+      // button, the wheel, and the Hand tool pan (touch too: one finger has nothing else to pan with).
+      if (surface && !middle && !spacePan && marqueeRef.current(event)) return;
       startPan(event, surface && !spacePan);
     };
 
@@ -3392,7 +4039,7 @@ function CanvasBoard({
         plain &&
         canvasFocus &&
         (event.key === "Delete" || event.key === "Backspace") &&
-        selectedRef.current &&
+        (selectedRef.current || multiRef.current.length) &&
         !openMarkRef.current &&
         !(event.target instanceof Element && typingIn(event.target))
       ) {
@@ -3435,7 +4082,7 @@ function CanvasBoard({
         setAnnotateMode(false);
         return;
       }
-      if (event.key === "Escape" && selectedRef.current && !openMarkRef.current && canvasFocus) {
+      if (event.key === "Escape" && (selectedRef.current || multiRef.current.length) && !openMarkRef.current && canvasFocus) {
         select(null);
         return;
       }
@@ -3686,6 +4333,13 @@ function CanvasBoard({
       const startY = event.clientY;
       const origin = positionsRef.current[item.id] ?? { x: item.x, y: item.y };
       const element = elements.current.get(item.id);
+      // The selection: a click on the name selects the item, Shift + click adds it or takes it
+      // out, and a drag of one of several selected moves them all (`group`). Not while asking
+      // the agent, where a click on the name is a note on the item, or in a shared file.
+      const selects = !shared && !annotatingRef.current;
+      const ownKey = `item:${item.id}`;
+      const shift = event.shiftKey;
+      let group: ReturnType<typeof selection.current.groupOf> | null = null;
       // Alignment snapping (see snap.ts). The other previews are measured once,
       // when the drag starts: nothing else moves during it. `mine` is this item's
       // preview relative to the item's own position, which is what the drag sets.
@@ -3702,7 +4356,9 @@ function CanvasBoard({
         };
         const own = boxOf(item.id);
         mine = own && { ...own, x: own.x - origin.x, y: own.y - origin.y };
-        others = [...elements.current.keys()].flatMap((id) => (id === item.id ? [] : (boxOf(id) ?? [])));
+        // What moves along is nothing to line up with.
+        const along = new Set(group?.items.map((entry) => entry.id));
+        others = [...elements.current.keys()].flatMap((id) => (id === item.id || along.has(id) ? [] : (boxOf(id) ?? [])));
       };
       const onMove = (move: PointerEvent) => {
         if (move.pointerId !== pointerId || !element) return;
@@ -3712,6 +4368,13 @@ function CanvasBoard({
           current = { kind: "move", pointerId, id: item.id, startX, startY, origin, moved: 0 };
           gesture.current = current;
           viewportRef.current?.setAttribute("data-gesture", "move");
+          if (selects) {
+            // Dragging an item that is not selected selects it alone, as a click on it would.
+            if (multiRef.current.includes(ownKey)) group = selection.current.groupOf(ownKey);
+            else selection.current.chooseKeys([ownKey]);
+            // Nothing is saved until the drag ends (see `dragging`): the group moves in state on every step.
+            if (group) dragging.current = true;
+          }
           measure();
         }
         if (current.kind !== "move" || current.pointerId !== pointerId) return;
@@ -3730,7 +4393,8 @@ function CanvasBoard({
         const next = sanitizePosition({ x: origin.x + dx + (snap?.dx ?? 0), y: origin.y + dy + (snap?.dy ?? 0) });
         guidesRef.current(snap);
         element.style.transform = `translate(${next.x}px, ${next.y}px)`;
-        dropTargetRef.current({ ...next, w: element.offsetWidth, h: element.offsetHeight });
+        if (group) selection.current.shiftGroup(group, next.x - origin.x, next.y - origin.y);
+        else dropTargetRef.current({ ...next, w: element.offsetWidth, h: element.offsetHeight });
       };
       const onEnd = (end: PointerEvent) => {
         if (end.pointerId !== pointerId) return;
@@ -3738,7 +4402,18 @@ function CanvasBoard({
         window.removeEventListener("pointerup", onEnd, true);
         window.removeEventListener("pointercancel", onEnd, true);
         const current = gesture.current;
-        if (current?.kind === "move" && current.pointerId === pointerId) endGesture();
+        if (current?.kind === "move" && current.pointerId === pointerId) {
+          endGesture();
+          if (group) {
+            dragging.current = false;
+            setDragEnds((n) => n + 1);
+            selection.current.pruneUnchanged();
+          }
+        } else if (selects && end.type === "pointerup") {
+          // A click that never travelled.
+          if (shift) selection.current.toggleKey(ownKey);
+          else selection.current.chooseKeys([ownKey]);
+        }
       };
       window.addEventListener("pointermove", onMove, true);
       window.addEventListener("pointerup", onEnd, true);
@@ -3807,10 +4482,38 @@ function CanvasBoard({
               section={section}
               hidden={removed.has(`section:${section.id}`) || marks.some((m) => m.kind === "section" && m.target === section.id)}
               interactive={boardInteractive}
-              selected={selected === `e:section:${section.id}`}
+              selected={selected === `e:section:${section.id}` || multi.includes(`section:${section.id}`)}
               working={working.has(sectionKey(section.id))}
               handlers={boardHandlers}
             />
+          ))}
+          {images.map((image) => {
+            const box = imageBoxes[image.id] ?? { x: image.x, y: image.y, w: image.width, h: image.height };
+            const chosen = multi.includes(`image:${image.id}`);
+            return (
+              <div
+                key={image.id}
+                className="canvas-image"
+                data-canvas-image={image.id}
+                data-selected={chosen || undefined}
+                data-interactive={boardInteractive || undefined}
+                style={{ transform: `translate(${box.x}px, ${box.y}px)`, inlineSize: box.w, blockSize: box.h }}
+                onPointerDown={(event) => boardInteractive && moveImage(event, image)}
+              >
+                {imageUrls[image.file] && <img src={imageUrls[image.file]} alt={labels.imageLabel} draggable={false} />}
+                {boardInteractive &&
+                  chosen &&
+                  multi.length === 1 &&
+                  IMAGE_CORNERS.map((corner) => (
+                    <span key={corner} className="canvas-resize" data-corner={corner} aria-hidden="true" onPointerDown={(event) => resizeImage(event, image, corner)} />
+                  ))}
+              </div>
+            );
+          })}
+          {placing.map((p) => (
+            <div key={p.key} className="canvas-image" data-placing style={{ transform: `translate(${p.box.x}px, ${p.box.y}px)`, inlineSize: p.box.w, blockSize: p.box.h }}>
+              <img src={p.url} alt={labels.imageLabel} draggable={false} />
+            </div>
           ))}
           {shown.map((item) => (
             <CanvasItemView
@@ -3852,6 +4555,7 @@ function CanvasBoard({
               working={working.has(item.id)}
               agentWorking={agentHandling}
               fresh={fresh[item.id]}
+              selected={multi.includes(`item:${item.id}`)}
             />
           ))}
           {notes.map((note) => (
@@ -3860,7 +4564,7 @@ function CanvasBoard({
               note={note}
               hidden={removed.has(`note:${note.id}`) || marks.some((m) => m.kind === "note" && m.target === note.id)}
               interactive={boardInteractive}
-              selected={selected === `e:note:${note.id}`}
+              selected={selected === `e:note:${note.id}` || multi.includes(`note:${note.id}`)}
               handlers={boardHandlers}
             />
           ))}
@@ -3871,7 +4575,7 @@ function CanvasBoard({
               open={openMark === mark.id}
               folded={foldedMarks.has(mark.id)}
               interactive={boardInteractive}
-              selected={selected === `g:${mark.kind}:${mark.id}`}
+              selected={selected === `g:${mark.kind}:${mark.id}` || multi.includes(mark.target ? `${mark.kind}:${mark.target}` : `mark:${mark.id}`)}
               agentWorking={agentHandling}
               handlers={boardHandlers}
               onText={markHandlers.onText}

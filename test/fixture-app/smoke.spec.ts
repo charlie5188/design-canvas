@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { appendFileSync, cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -1589,6 +1589,251 @@ test('after a reload the canvas is at its saved view from the first frame', asyn
 })
 
 // A section around the example item, for the tests below. Waits for the page to take it.
+/** A one-pixel PNG. */
+const DOT_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
+
+/** Two items side by side and a note under the first, for the tests that select several things. */
+async function withBoard(page: Page, original: string) {
+  const board = original
+    .replace('export const notes: CanvasNote[] = [];', 'export const notes: CanvasNote[] = [\n  { id: "why", text: "Why A", x: 0, y: 300 },\n];')
+    .replace(/\];\s*$/, '  { id: "second", name: "Second", component: Example, x: 480, y: 0, width: 360, height: 180 },\n];\n')
+  expect(board).toContain('id: "why"')
+  expect(board).toContain('id: "second"')
+  writeFileSync(REGISTRY, board)
+  await expect
+    .poll(async () => (await (await page.request.get('/registry.tsx')).text()).includes('id: "second"'), { timeout: 15_000 })
+    .toBe(true)
+  await page.goto('/')
+  const second = page.locator('.canvas-item[data-canvas-item="second"]')
+  await expect(second).toBeVisible()
+  await page.waitForTimeout(600)
+  // On a dev server that has just started, the view is fitted and an item can be placed
+  // again a moment after the page shows. Wait until everything has held still for a while,
+  // so a press lands where it was measured.
+  let last = ''
+  let still = 0
+  await expect
+    .poll(
+      async () => {
+        const now = await page.evaluate(() =>
+          [...document.querySelectorAll('.canvas-item, .canvas-note-card')].map((e) => JSON.stringify(e.getBoundingClientRect())).join(),
+        )
+        still = now === last ? still + 1 : 0
+        last = now
+        return still
+      },
+      { intervals: [300], timeout: 15_000 },
+    )
+    .toBeGreaterThanOrEqual(3)
+  return board
+}
+
+test('a box drawn on empty canvas selects what it touches, and a drag moves them together with one Undo', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    const board = await withBoard(page, original)
+    const example = page.locator('.canvas-item[data-canvas-item="example"]')
+    const second = page.locator('.canvas-item[data-canvas-item="second"]')
+    const note = page.locator('.canvas-note-card[data-board-id="why"]')
+    const a = (await example.boundingBox())!
+    const b = (await second.boundingBox())!
+    const n = (await note.boundingBox())!
+    // A box around the first item and the note, wherever they sit, that stays clear of the second item.
+    const left = Math.min(a.x, n.x) - 24
+    const top = Math.min(a.y, n.y) - 24
+    const right = Math.max(a.x + a.width, n.x + n.width) + 12
+    const bottom = Math.max(a.y + a.height, n.y + n.height) + 12
+    expect(b.x > right || b.x + b.width < left || b.y > bottom || b.y + b.height < top).toBe(true)
+    await page.mouse.move(left, top)
+    await page.mouse.down()
+    await page.mouse.move(right, bottom, { steps: 8 })
+    await expect(page.locator('.canvas-draw')).toBeVisible()
+    // Selected as the box is drawn, before the button is let go.
+    await expect(example).toHaveAttribute('data-selected', 'true')
+    await page.mouse.up()
+    await expect(page.locator('.canvas-draw')).toBeHidden()
+    await expect(note).toHaveAttribute('data-selected', 'true')
+
+    await expect(second).not.toHaveAttribute('data-selected')
+    // The drag selected; it did not pan.
+    expect((await example.boundingBox())!.x).toBe(a.x)
+    // Several selected show no resize grips.
+    await expect(note.locator('.canvas-resize').first()).toBeHidden()
+    // Dragging one of them moves them all, and leaves the rest of the canvas.
+    const name = (await example.locator('.canvas-name').boundingBox())!
+    await page.mouse.move(name.x + 10, name.y + name.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(name.x + 10, name.y + name.height / 2 + 90, { steps: 8 })
+    await page.mouse.up()
+    const movedItem = (await example.boundingBox())!.y - a.y
+    expect(movedItem).toBeGreaterThan(60)
+    const movedNote = (await page.locator('.canvas-note-card').first().boundingBox())!.y - n.y
+    expect(Math.abs(movedNote - movedItem)).toBeLessThan(2)
+    expect(Math.abs((await second.boundingBox())!.y - b.y)).toBeLessThan(1)
+    // Both land in the registry, and the selection is kept once they are saved.
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).not.toContain('text: "Why A", x: 0, y: 300')
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).not.toMatch(/id: "example"[^}]*\by: 0,/)
+    await expect(page.locator('[data-board-ghost]')).toHaveCount(0)
+    await expect(example).toHaveAttribute('data-selected', 'true')
+    await expect(note).toHaveAttribute('data-selected', 'true')
+    // One Undo for the one move.
+    await page.keyboard.press('ControlOrMeta+z')
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toBe(board)
+    // A click on empty canvas lets go.
+    await page.mouse.click(left, top)
+    await expect(page.locator('[data-selected]')).toHaveCount(0)
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
+test('Shift + click adds to the selection and takes out of it, and Delete removes several with one Undo', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    await withBoard(page, original)
+    const example = page.locator('.canvas-item[data-canvas-item="example"]')
+    const second = page.locator('.canvas-item[data-canvas-item="second"]')
+    const note = page.locator('.canvas-note-card[data-board-id="why"]')
+    // A click on an item's name selects it alone.
+    await example.locator('.canvas-name').click()
+    await expect(example).toHaveAttribute('data-selected', 'true')
+    await second.locator('.canvas-name').click()
+    await expect(second).toHaveAttribute('data-selected', 'true')
+    await expect(example).not.toHaveAttribute('data-selected')
+    await note.click({ modifiers: ['Shift'] })
+    await example.locator('.canvas-name').click({ modifiers: ['Shift'] })
+    await expect(page.locator('[data-selected]')).toHaveCount(3)
+    await second.locator('.canvas-name').click({ modifiers: ['Shift'] })
+    await expect(second).not.toHaveAttribute('data-selected')
+    await expect(page.locator('[data-selected]')).toHaveCount(2)
+    // The item goes to the trash and the note leaves the registry, with one notice.
+    await page.keyboard.press('Delete')
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toContain('trashed: true')
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).not.toContain('id: "why"')
+    await expect(example).toHaveCount(0)
+    await expect(note).toHaveCount(0)
+    await expect(second).toBeVisible()
+    await expect(page.locator('.canvas-toast')).toHaveCount(1)
+    await expect(page.locator('.canvas-toast')).toContainText('Removed 2 from the canvas')
+    await page.getByRole('button', { name: 'Undo' }).click()
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toContain('id: "why", text: "Why A", x: 0, y: 300')
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).not.toContain('trashed: true')
+    await expect(example).toBeVisible()
+    await expect(note).toBeVisible()
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
+test('a note draws **bold** and lists, and is edited as the text it is', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    const text = 'We compared:\\n- **A** keeps the summary\\n- B hides it\\n\\n1. Pick one\\n2. Ship it\\n2 ** 3 ** 4'
+    const noted = original.replace(
+      'export const notes: CanvasNote[] = [];',
+      `export const notes: CanvasNote[] = [\n  { id: "why", text: "${text}", x: 0, y: 300 },\n];`,
+    )
+    expect(noted).toContain('id: "why"')
+    writeFileSync(REGISTRY, noted)
+    await expect
+      .poll(async () => (await (await page.request.get('/registry.tsx')).text()).includes('id: "why"'), { timeout: 15_000 })
+      .toBe(true)
+    await page.goto('/')
+    const note = page.locator('.canvas-note-card[data-board-id="why"]')
+    await expect(note).toBeVisible()
+    await expect(note.locator('ul > li')).toHaveText(['A keeps the summary', 'B hides it'])
+    await expect(note.locator('ol > li')).toHaveText(['Pick one', 'Ship it'])
+    await expect(note.locator('strong')).toHaveText(['A'])
+    // The marks are drawn, not shown; stars with spaces inside are no mark.
+    await expect(note).not.toContainText('**A**')
+    await expect(note).toContainText('2 ** 3 ** 4')
+    // Editing shows the text as typed.
+    await page.waitForTimeout(600)
+    await note.dblclick()
+    await expect(page.locator('[data-board-ghost] textarea')).toHaveValue(/^We compared:\n- \*\*A\*\* keeps the summary/)
+    await page.keyboard.press('Escape')
+    expect(readFileSync(REGISTRY, 'utf8')).toBe(noted)
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
+test('a pasted image is kept in the canvas folder, moves and resizes in proportion, and Delete and Undo work on it', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  const folder = 'design-canvas/smoke/images'
+  try {
+    const errors = collectErrors(page)
+    await page.goto('/')
+    await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toBeVisible()
+    await page.waitForTimeout(600)
+    // A picture twice as wide as it is tall, pasted as a copied screenshot is. It lands at the
+    // pointer, here on empty canvas clear of the item and the bars.
+    await page.mouse.move(230, 560)
+    await page.evaluate(async () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = 400
+      canvas.height = 200
+      const context = canvas.getContext('2d')!
+      context.fillStyle = '#2f6fed'
+      context.fillRect(0, 0, 400, 200)
+      const blob = await new Promise<Blob>((resolve) => canvas.toBlob((b) => resolve(b!), 'image/png'))
+      const data = new DataTransfer()
+      data.items.add(new File([blob], 'reference.png', { type: 'image/png' }))
+      window.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }))
+    })
+    // Stored again as WebP, or as it came when that is not smaller.
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toMatch(/file: "image-1\.(webp|png)"/)
+    const stored = () => readdirSync(folder).filter((name) => name.startsWith('image-1.'))
+    expect(stored()).toHaveLength(1)
+    const entry = () => /\{ id: "image-1"[^}]*\}/.exec(readFileSync(REGISTRY, 'utf8'))?.[0] ?? ''
+    const placed = entry()
+    expect(placed).toContain('width: 400, height: 200')
+    const image = page.locator('.canvas-image[data-canvas-image="image-1"]')
+    await expect.poll(() => image.locator('img').evaluate((element: HTMLImageElement) => element.naturalWidth)).toBe(400)
+    await expect(page.locator('.canvas-image[data-placing]')).toHaveCount(0)
+    // A drag moves it and selects it, and the move is saved.
+    const box = (await image.boundingBox())!
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(box.x + box.width / 2 + 70, box.y + box.height / 2 + 40, { steps: 6 })
+    await page.mouse.up()
+    await expect.poll(entry).not.toBe(placed)
+    expect(entry()).toContain('width: 400, height: 200')
+    await expect(image).toHaveAttribute('data-selected', 'true')
+    await expect(image.locator('.canvas-resize')).toHaveCount(4)
+    // A corner resizes it, and the picture keeps its proportions.
+    const moved = entry()
+    const grip = (await image.locator('.canvas-resize[data-corner="se"]').boundingBox())!
+    await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(grip.x + grip.width / 2 + 60, grip.y + grip.height / 2 + 5, { steps: 6 })
+    await page.mouse.up()
+    await expect.poll(entry).not.toBe(moved)
+    const size = /width: (\d+), height: (\d+)/.exec(entry())!
+    expect(Number(size[1])).toBeGreaterThan(400)
+    expect(Math.abs(Number(size[1]) / Number(size[2]) - 2)).toBeLessThan(0.02)
+    // Delete takes it off the canvas and keeps its file, so Undo can bring it back.
+    const resized = entry()
+    await page.keyboard.press('Delete')
+    await expect.poll(entry).toBe('')
+    await expect(image).toHaveCount(0)
+    expect(stored()).toHaveLength(1)
+    await page.keyboard.press('ControlOrMeta+z')
+    await expect.poll(entry).toBe(resized)
+    await expect(image).toBeVisible()
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+    rmSync(folder, { recursive: true, force: true })
+  }
+})
+
 async function withSection(page: Page, original: string) {
   const sectioned = original.replace(
     'export const sections: CanvasSection[] = [];',
@@ -1639,13 +1884,25 @@ test('a section resizes from its border like an item, and a click inside selects
     await page.mouse.click(box.x + box.width - 30, box.y + box.height - 30)
     await expect(section).toHaveAttribute('data-selected', 'true')
     await expect(section.locator('.canvas-resize')).toHaveCount(4)
-    // A drag inside pans and keeps the selection.
+    // A drag inside draws a selection box: nothing pans, and what the box touches is selected
+    // in the section's place. The section itself is selected only by a box around all of it.
+    await page.mouse.move(box.x + box.width - 30, box.y + box.height - 30)
+    await page.mouse.down()
+    await page.mouse.move(itemBefore.x + itemBefore.width - 20, itemBefore.y + itemBefore.height - 20, { steps: 6 })
+    await expect(page.locator('.canvas-draw')).toBeVisible()
+    await page.mouse.up()
+    expect(Math.abs((await frame.boundingBox())!.x - box.x)).toBeLessThan(1)
+    await expect(item).toHaveAttribute('data-selected', 'true')
+    await expect(section).not.toHaveAttribute('data-selected')
+    // Space + drag still pans, and keeps the selection.
+    await page.keyboard.down('Space')
     await page.mouse.move(box.x + box.width - 30, box.y + box.height - 30)
     await page.mouse.down()
     await page.mouse.move(box.x + box.width + 30, box.y + box.height - 30, { steps: 6 })
     await page.mouse.up()
+    await page.keyboard.up('Space')
     expect(Math.abs((await frame.boundingBox())!.x - box.x - 60)).toBeLessThan(3)
-    await expect(section).toHaveAttribute('data-selected', 'true')
+    await expect(item).toHaveAttribute('data-selected', 'true')
     expect(readFileSync(REGISTRY, 'utf8')).toBe(sectioned)
     expect(errors).toEqual([])
   } finally {
@@ -2981,7 +3238,14 @@ test('a shared file works from disk, frames included, without the agent tools', 
   const added =
     '  { id: "phone", name: "Phone", component: Example, x: 0, y: 240, width: 375, height: 180, viewport: true },\n' +
     '  { id: "old", name: "Old", component: Example, x: 400, y: 0, width: 360, height: 180, trashed: true },\n];'
-  writeFileSync(`${copy}/registry.tsx`, registry.replace(/\];\s*$/, `${added}\n`))
+  // And a reference image, whose picture must be inside the file.
+  const withImage = registry
+    .replace(/\];\s*$/, `${added}\n`)
+    .replace('export const images: CanvasImage[] = [];', 'export const images: CanvasImage[] = [\n  { id: "ref", file: "ref.png", x: 400, y: 240, width: 120, height: 120 },\n];')
+  expect(withImage).toContain('file: "ref.png"')
+  writeFileSync(`${copy}/registry.tsx`, withImage)
+  mkdirSync(`${copy}/images`, { recursive: true })
+  writeFileSync(`${copy}/images/ref.png`, Buffer.from(DOT_PNG, 'base64'))
   const folder = mkdtempSync(join(tmpdir(), 'design-canvas-share-'))
   const file = join(folder, 'canvas.html')
   try {
@@ -2993,6 +3257,10 @@ test('a shared file works from disk, frames included, without the agent tools', 
     await expect(example).toContainText('Canvas is ready')
     await expect(example.locator('h2')).toHaveCSS('color', APP_TEXT)
     await expect(page.locator('.canvas-item[data-canvas-item="old"]')).toHaveCount(0)
+    // The reference image shows from inside the file, and cannot be moved there.
+    const picture = page.locator('.canvas-image[data-canvas-image="ref"]')
+    await expect.poll(() => picture.locator('img').evaluate((element: HTMLImageElement) => element.naturalWidth)).toBe(1)
+    await expect(picture).not.toHaveAttribute('data-interactive')
     // A shared file is read-only: no trash to open and nothing to move into it.
     await expect(page.getByRole('button', { name: /^Trash/ })).toHaveCount(0)
     await page.getByRole('button', { name: /^More actions for / }).first().click()
@@ -3138,13 +3406,20 @@ test('only the canvas page can build a shared file', async ({ request }) => {
 test('cursors say what a press or drag will do', async ({ page }) => {
   await page.goto('/')
   const cursor = (selector: string) => page.locator(selector).first().evaluate((element) => getComputedStyle(element).cursor)
-  expect(await cursor('.canvas-viewport')).toBe('grab')
+  // With the default tool a drag on empty canvas selects, so the pointer there is the plain arrow.
+  expect(await cursor('.canvas-viewport')).toBe('default')
   expect(await cursor('.canvas-name')).toBe('grab')
   expect(await cursor('.canvas-handle')).toBe('grab')
   expect(await cursor('.canvas-preview h2')).toBe('auto')
+  // A note is placed with an arrow that carries a note, and falls back to the crosshair.
+  await page.getByRole('button', { name: 'Note', exact: true }).click()
+  expect(await cursor('.canvas-viewport')).toMatch(/^url\(.*\) 5 3, crosshair$/)
+  await page.keyboard.press('Escape')
+  // Asking: an arrow that carries a speech bubble over what can be asked about, and empty canvas pans.
   await page.getByRole('button', { name: 'Ask agent', exact: true }).click()
-  expect(await cursor('.canvas-preview h2')).toBe('crosshair')
-  expect(await cursor('.canvas-name')).toBe('crosshair')
+  expect(await cursor('.canvas-preview h2')).toMatch(/^url\(.*\) 5 3, crosshair$/)
+  expect(await cursor('.canvas-name')).toMatch(/^url\(.*\) 5 3, crosshair$/)
+  expect(await cursor('.canvas-viewport')).toBe('grab')
   await page.locator('.canvas-viewport').evaluate((element) => element.setAttribute('data-gesture', 'pan'))
   expect(await cursor('.canvas-preview h2')).toBe('grabbing')
   // Z held wins over the crosshair and the copy cursor; Alt turns it to zoom out.

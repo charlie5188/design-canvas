@@ -102,6 +102,22 @@ export type CanvasSection = {
   height: number;
 };
 
+/**
+ * A reference image on the canvas: a screenshot, a sketch, another product's screen.
+ * The person pastes or drops it, and the canvas writes the file into the canvas's
+ * `images/` folder and the entry into `registry.tsx`, moves and resizes included.
+ * The agent can read the file like any other, and may add one the same way.
+ */
+export type CanvasImage = {
+  id: string;
+  /** The file's name in the canvas's `images/` folder, for example "checkout-reference.png". */
+  file: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
 // The section a pick makes for the versions that were not picked. The agent's own
 // set-aside sections, drawn around one dropped item where it stands, have ids that
 // start with this one (SKILL.md, "Decision notes"); items in either kind are out of the running.

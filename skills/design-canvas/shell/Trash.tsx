@@ -165,7 +165,8 @@ export function useTrash(list: TrashList, board: TrashBoard) {
     [leave, saveTrashed],
   );
   const moveToTrash = useCallback(
-    (item: CanvasItem) => {
+    // `quiet`: one of several going at once, which get one notice and one Undo between them (Canvas.tsx, deleteGroup).
+    (item: CanvasItem, quiet = false) => {
       beforeTrash(item);
       times.current[item.id] = Date.now();
       setTrash([item.id, ...idsRef.current.filter((id) => id !== item.id)]);
@@ -173,7 +174,7 @@ export function useTrash(list: TrashList, board: TrashBoard) {
       setFrontId((front) => (front === item.id ? null : front));
       // The button that had focus is gone with its item.
       viewportRef.current?.focus({ preventScroll: true });
-      notify(labels.movedToTrash(item.name), { label: labels.undo, run: () => putBack(item) });
+      if (!quiet) notify(labels.movedToTrash(item.name), { label: labels.undo, run: () => putBack(item) });
     },
     [beforeTrash, idsRef, notify, putBack, saveTrashed, setFrontId, setTrash, times, viewportRef],
   );

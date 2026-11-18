@@ -7,7 +7,7 @@ a device or input you do not have.
 
 ## Camera
 
-- Drag empty space pans. Space + drag and middle-button drag pan anywhere, including over previews and `viewport` frames (middle-button over a frame is a known limit).
+- On the canvas page with the default tool, a drag on empty space draws a selection box (see Selection) and does not pan; a wheel or two-finger scroll pans. A drag on empty space pans in a shared file, by touch, and with Ask agent or Inspect chosen. Space + drag and middle-button drag pan anywhere, including over previews and `viewport` frames (middle-button over a frame is a known limit).
 - ⌘/Ctrl + wheel and trackpad pinch zoom around the pointer, over empty space, previews, and frames, in both directions without jumps or drift.
 - A canvas opened in a background or zero-size tab fits all items once it has a real size, never at minimum zoom.
 - After a reload the canvas is at its saved pan and zoom from the first frame. It does not show at the default view and then jump.
@@ -20,10 +20,10 @@ a device or input you do not have.
 
 ## Cursors
 
-- Empty space and an item's grip and name show an open hand; a pan or an item move shows a closed hand everywhere, including over previews and frames. Holding Space shows the open hand everywhere.
+- An item's grip and name show an open hand; a pan or an item move shows a closed hand everywhere, including over previews and frames. Holding Space shows the open hand everywhere. Empty space shows the plain arrow where a drag there selects (the canvas page, default tool), also while the box is drawn, and the open hand where a drag there pans (a shared file, Ask agent, Inspect, the Hand tool).
 - Previews keep the app's own cursors: a text cursor over text, the app's pointers on controls.
 - Holding Alt/Option over a preview or a frame shows the copy cursor.
-- In annotate mode previews, frames, and item titles show a crosshair; a pan or Space still shows the hand.
+- In annotate mode previews, frames, and item titles show an arrow with a see-through speech bubble at its lower right; the arrow's tip is the point a click asks about. With the Note tool the pointer is an arrow with a see-through sticky note, everywhere on the canvas; the Section tool keeps the crosshair. What is under either shape stays readable. A pan or Space still shows the hand, and Z the zoom cursor. Not verified on a high-density display or in Safari and Firefox, where the pointer may be drawn at another size.
 
 ## Items
 
@@ -206,7 +206,7 @@ Before claiming smooth performance, profile a canvas with a realistic number of 
 ## Tools, notes, and sections
 
 - The tools bar has Interact, Move canvas, Inspect (with a design system), Ask agent, Note, and Section; exactly one is pressed. Interact is the default: in it, the prototypes respond to clicks and typing as in the product. Escape or V returns to Interact from any of them, A toggles Ask agent, N and S pick the Note and Section tools, none of these while typing in a field.
-- Note and Section work without Ask agent mode. While one is armed the cursor is a crosshair everywhere and every press, also over items, notes, and sections, goes to the canvas; it puts itself down after one use. Picking Annotate or Select puts it down too.
+- Note and Section work without Ask agent mode. While one is armed the cursor is its own everywhere (see Cursors) and every press, also over items, notes, and sections, goes to the canvas; it puts itself down after one use. Picking Annotate or Select puts it down too.
 - Note: one click places a sticker with its field focused, showing the "Write a note" placeholder and no tag; typing works at once. Escape or a press elsewhere keeps the text. An empty note stays as a draft: placeholder, no state, not counted or sent, kept in browser storage; its discard button removes it. Once it has text it is appended to `notes` in `registry.tsx` with an id made from its text, shows no tag while it saves, and its ghost leaves when the registry has one more note.
 - Section: a drag draws the outline, then a folder with the "Section title" placeholder focused on the tab; Enter keeps it. Left empty it stays as a draft, like a note; with a title it is appended to `sections` the same way. With no dev server a new note or section stays "Not applied yet" and goes to the agent. A drag under 80×60 canvas units makes nothing and keeps the tool.
 - A section looks like a folder: its title is on a raised tab joined to the frame, in tints of the canvas colors in both themes. A note is a sticker with a cut, folded bottom-right corner in fixed colors in both themes.
@@ -229,6 +229,32 @@ Before claiming smooth performance, profile a canvas with a realistic number of 
 - Discard all (the eraser) drops annotations, ghosts, and moved items' new positions in one step, with Undo for all of it; its toast counts what the Send button counted.
 - Registry notes and sections draw in the shared file, sections behind items, with no tools, grips, or ghosts. Fit all includes them.
 - A section shows the grip an item's name has on its tab, and its frame lights up while the tab is hovered; pulling the tab moves it. A drag on a section's border resizes the frame alone and never moves it or the items inside; only the tab moves a section.
+
+## Note formatting
+
+- A note shows `**words**` in bold and lines that start with `- `, `* `, or `• ` as a bulleted list, and with `1. ` or `1) ` as a numbered list that starts at the number written. Everything else shows as typed, with its line breaks and blank lines. Stars with a space inside them (`2 ** 3 ** 4`) stay as typed. The same for a note from the registry, a note waiting as a ghost, and a note in a shared file.
+- While a note is edited, its field shows the text as typed, marks included; they are drawn again when the edit ends. The registry, a section note's reference, and the message to the agent keep the text as typed.
+
+## Selection
+
+- On the canvas page with the default tool, a drag that starts on empty canvas draws a box, and everything the box touches is selected as it is drawn: items, notes, and reference images. A section is selected only when the box holds all of its frame, so a box drawn inside a section selects what is in it. The camera does not move. Shift + drag adds to what was selected. A press on empty canvas that never travels is the click it always was: it selects the section under it, or lets go of the selection.
+- A click on an item's name selects that item alone; it shows the outline a selected note shows, around its preview. Shift + click on an item's name, a note, a section's tab, or an image adds it to the selection, or takes it out, and starts no move.
+- With several selected, each shows its outline and none shows resize grips. Dragging any one of them moves them all by the same amount; a selected section also carries what is inside it, and nothing moves twice. The dragged item still snaps to the items that are not moving. Dragging something that is not selected selects it alone and moves only it.
+- The whole move is one write to `registry.tsx` and one ⌘/Ctrl + Z. The selection is kept once the move is saved, and after the undo.
+- Delete or Backspace removes the selection in one step: items go to the trash, notes, sections, and images leave the registry, and one notice ("Removed 3 from the canvas") has one Undo that brings all of it back. A section's contents stay unless they were selected too.
+- Escape, a click on empty canvas, or a press anywhere that is not selectable (a preview, a bar) lets go of the selection. Shift + 2 fits the view to it.
+- None of it in a shared file, where nothing can move, or with Ask agent chosen, where a click on a name is a note. Not verified by touch: one finger on empty canvas pans.
+
+## Reference images
+
+- Pasting a copied picture (⌘/Ctrl + V) puts it on the canvas at the pointer, or in the middle of the view when the pointer is off the canvas. Dropping image files from the desktop puts them where they are dropped, several a step apart. It shows at once, dimmed, and at full strength once it is saved. Not while typing in a field or with focus in a preview, where the paste belongs to the app shown.
+- The file is written into the canvas's `images/` folder as `image-N` with the extension of the format it was stored in, and `registry.tsx` gets an entry in `images` (`{ id, file, x, y, width, height }`). A registry made before images existed gets the array added above `registry`. A new image is shown at most 640 px on its longest side.
+- Every picture is stored again as WebP before it is kept, and one larger than 2400 px on its longest side is also made smaller. The file as it came is kept when that would not make it smaller. A GIF goes as it is, so one that moves keeps moving. In a browser that cannot write WebP (Safari) the picture is stored as JPEG, or as PNG when it has see-through parts. Not verified in Safari. A file the browser cannot read gives a notice and adds nothing.
+- An image moves by a drag and resizes from a corner when it alone is selected; it keeps its proportions, and the size shows by the pointer. Moves and resizes are saved like an item's, and ⌘/Ctrl + Z puts them back. It is selected, moved with a selection, carried by a section whose frame holds its centre, and deleted like a note. Deleting it takes its entry out and leaves the file, so Undo can list it again.
+- Images draw above sections and under items. Fit all takes them in.
+- The shared file holds each picture inside it and shows it; it cannot be moved there. Sharing one section still puts every image in the file.
+- With no dev server the picture is not added, and a notice says why.
+- Not built: asking the agent about an image with a pin, cropping, and keyboard moves.
 
 ## Moved items
 

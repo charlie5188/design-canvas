@@ -20,3 +20,7 @@ export const EDIT_PATH = "/__design-canvas/edit";
 export const PROPS_PATH = "/__design-canvas/props";
 /** Inspect: the Tailwind theme the app builds with, its tokens whether the page uses them or not (tailwind-theme.ts). */
 export const THEME_PATH = "/__design-canvas/theme";
+/** A pasted or dropped image: the file is written into the canvas's images/ folder and listed in registry.tsx. */
+export const IMAGE_PATH = "/__design-canvas/image";
+/** The largest image file the canvas keeps. The page makes a larger one smaller before it sends it (Canvas.tsx). */
+export const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
