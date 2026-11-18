@@ -126,8 +126,14 @@ export const labels = {
   states: (n: number) => `${n} state${n === 1 ? "" : "s"}`,
   stateDefault: "Default",
   statesOf: (path: string) => `States of ${path}`,
+  /** The hint on the button by an item's name: what a press does, then what it holds. */
+  flowHint: (screens: number, states: number) =>
+    `${screens > 1 ? "Show the flow" : "Show the states"}: ${[screens > 1 ? `${screens} screens` : "", states ? `${states} state${states === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ")}`,
   flowOf: (name: string) => `Screens of ${name}`,
-  openScreen: (path: string) => `Open ${path}`,
+  zoomToScreen: (path: string) => `Zoom to ${path}`,
+  showWholeFlow: "Show the whole flow",
+  tryScreen: (path: string) => `Try ${path} on the canvas`,
+  tryScreenHint: "Try it on the canvas",
   /** The name of an item's own screen when it names no path. */
   firstScreen: "Start",
   askFlow: (name: string) => `Ask agent about the whole flow of ${name}`,

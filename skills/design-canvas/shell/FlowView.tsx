@@ -3,7 +3,7 @@ import { frameSource } from "./bridge";
 import { describeElement, pickElement } from "./dom";
 import { Icon } from "./icons";
 import { labels } from "./labels";
-import { opensNewTab, pathOf, RouteContext, type Screen, screenIndex, screensOf, stateCount } from "./routes";
+import { namedSteps, opensNewTab, pathOf, RouteContext, type Screen, screenIndex, screensOf, stateCount } from "./routes";
 import type { CanvasItem } from "./types";
 
 // The flow view: every screen of one item, side by side, with arrows for where each one leads.
@@ -14,14 +14,23 @@ import type { CanvasItem } from "./types";
 //
 // - Each screen is the item's real component, rendered live at the item's size. The view opens
 //   with the whole flow in the window, to see its shape; then it pans and zooms as the canvas
-//   does, to read a screen. The words on arrows, the screen names, the pins, and the buttons
-//   keep one size on screen at any zoom. The screens are for looking: they take no clicks. A
-//   click on one opens the item at that screen, back on the canvas.
+//   does, to read a screen. The screens are for looking: their own controls take no clicks.
+//   A click on a screen glides the view to it, as large as fits (real size at most), to read
+//   it: that is what a click on a small picture of a screen is for. To try the screen, its
+//   name row has a button that opens the item at that screen, back on the canvas. A click
+//   used to do that, and it threw the person out of the view while they were reading it.
 // - Each arrow says what makes the step, in the words on the control: click "Pay". The words
-//   scale with the view, as the screens' names do; they read at 12px when the view opens.
-// - Arrows come from two places. A link in a screen is read from the screen itself. A step that
-//   code makes (a router call in a click handler) cannot be read without running it, so it gets
-//   an arrow once the person has made that step in the item (`learned`), and not before.
+//   read at 12px when the view opens, and keep that size as the view zooms in, like the pins
+//   and lines; the screens' names do the same once they reach their size. Before, they grew
+//   with the view and stood taller than the screens' own headings. Zoomed out further than the
+//   view opens, they shrink with it, so they never run into the screens. When the flow is wider
+//   than the window, the gaps between screens grow so the words fit at the zoom it opens at.
+// - Arrows come from three places. A link in a screen is read from the screen itself. A step
+//   that code makes (a router call in a click handler) cannot be read without running it: the
+//   agent names it in the registry (`steps`), so the arrow and the layout are right from the
+//   start; else it gets an arrow once the person has made that step in the item (`learned`).
+// - A screen shown in another state keeps the arrows of its first state, so nothing moves; an
+//   arrow whose control that state does not have is dimmed.
 // - The main path runs left to right in the order the registry lists the screens, which is
 //   the order a person goes through them. A screen that its previous one does not lead to,
 //   but an earlier one does, is a branch (checkout fails, a form has an error): it sits in a
@@ -46,8 +55,11 @@ const SIDES = 96;
 const GAP = 120;
 /** Between two rows: room for an arrow down and its words. */
 const ROW_GAP = 96;
-/** A screen's name row and the space under it. */
-const HEAD = 32;
+/** The room over a screen for its name row: the row (24) and the gap under it (8), as drawn, and room for the row to grow (below). */
+const HEAD = 40;
+const HEAD_ROW = 32;
+/** How much larger than its laid-out size a screen's name row grows, so a wide flow's names read when the view opens. */
+const HEAD_GROW = 1.4;
 /** Around the layout. */
 const PAD_X = 48;
 const PAD_Y = 32;
@@ -62,6 +74,13 @@ const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 2;
 /** One press of a zoom button or key. */
 const ZOOM_STEP = 1.25;
+/** Around a screen the view glides to: clear of the bars at the top and the bottom. */
+const FOCUS_X = 48;
+const FOCUS_Y = 76;
+/** About how wide one character of an arrow's words is on screen, at 12px. */
+const CHAR = 6.6;
+/** The most of the window's width the gaps between screens take, when they grow to hold the words. */
+const GAPS_SHARE = 0.4;
 
 type Place = { row: number; col: number };
 type Box = { x: number; y: number; w: number; h: number; row: number; col: number };
@@ -111,8 +130,10 @@ type Edge = FlowStep;
  * The words a person would name a control by: its accessible name, or its text. Undefined for
  * a control with neither, such as an icon alone; its arrow then has no words.
  */
+const CONTROLS = "a[href], button, [role='button'], [role='link'], input[type='submit'], input[type='button']";
+
 export function controlWords(element: Element | null): string | undefined {
-  const control = element?.closest("a[href], button, [role='button'], [role='link'], input[type='submit'], input[type='button']");
+  const control = element?.closest(CONTROLS);
   if (!control) return undefined;
   const words = (control.getAttribute("aria-label") ?? (control instanceof HTMLInputElement ? control.value : control.textContent) ?? "").replace(/\s+/g, " ").trim();
   return words || undefined;
@@ -200,15 +221,19 @@ export function FlowView({
   const [cam, setCam] = useState({ x: 0, y: 0, z: 1 });
   const camRef = useRef(cam);
   camRef.current = cam;
+  // The screen a click brought close; a second click on it goes back to the whole flow. Any other
+  // move of the view lets go of it.
+  const [focused, setFocused] = useState<number | null>(null);
   const fitted = useRef(false);
-  // The words on arrows belong to the flow, like the screens' names, so they scale with the
-  // view. They read at 12px at the zoom the view opens at, which shows the whole flow.
+  // The words on arrows read at 12px at the zoom the view opens at, which shows the whole flow,
+  // and keep that size zoomed in further (see the top). The zoom the view opened at.
   const [labelZoom, setLabelZoom] = useState(1);
   // The layout is made from the steps known as the view opens, while the screens render and
   // their links are read, and then holds still: a screen never moves under the person.
   const settled = useRef(false);
   const touched = useRef(false);
-  const [places, setPlaces] = useState<Place[]>(() => screens.map((_, col) => ({ row: 0, col })));
+  // The steps the registry names are known before anything renders, so the first layout has them.
+  const [places, setPlaces] = useState<Place[]>(() => placeScreens(screens.length, namedSteps(item)));
   useEffect(() => {
     const timer = window.setTimeout(() => (settled.current = true), 1600);
     return () => window.clearTimeout(timer);
@@ -227,6 +252,7 @@ export function FlowView({
       const stage = stageRef.current;
       if (!stage) return;
       touched.current = true;
+      setFocused(null);
       const { x, y, z } = camRef.current;
       const next = Math.min(MAX_ZOOM / scale, Math.max(MIN_ZOOM / scale, z * factor));
       const cx = px ?? stage.clientWidth / 2;
@@ -235,6 +261,32 @@ export function FlowView({
     },
     [scale],
   );
+  // Glides the camera to `to` in about a quarter of a second, as the canvas's does (camera.ts),
+  // so the person sees which screen they went to. A press, a wheel turn, or a key stops it where
+  // it is. With reduced motion the camera is set at once.
+  const flight = useRef({ frame: 0, stop: () => {} });
+  const flyTo = useCallback((to: { x: number; y: number; z: number }) => {
+    touched.current = true;
+    flight.current.stop();
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return setCam(to);
+    const from = camRef.current;
+    const start = performance.now();
+    const events = ["pointerdown", "wheel", "keydown"] as const;
+    const stop = () => {
+      cancelAnimationFrame(flight.current.frame);
+      for (const type of events) window.removeEventListener(type, stop, true);
+    };
+    for (const type of events) window.addEventListener(type, stop, true);
+    const step = (now: number) => {
+      const part = Math.min(1, (now - start) / 260);
+      const eased = 1 - (1 - part) ** 3;
+      setCam({ x: from.x + (to.x - from.x) * eased, y: from.y + (to.y - from.y) * eased, z: from.z + (to.z - from.z) * eased });
+      if (part < 1) flight.current.frame = requestAnimationFrame(step);
+      else stop();
+    };
+    flight.current = { frame: requestAnimationFrame(step), stop };
+  }, []);
+  useEffect(() => () => flight.current.stop(), []);
 
   useEffect(() => {
     const onResize = () => setSize({ w: window.innerWidth, h: window.innerHeight });
@@ -264,7 +316,10 @@ export function FlowView({
       }
       const zoom = event.key === "+" || event.key === "=" ? ZOOM_STEP : event.key === "-" || event.key === "−" ? 1 / ZOOM_STEP : event.key === "0" ? 1 / scale / camRef.current.z : 0;
       if (zoom) zoomAt(zoom);
-      else if (event.key === "1") setCam(fitCam());
+      else if (event.key === "1") {
+        setFocused(null);
+        setCam(fitCam());
+      }
       else return;
       event.preventDefault();
       event.stopPropagation();
@@ -283,6 +338,7 @@ export function FlowView({
       event.preventDefault();
       const box = stage.getBoundingClientRect();
       touched.current = true;
+      setFocused(null);
       if (event.ctrlKey || event.metaKey) zoomAt(Math.exp(-event.deltaY * 0.01), event.clientX - box.left, event.clientY - box.top);
       else setCam((c) => ({ ...c, x: c.x - event.deltaX, y: c.y - event.deltaY }));
     };
@@ -292,7 +348,10 @@ export function FlowView({
 
   // A drag pans, on a screen too: zoomed in, the screens fill the view and leave no empty space
   // to hold. A press that does not move does what it would: on a screen it opens that screen,
-  // and on empty space it closes the open note, or the view. Not on a pin, a note, or a button.
+  // and on empty space it closes the open note, as on the canvas. Not on a pin, a note, or a button.
+  // Why empty space never closes the view: the view is a workspace of its own (pan, zoom, tools),
+  // so its empty space is inside it, not outside. Closing there threw away the person's place on
+  // a stray click, often one meant to pan or to put a note down. Back and Escape close it.
   const drag = useRef<{ x: number; y: number; moved: boolean; empty: boolean } | null>(null);
   const dragged = useRef(false);
 
@@ -303,10 +362,12 @@ export function FlowView({
   // read from its first.
   const stepsOf = useRef<Record<number, Edge[]>>({});
   const shownRef = useRef<Record<number, string>>({});
+  // What a screen shown in another state offers: the screens its links lead to, and the words on
+  // its controls. An arrow from it that neither names is dimmed: that state has no such control.
+  const [offers, setOffers] = useState<Record<number, { to: number[]; words: string[] }>>({});
   const readLinks = useCallback(() => {
+    const offered: Record<number, { to: number[]; words: string[] }> = {};
     boxes.current.forEach((box, from) => {
-      if (shownRef.current[from]) return;
-      const found: Edge[] = [];
       const frame = box?.querySelector("iframe");
       let root: ParentNode | null | undefined = box;
       if (frame) {
@@ -316,6 +377,19 @@ export function FlowView({
           root = null;
         }
       }
+      if (shownRef.current[from]) {
+        const to = new Set<number>();
+        const words = new Set<string>();
+        for (const control of root?.querySelectorAll(CONTROLS) ?? []) {
+          const said = controlWords(control);
+          if (said) words.add(said);
+          const path = control.matches("a[href]") && !opensNewTab(control) ? pathOf(control.getAttribute("href") ?? "") : null;
+          if (path && screenIndex(item, path) >= 0) to.add(screenIndex(item, path));
+        }
+        offered[from] = { to: [...to], words: [...words] };
+        return;
+      }
+      const found: Edge[] = [];
       for (const anchor of root?.querySelectorAll("a[href]") ?? []) {
         if (opensNewTab(anchor)) continue;
         const path = pathOf(anchor.getAttribute("href") ?? "");
@@ -326,6 +400,7 @@ export function FlowView({
     });
     const all = Object.values(stepsOf.current).flat();
     setLinked((was) => (JSON.stringify(was) === JSON.stringify(all) ? was : all));
+    setOffers((was) => (JSON.stringify(was) === JSON.stringify(offered) ? was : offered));
   }, [item]);
 
   shownRef.current = shown;
@@ -337,6 +412,8 @@ export function FlowView({
     const timers = [100, 600, 1500].map((ms) => window.setTimeout(measure, ms));
     return () => timers.forEach(window.clearTimeout);
   }, [measure]);
+  // A state switched in place is read at once; a frame's, once it loads (onLoad).
+  useLayoutEffect(() => measure(), [measure, shown]);
 
   /**
    * What a click with the Ask agent tool asks about: an element of a plain item's screen, or a
@@ -351,12 +428,22 @@ export function FlowView({
     return { index, element, box: element ?? frame };
   };
 
+  // A link's own words win; a step the registry names is next, as the agent wrote it from the code;
+  // a step the person made is last, named by the control pressed just before it.
+  const named = namedSteps(item);
+  const same = (a: Edge) => (b: Edge) => a.from === b.from && a.to === b.to;
   const edges = [
-    ...linked.map((l) => (l.label ? l : { ...l, label: learned.find((e) => e.from === l.from && e.to === l.to)?.label })),
-    ...learned.filter((e) => !linked.some((l) => l.from === e.from && l.to === e.to)),
+    ...linked.map((l) => (l.label ? l : { ...l, label: named.find(same(l))?.label ?? learned.find(same(l))?.label })),
+    ...named.filter((n) => !linked.some(same(n))),
+    ...learned.filter((e) => !linked.some(same(e)) && !named.some(same(e))),
   ].filter(
     (e) => e.from < screens.length && e.to < screens.length,
   );
+  /** An arrow from a screen shown in another state, whose control that state does not have. */
+  const absent = (e: Edge) => {
+    const offer = shown[e.from] ? offers[e.from] : undefined;
+    return !!offer && !offer.to.includes(e.to) && !(e.label && offer.words.includes(e.label));
+  };
   const w = item.width * scale;
   const h = item.height * scale;
   // While the view settles, the layout follows the steps found; then it holds.
@@ -372,16 +459,52 @@ export function FlowView({
   const lanes = edges.filter((e) => route(places, e) === "loop").length;
   const overLanes = edges.filter((e) => route(places, e) === "over").length;
   const top = PAD_Y + (overLanes ? 16 + overLanes * LANE : 0);
+  const height = top + PAD_Y + rows * (HEAD + h) + (rows - 1) * ROW_GAP + (lanes ? 16 + lanes * LANE : 0);
+  // The words between two screens need GAP on screen at the zoom the view opens at. A flow wider
+  // than the window opens zoomed out, which narrows the gaps under its words: then each gap grows
+  // so it is still `room` wide on screen. That is the zoom fitCam finds, worked out beforehand:
+  // the gaps on screen take (cols − 1) × room of the window, and the rest scales. With many
+  // screens the gaps keep at most GAPS_SHARE of the window, and the words wrap in fewer letters.
+  const room = cols > 1 ? Math.min(GAP, (GAPS_SHARE * size.w) / (cols - 1)) : GAP;
+  const openZoom = Math.min(1, size.h / height, (size.w - (cols - 1) * room) / (PAD_X * 2 + cols * w));
+  const gap = Math.max(GAP, room / Math.max(openZoom, 0.05));
+  const lineChars = Math.max(8, Math.min(SHORT_LINE, Math.floor((room - 12) / CHAR)));
   const boxesAt: Box[] = places.map((p) => ({
-    x: PAD_X + p.col * (w + GAP),
+    x: PAD_X + p.col * (w + gap),
     y: top + p.row * (HEAD + h + ROW_GAP) + HEAD,
     w,
     h,
     row: p.row,
     col: p.col,
   }));
-  const width = PAD_X * 2 + cols * w + (cols - 1) * GAP;
-  const height = top + PAD_Y + rows * (HEAD + h) + (rows - 1) * ROW_GAP + (lanes ? 16 + lanes * LANE : 0);
+  const width = PAD_X * 2 + cols * w + (cols - 1) * gap;
+  // Words and names keep one size on screen as the view zooms in (see the top): the words from
+  // the zoom the view opened at, 12px. The names stop at their laid-out size, 15px; a flow that
+  // opens zoomed out draws them up to HEAD_GROW larger, so they read about as the words do, and
+  // still fit the room over the screen. Under the name, the gap to the screen keeps 8px on screen.
+  const wordsUnit = Math.min(1 / cam.z, 1 / labelZoom);
+  const headUnit = Math.min(1 / cam.z, Math.max(1, Math.min(HEAD_GROW, 0.8 / labelZoom)));
+  const headDrop = 8 * (1 - Math.min(1, 1 / cam.z));
+
+  /**
+   * Glides to one screen, with its name row, as large as fits between the bars, real size at most;
+   * on the screen it is at, back to the whole flow.
+   */
+  const focusScreen = (index: number) => {
+    const stage = stageRef.current;
+    const box = boxesAt[index];
+    if (!stage || !box) return;
+    if (focused === index) {
+      setFocused(null);
+      return flyTo(fitCam());
+    }
+    setFocused(index);
+    const boxTop = box.y - HEAD;
+    const boxHeight = box.h + HEAD;
+    const fit = Math.min((stage.clientWidth - 2 * FOCUS_X) / box.w, (stage.clientHeight - 2 * FOCUS_Y) / boxHeight);
+    const z = Math.max(MIN_ZOOM / scale, Math.min(1 / scale, fit));
+    flyTo({ x: (stage.clientWidth - box.w * z) / 2 - box.x * z, y: (stage.clientHeight - boxHeight * z) / 2 - boxTop * z, z });
+  };
   // The view opens on the whole flow, and fits it again when the layout changes as it settles,
   // until the person moves the view.
   useLayoutEffect(() => {
@@ -453,7 +576,10 @@ export function FlowView({
           <Icon name="plus" />
         </button>
         <span className="canvas-separator" aria-hidden="true" />
-        <button type="button" className="canvas-button canvas-icon-button" aria-label={labels.fitAll} data-tip={labels.fitAll} onClick={() => setCam(fitCam())}>
+        <button type="button" className="canvas-button canvas-icon-button" aria-label={labels.fitAll} data-tip={labels.fitAll} onClick={() => {
+            setFocused(null);
+            setCam(fitCam());
+          }}>
           <Icon name="maximize" />
         </button>
         <button type="button" className="canvas-button canvas-icon-button" aria-label={labels.resetCamera} data-tip={labels.resetCamera} onClick={() => zoomAt(1 / scale / camRef.current.z)}>
@@ -498,6 +624,7 @@ export function FlowView({
           d.moved = true;
           dragged.current = true;
           touched.current = true;
+          setFocused(null);
           d.x = event.clientX;
           d.y = event.clientY;
           setCam((c) => ({ ...c, x: c.x + dx, y: c.y + dy }));
@@ -507,7 +634,6 @@ export function FlowView({
           drag.current = null;
           if (!d || d.moved || !d.empty) return;
           if (noteOpen) onCloseNote();
-          else onClose();
         }}
         // The click that ends a drag opens nothing. With the Ask agent tool, a click on a screen asks.
         onClickCapture={(event) => {
@@ -544,7 +670,9 @@ export function FlowView({
               transform: `translate(${cam.x}px, ${cam.y}px) scale(${cam.z})`,
               // Pins, lines, and borders keep one size on screen at any zoom, as pins do on the canvas.
               "--canvas-unzoom": 1 / cam.z,
-              "--flow-label": 1 / labelZoom,
+              "--flow-label": wordsUnit,
+              "--flow-head": headUnit,
+              "--flow-head-drop": `${headDrop}px`,
             } as CSSProperties
           }
         >
@@ -554,11 +682,11 @@ export function FlowView({
               className="canvas-flow-screen"
               data-current={index === current || undefined}
               data-row={places[index]?.row}
-              style={{ left: boxesAt[index]?.x, top: (boxesAt[index]?.y ?? 0) - HEAD, inlineSize: w }}
+              style={{ left: boxesAt[index]?.x, top: (boxesAt[index]?.y ?? 0) - HEAD_ROW, inlineSize: w }}
             >
               {/* Named and asked about as an item is: its name, and its actions at the right while hovered. */}
               <div className="canvas-flow-head">
-                <span className="canvas-flow-path">{screen.path || labels.firstScreen}</span>
+                <span className="canvas-flow-path" title={screen.path || labels.firstScreen}>{screen.path || labels.firstScreen}</span>
                 {/* The screen's states, as a variant is chosen in a design tool. A menu, not a row of
                     buttons: it fits beside the name however many states there are. */}
                 {screen.states.length > 0 && (
@@ -585,8 +713,18 @@ export function FlowView({
                     <Icon name="stack-2" size={14} />
                   </span>
                 )}
-                {onAsk && (
-                  <span className="canvas-item-actions">
+                <span className="canvas-item-actions">
+                  {/* Trying a screen is done on the canvas, where the item is live: this leaves the view. */}
+                  <button
+                    type="button"
+                    className="canvas-item-action"
+                    aria-label={labels.tryScreen(screen.path || labels.firstScreen)}
+                    data-tip={labels.tryScreenHint}
+                    onClick={() => onOpen(index)}
+                  >
+                    <Icon name="click" />
+                  </button>
+                  {onAsk && (
                     <button
                       type="button"
                       className="canvas-item-action"
@@ -596,8 +734,8 @@ export function FlowView({
                     >
                       <Icon name="message-circle" />
                     </button>
-                  </span>
-                )}
+                  )}
+                </span>
               </div>
               {/* The frame holds the screen, and beside it what must not be cut at its edge: the pins
                   and their notes, and the Ask button. The box inside it clips the screen. */}
@@ -610,7 +748,7 @@ export function FlowView({
                 style={{ inlineSize: w, blockSize: h }}
               >
                 <span className="canvas-flow-box">
-                {/* Inert: a screen here is a picture of the step, and a press on it opens the item there. */}
+                {/* Inert: a screen here is a picture of the step, and a press on it brings it close. */}
                 <span
                   ref={(element) => {
                     lives.current[index] = element;
@@ -631,8 +769,9 @@ export function FlowView({
                   <button
                     type="button"
                     className="canvas-flow-open"
-                    aria-label={labels.openScreen(screen.path || labels.firstScreen)}
-                    onClick={() => onOpen(index)}
+                    data-focused={focused === index || undefined}
+                    aria-label={focused === index ? labels.showWholeFlow : labels.zoomToScreen(screen.path || labels.firstScreen)}
+                    onClick={() => focusScreen(index)}
                   />
                 )}
                 </span>
@@ -640,7 +779,7 @@ export function FlowView({
               </span>
             </div>
           ))}
-          <Arrows edges={edges} layout={boxesAt} places={places} unzoom={1 / cam.z} label={1 / labelZoom} />
+          <Arrows edges={edges} absent={absent} layout={boxesAt} places={places} gap={gap} lineChars={lineChars} unzoom={1 / cam.z} label={wordsUnit} />
         </div>
       </div>
     </div>
@@ -669,14 +808,23 @@ function route(places: readonly Place[], step: { from: number; to: number }): "n
  */
 function Arrows({
   edges,
+  absent,
   layout,
   places,
+  gap,
+  lineChars,
   unzoom,
   label: unit,
 }: {
   edges: Edge[];
+  /** An arrow whose control the state shown does not have: drawn dimmed. */
+  absent: (edge: Edge) => boolean;
   layout: Box[];
   places: readonly Place[];
+  /** Between two screens in a row. */
+  gap: number;
+  /** How many letters a line of words between two screens holds. */
+  lineChars: number;
   /** Keeps a line and its head one size on screen. */
   unzoom: number;
   /** The size of a pixel of the words, which scale with the view. */
@@ -713,14 +861,15 @@ function Arrows({
         const key = `${from}-${to}`;
         const kind = route(places, edge);
         const text = label && labels.flowStep(label);
+        const dim = absent(edge) || undefined;
         if (kind === "next") {
           const y = a.y + a.h / 2;
           return (
-            <g key={key}>
+            <g key={key} data-absent={dim}>
               <path d={`M${a.x + a.w + 6} ${y}H${b.x - 6}`} markerEnd="url(#canvas-flow-head)" />
               {/* Between two screens there is little room: a long label takes two lines, above the arrow. */}
               {text &&
-                lines(text, SHORT_LINE, 2)
+                lines(text, lineChars, lineChars < 14 ? 3 : 2)
                   .reverse()
                   .map((line, n) => <g key={n}>{words(line, (a.x + a.w + b.x) / 2, y - (8 + n * 14) * unit)}</g>)}
             </g>
@@ -738,7 +887,7 @@ function Arrows({
           const mid = (y1 + y2) / 2;
           const d = x1 === x2 ? `M${x1} ${y1}V${y2}` : `M${x1} ${y1}V${mid}H${x2}V${y2}`;
           return (
-            <g key={key}>
+            <g key={key} data-absent={dim}>
               <path d={d} markerEnd="url(#canvas-flow-head)" />
               {text &&
                 (x1 === x2
@@ -755,7 +904,7 @@ function Arrows({
           const x2 = b.x + b.w / 2 + (right ? -12 : 12);
           const t = Math.sign(x2 - x1) * 8;
           return (
-            <g key={key}>
+            <g key={key} data-absent={dim}>
               <path
                 d={`M${x1} ${a.y - HEAD - 4}V${rise + 8}Q${x1} ${rise} ${x1 + t} ${rise}H${x2 - t}Q${x2} ${rise} ${x2} ${rise + 8}V${b.y - HEAD - 6}`}
                 markerEnd="url(#canvas-flow-head)"
@@ -774,14 +923,14 @@ function Arrows({
           d = `M${x1} ${a.y + a.h + 4}V${dip - 8}Q${x1} ${dip} ${x1 + turn(x1, x2)} ${dip}H${x2 - turn(x1, x2)}Q${x2} ${dip} ${x2} ${dip - 8}V${b.y + b.h + 6}`;
         } else {
           // Out from under the screen, along the gap beside it, so the line passes no screen below.
-          const g1 = right ? a.x + a.w + GAP / 2 : a.x - GAP / 2;
-          const g2 = right ? b.x - GAP / 2 : b.x + b.w + GAP / 2;
+          const g1 = right ? a.x + a.w + gap / 2 : a.x - gap / 2;
+          const g2 = right ? b.x - gap / 2 : b.x + b.w + gap / 2;
           const yA = a.y + a.h + 16;
           const yB = b.y + b.h + 16;
           d = `M${x1} ${a.y + a.h + 4}V${yA}H${g1}V${dip}H${g2}V${yB}H${x2}V${b.y + b.h + 6}`;
         }
         return (
-          <g key={key}>
+          <g key={key} data-absent={dim}>
             <path d={d} markerEnd="url(#canvas-flow-head)" />
             {/* On the line, with the canvas color behind the words, so the line does not cross them. */}
             {text && words(clip(text, 40), (x1 + x2) / 2, dip + 4 * unit, "middle", true)}
