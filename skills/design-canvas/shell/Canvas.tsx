@@ -2776,7 +2776,10 @@ function CanvasBoard({
    */
   const [handTool, setHandTool] = useState(false);
   // Inspect (prototype): a click in a preview selects an element and the panel at the right reads it
-  // (Inspect.tsx). The element itself carries the selection outline, so it follows every camera move.
+  // (Inspect.tsx). As in a browser's element picker, the box marks what is being chosen, not what is
+  // chosen: the element under the pointer, a breadcrumb level hovered, or a new selection made from
+  // the keyboard or a double-click. It goes once the pointer works in the panel or a value shows, so it
+  // never sits on the edges being judged. The breadcrumb names the selection; hovering it shows it again.
   const inspectable = !!designSystem && !shared;
   const [inspectTool, setInspectTool] = useState(false);
   const inspectToolRef = useRef(false);
@@ -2784,11 +2787,6 @@ function CanvasBoard({
   const [inspected, setInspected] = useState<{ element: Element; preview: Element; itemId: string } | null>(null);
   const inspectedRef = useRef(inspected);
   inspectedRef.current = inspected;
-  useEffect(() => {
-    if (!inspected) return;
-    inspected.element.setAttribute("data-canvas-inspected", "");
-    return () => inspected.element.removeAttribute("data-canvas-inspected");
-  }, [inspected]);
   useEffect(() => {
     if (!inspectTool) setInspected(null);
   }, [inspectTool]);
@@ -2824,6 +2822,11 @@ function CanvasBoard({
     Object.assign(box.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
     box.hidden = false;
   }, []);
+  // A new selection shows where it is: after a click the box is there already; after Arrow Up or
+  // Down, a double-click, or a breadcrumb press, nothing else would show it.
+  useEffect(() => {
+    inspectHighlight(inspected?.element ?? null);
+  }, [inspected, inspectHighlight]);
   /**
    * A value shown for a moment, while the pointer is over it in a picker (Inspect.tsx). It
    * changes nothing that is saved: `null`, or the next one, puts back what was there.
@@ -2835,6 +2838,8 @@ function CanvasBoard({
       previewing.current = null;
       const current = inspectedRef.current;
       if (!edit || !current || !designSystem) return;
+      // A value on show is judged by its edges: no box over them (also when the keys chose it).
+      if (pickRef.current) pickRef.current.hidden = true;
       const { element } = current;
       // "Reset to …" in a picker: what the code had, shown until the pointer moves on.
       if (edit.value === RESET) {
@@ -5291,8 +5296,12 @@ function CanvasBoard({
       if (inTextEdit(event.target)) return hidePick();
       if (moveDraw(event)) return;
       if (inspectToolRef.current) {
-        // Over the panel, its breadcrumb owns the box (inspectHighlight).
-        if (event.target instanceof Element && event.target.closest(".canvas-inspect, .canvas-inspect-popover")) return;
+        // Over the panel, its breadcrumb owns the box (inspectHighlight); anywhere else there,
+        // the person is working on the selection, and the box would cover the edges they judge.
+        if (event.target instanceof Element && event.target.closest(".canvas-inspect, .canvas-inspect-popover")) {
+          if (!event.target.closest(".canvas-inspect-path")) hidePick();
+          return;
+        }
         const target = gesture.current ? null : inspectTarget(event.target);
         if (target) placeBox(pickRef.current, target.element.getBoundingClientRect());
         else hidePick();

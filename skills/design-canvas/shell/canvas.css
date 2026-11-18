@@ -2553,11 +2553,6 @@ html[data-canvas-alt] .canvas-frame-root * {
   background: var(--canvas-focus-color);
   translate: 0 -50%;
 }
-/* The selected element, outlined on itself so the outline follows every camera move. */
-[data-canvas-inspected] {
-  outline: 2px solid var(--canvas-focus, #2f6fed) !important;
-  outline-offset: 1px !important;
-}
 .canvas-inspect .canvas-subtle {
   font-size: inherit;
 }
