@@ -47,7 +47,9 @@ Router calls such as `router.push` stay on the canvas with a notice.
 
 A page that is a server component (an `async` page that loads its own data, `next/headers`, `cookies()`, route handlers) cannot render on the canvas. Put its few lines of page markup in the item, around the client components beneath it, and pass them the data as props from a file in the canvas folder (`items/contracts-data.ts`). Do not import the page itself.
 
-Other frameworks (React Router framework mode, Remix, Gatsby, Expo web): alias each framework-only module to a small mock in `mocks/` the same way. To make a mocked navigation stay on the canvas, dispatch `design-canvas:navigate` with the URL as `detail`, as `mocks/next-navigation.ts` does.
+For React Router (6 or later) the installer gives each item its own router, driven by the canvas (`mocks/react-router.tsx`, set in `providers.tsx`): `<Link>`, `NavLink`, `useNavigate`, `useParams`, `useSearchParams`, and `useLocation` work, so a page component can be an item as it is. A data router's loaders and actions (`useLoaderData`, `useActionData`) do not run, since they reach the backend: render the component beneath them and pass the data as props, as for a Next.js server page.
+
+Other frameworks (Remix, Gatsby, Expo web): alias each framework-only module to a small mock in `mocks/` the same way. To make a mocked navigation stay on the canvas, dispatch `design-canvas:navigate` with the URL as `detail`, as `mocks/next-navigation.ts` does.
 
 ## 7. Themes
 

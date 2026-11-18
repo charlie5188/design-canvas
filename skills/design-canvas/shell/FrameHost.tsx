@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   BACK_EVENT,
   type FrameMessage,
@@ -10,7 +10,7 @@ import {
   readCanvasMessage,
   readFrameMessage,
 } from "./bridge";
-import { LocationContext, linkName, locationIn, locationOf, opensNewTab, pathOf, pathPart, RouteContext, screenAt } from "./routes";
+import { LocationContext, linkName, locationIn, locationOf, opensNewTab, pathOf, pathPart, RouteContext, ScreenRouter, screenAt } from "./routes";
 import {
   clearPending,
   describeArea,
@@ -467,6 +467,8 @@ export function FrameHost({
     };
   }, [inCanvas]);
 
+  // The app's router around the screen, when its components need one (routes.ts ScreenRouter).
+  const Router = useContext(ScreenRouter);
   if (!item) return <p className="canvas-frame-missing">{labels.missingItem(id)}</p>;
 
   // The item's own page: the notice, where the canvas shows its own, and a reader's live region.
@@ -507,7 +509,13 @@ export function FrameHost({
     <div ref={rootRef} className="canvas-frame-root" style={{ inlineSize: item.width, blockSize: item.height }}>
       <RouteContext.Provider value={route ? pathPart(route) : (item.path ?? null)}>
         <LocationContext.Provider value={route || item.path ? locationIn(item, route ?? item.path ?? "") : null}>
-          <Component />
+          {Router ? (
+            <Router>
+              <Component />
+            </Router>
+          ) : (
+            <Component />
+          )}
         </LocationContext.Provider>
       </RouteContext.Provider>
     </div>

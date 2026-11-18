@@ -24,7 +24,7 @@
 // an item to its first screen. Nothing here is saved: a reload starts every item at its start.
 // An item opened alone (frame.html?item=<id>) follows the same rules: FrameHost.tsx shows its
 // screens, and its page says what the item could not show, since no canvas is there to.
-import { type ComponentType, createContext } from "react";
+import { type ComponentType, createContext, type ReactNode } from "react";
 import type { CanvasItem } from "./types";
 
 /**
@@ -38,8 +38,15 @@ export const RouteContext = createContext<string | null>(null);
  * `useParams`: its path, its query (`status=signed`, without "?"), and the values its screen's
  * `[param]` parts matched (`{ id: "msa-acme" }` for `/contracts/[id]`). Null where the item names no path.
  */
-export type Location = { path: string; search: string; params: Record<string, string> };
+export type Location = { path: string; search: string; params: Record<string, string>; pattern: string };
 export const LocationContext = createContext<Location | null>(null);
+
+/**
+ * A router the app's components need around them (React Router's `<Link>` and hooks throw
+ * outside one), set by the kit's providers.tsx: each screen of an item is rendered inside it,
+ * inside the item's location (kits/react-vite/mocks/react-router.tsx). Null for none.
+ */
+export const ScreenRouter = createContext<ComponentType<{ children: ReactNode }> | null>(null);
 
 const tidy = (path: string) => path.replace(/\/+$/, "") || "/";
 
@@ -155,7 +162,7 @@ export function locationIn(item: CanvasItem, location: string): Location {
     const name = /^\[(?:\.\.\.)?([^\]]+)\]$/.exec(part)?.[1] ?? (part.startsWith(":") ? part.slice(1) : undefined);
     if (name && have[index] !== undefined) params[name] = have[index]!;
   });
-  return { path, search: searchPart(location), params };
+  return { path, search: searchPart(location), params, pattern };
 }
 
 /** How many states an item has beside its screens' first ones. */

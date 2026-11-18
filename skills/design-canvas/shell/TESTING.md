@@ -62,6 +62,7 @@ a device or input you do not have.
 - A native form submit is cancelled with a notice; a form that cancels its own submit shows nothing.
 - A pan or move that ends on a link shows no notice.
 - A link or router call with a query (`/contracts?status=signed`, or `?status=signed` alone) keeps it on the item: the path decides the screen, `useSearchParams()` in the stand-in reads the query, and Back returns to the screen before with its query. `useParams()` gives the values the screen's `[param]` parts matched. Restart clears both. The same holds inside a `viewport` frame.
+- In a React Router app (the installer sets `ScreenRouter` to `mocks/react-router.tsx` in providers.tsx), an app's page component used as an item works as in the app: `NavLink` marks the current path, `setSearchParams` filters in place, a `<Link>` to `/contracts/:id` shows that screen with `useParams()` set, `navigate(-1)` goes back with the filter kept, and a link or `navigate()` to a path the item does not have shows a notice. The same holds inside a `viewport` frame. In an app without React Router, the installer removes the stand-in.
 
 ## Toolbar
 

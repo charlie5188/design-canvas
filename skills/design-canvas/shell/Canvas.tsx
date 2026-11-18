@@ -100,7 +100,7 @@ import { Icon } from "./icons";
 import { type InspectChanged, type InspectEdit, InspectPanel, RESET } from "./Inspect";
 import { type DesignSystem, pathOf as inspectPath, selectable, showProp, showStyle } from "./inspect-read";
 import { controlWords, type FlowStep, FlowView } from "./FlowView";
-import { LocationContext, linkName, locationIn, locationOf, opensNewTab, pathPart, RouteContext, screenAt, screenIndex, screensOf, searchPart, stateCount } from "./routes";
+import { LocationContext, linkName, locationIn, locationOf, opensNewTab, pathPart, RouteContext, ScreenRouter, screenAt, screenIndex, screensOf, searchPart, stateCount } from "./routes";
 import { labels } from "./labels";
 import {
   type Bounds,
@@ -962,6 +962,8 @@ function CanvasItemView({
   };
   // The screen shown: the item's own component, or the one a link inside it led to.
   const Shown = (route && screenAt(item, route)) || item.component;
+  // The app's router around it, when its components need one (routes.ts ScreenRouter).
+  const Router = useContext(ScreenRouter);
   const screenCount = screensOf(item).length;
   const states = stateCount(item);
 
@@ -1104,7 +1106,13 @@ function CanvasItemView({
             // `useSearchParams`, and `useParams`. A frame provides its own.
             <RouteContext.Provider value={route ? pathPart(route) : (item.path ?? null)}>
               <LocationContext.Provider value={route || item.path ? locationIn(item, route ?? item.path ?? "") : null}>
-                <Preview key={run} component={Shown} />
+                {Router ? (
+                  <Router>
+                    <Preview key={run} component={Shown} />
+                  </Router>
+                ) : (
+                  <Preview key={run} component={Shown} />
+                )}
               </LocationContext.Provider>
             </RouteContext.Provider>
           )}

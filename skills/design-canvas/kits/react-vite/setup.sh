@@ -161,3 +161,21 @@ if (flat && !fs.readFileSync(path.join(app, flat), "utf8").includes(parent)) {
   if (!fs.existsSync(ignore) || !fs.readFileSync(ignore, "utf8").includes(parent)) console.log(`The app's lint (${legacy}) covers ${parent}/. Ask the user, then add "${parent}/" to .eslintignore.`);
 }
 NODE
+
+# React Router (6 or later): its <Link> and hooks need a router around each screen. The kit's
+# stand-in drives one per item from the canvas (mocks/react-router.tsx); providers.tsx sets it.
+router_pkg="$(node -e 'const p = require(process.argv[1]); const d = { ...p.devDependencies, ...p.dependencies }; for (const name of ["react-router", "react-router-dom"]) { const v = String(d[name] || "").replace(/[^0-9.]/g, ""); if (v && Number(v.split(".")[0]) >= 6) { console.log(name); break; } }' "$APP_DIR/package.json")"
+if [[ -n "$router_pkg" ]]; then
+  if [[ "$router_pkg" == "react-router-dom" && ! -f "$APP_DIR/node_modules/react-router/package.json" ]]; then
+    perl -pi -e 's|from "react-router";|from "react-router-dom";|' "$CANVAS_DIR/mocks/react-router.tsx"
+  fi
+  if grep -q 'return <>{children}</>;' "$CANVAS_DIR/providers.tsx"; then
+    perl -0pi -e 's|(import "\./theme\.css";\n)|$1import { ScreenRouter } from "./canvas/routes";\nimport { CanvasRouter } from "./mocks/react-router";\n|; s|return <>\{children\}</>;|// Each item gets its own router, driven by the canvas (mocks/react-router.tsx).\n  return <ScreenRouter.Provider value={CanvasRouter}>{children}</ScreenRouter.Provider>;|' "$CANVAS_DIR/providers.tsx"
+    note "found $router_pkg; each item gets a router driven by the canvas (mocks/react-router.tsx)"
+  else
+    note "found $router_pkg; set ScreenRouter to CanvasRouter in providers.tsx (see mocks/react-router.tsx)"
+  fi
+else
+  # No React Router: the stand-in would only fail the canvas's type check on its import.
+  rm -f "$CANVAS_DIR/mocks/react-router.tsx"
+fi
