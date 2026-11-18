@@ -81,6 +81,7 @@ a device or input you do not have.
 - Controls and surfaces share one scale: 6 px corners on small controls and hints, 8 px on buttons and fields, 12 px on bars, popovers, and the note for the agent; one shadow for bars and notices, and one for what opens over the work.
 - An open note for the agent is above its item's tag: "Picked" is never drawn over it.
 - A control's wash and color ease in on hover, and a button gives a little under a press. A popover, a notice, a tag, a hint, and a pin fade in as they appear; a hint waits a moment first. Every surface that opens over the work (the item's More menu, Share, Help, Canvas settings, the Inspect panel and its option lists, the trash) also rises a few pixels, all the same way. Nothing animates out.
+- A note placed with the Note tool sticks on, in under half a second: it drops in tilted with a lifted shadow, lands with a small squash, its outline fades in, and its corner folds down last. Typing works from the first frame. It plays once, when placed: not for a draft back after a reload, a saved note, or a note being edited. Off under reduced motion.
 - When a pick sets the others aside, and when Undo brings items back, the items glide to their new place. An item never glides during a drag, a resize, or a hot update, and never trails the pointer. A note for the agent that is dragged aside follows the pointer from the first frame, also straight after it opens.
 - With "reduce motion" on, none of this moves.
 - The chrome's text is drawn antialiased; the text inside a preview is drawn as the app draws it.

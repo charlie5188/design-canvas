@@ -299,6 +299,10 @@ export function MarkView({
 }) {
   const fieldRef = useRef<HTMLTextAreaElement>(null);
   const isNote = mark.kind === "note";
+  // A note the person has just placed: new, empty, and open as it first draws. It sticks on
+  // with a small flourish (canvas.css, "Motion"); a draft that comes back on reload, or a
+  // note changed later, never plays it.
+  const [arriving] = useState(() => isNote && !mark.target && open && !mark.text);
   const ref: BoardRef = { kind: mark.kind, id: mark.id, ghost: true };
   // One frame later, so the press that opened it has finished moving focus.
   useEffect(() => {
@@ -370,6 +374,7 @@ export function MarkView({
         className="canvas-note-card canvas-ghost"
         role="group"
         aria-label={labels.boardNoteLabel}
+        data-arriving={arriving || undefined}
         tabIndex={interactive ? 0 : undefined}
         style={{ transform: place(mark.x, mark.y), inlineSize: mark.w ?? NOTE_WIDTH, minBlockSize: mark.h }}
         onPointerDown={(event) => interactive && handlers.move(event, ref)}
