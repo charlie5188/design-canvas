@@ -4,6 +4,7 @@ import { type AnnotationHandlers, AnnotationPin } from "./AnnotationView";
 import { type Annotation, fingerprintItem } from "./annotations";
 import { type BoardEdge, DiscardButton, SAVE_OVERDUE_MS, useOverdue, WorkingBeam, WorkingTag } from "./Board";
 import { frameUrl, hasAddress } from "./bridge";
+import type { Fresh } from "./fresh";
 import { AnnotateIcon, CopyIcon, GripIcon, Icon, MoreIcon, OpenIcon, PickIcon, RestartIcon, RouteIcon, StatesIcon, TrashIcon } from "./icons";
 import { labels } from "./labels";
 import type { Position } from "./layout";
@@ -13,8 +14,6 @@ import { LocationContext, locationIn, pathPart, RouteContext, ScreenRouter, scre
 import type { CanvasItem } from "./types";
 
 const MOVE_STEP = 8;
-/** What the tag on an item the person has not seen yet says: the agent added it, or changed it. */
-export type Fresh = "new" | "updated";
 
 /**
  * The actions an item needs seldom: open it alone, and move it to the trash. They sit behind

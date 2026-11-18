@@ -49,6 +49,7 @@ import {
   sharedStorageKey,
 } from "./bridge";
 import { FrameHost } from "./FrameHost";
+import { useFresh } from "./fresh";
 import { Help } from "./Help";
 import { type AnnotationHandlers, AnnotationPin, SendContext } from "./AnnotationView";
 import {
@@ -84,7 +85,7 @@ import {
   wheelPixels,
 } from "./dom";
 import { AnnotateIcon, CopyIcon, EraserIcon, FitIcon, HandIcon, InspectIcon, MinusIcon, MoonIcon, NoteIcon, PlusIcon, ResetIcon, SectionIcon, SelectIcon, SendIcon, SunIcon } from "./icons";
-import { CanvasItemView, type Fresh, type ResizeEdge } from "./Item";
+import { CanvasItemView, type ResizeEdge } from "./Item";
 import { type InspectChanged, type InspectEdit, InspectPanel, RESET } from "./Inspect";
 import { type DesignSystem, pathOf as inspectPath, propsNow, selectable, showProp, showStyle } from "./inspect-read";
 import { controlWords, type FlowStep, FlowView } from "./FlowView";
@@ -105,13 +106,14 @@ import {
   saveLayout,
   zoomAt,
 } from "./layout";
+import { ToastView, useNotices, useOpeningChecks, writeClipboard } from "./Notices";
 import { type Background, loadBackground, saveBackground, SettingsMenu } from "./Settings";
 import { ShareButton, SharePanel, useShare } from "./Share";
 import { type ThemeStore, useThemeId } from "./theme";
 import { TrashButton, TrashPopover, useTrash, useTrashList } from "./Trash";
 import { type Box, type Guide, SNAP_DISTANCE, type Snap, snapBox } from "./snap";
 import { type CanvasItem, type CanvasNote, type CanvasSection, isSetAside, SET_ASIDE_ID } from "./types";
-import { EDIT_PATH, VERSION_PATH } from "./channel.ts";
+import { EDIT_PATH } from "./channel.ts";
 import type { DirectAdd, DirectEdit, DirectRemove } from "./registry-edit.ts";
 import "./canvas.css";
 
@@ -121,8 +123,6 @@ const KEY_PAN = 48;
 const DRAG_THRESHOLD = 3;
 const SAVE_DELAY = 400;
 const SAVE_MAX_WAIT = 2000;
-const TOAST_MS = 2500;
-const TOAST_ACTION_MS = 8000;
 const ADD_GAP = 96;
 const REVEAL_MARGIN = 48;
 /** The notice row that opens under the top bars, at the top centre. */
@@ -147,32 +147,6 @@ const ASIDE_ROOM = 120;
 const SECTION_TAB_ROOM = 40;
 /** A note's height when the registry gives none: enough for a few lines. */
 const NOTE_HEIGHT_GUESS = 120;
-
-// Fresh tags (the type is in Item.tsx): an item the agent added or changed that the person
-// has not seen yet. New items no longer pull the view to them, so they say so where they
-// are until they have been on screen, at a readable size, for a moment.
-const SEEN_MS = 2000;
-/** On screen at least this wide, in px, to count as seen. */
-const SEEN_WIDTH = 120;
-const freshKey = (storageKey: string) => `${storageKey}:fresh`;
-function loadFresh(storageKey: string, ids: ReadonlySet<string>): Record<string, Fresh> {
-  try {
-    const raw = JSON.parse(window.localStorage.getItem(freshKey(storageKey)) ?? "{}") as Record<string, unknown>;
-    return Object.fromEntries(
-      Object.entries(raw).filter((entry): entry is [string, Fresh] => ids.has(entry[0]) && (entry[1] === "new" || entry[1] === "updated")),
-    );
-  } catch {
-    return {};
-  }
-}
-function saveFresh(storageKey: string, fresh: Record<string, Fresh>) {
-  try {
-    if (Object.keys(fresh).length) window.localStorage.setItem(freshKey(storageKey), JSON.stringify(fresh));
-    else window.localStorage.removeItem(freshKey(storageKey));
-  } catch {
-    // Storage may be unavailable; the tags still work for this session.
-  }
-}
 
 /** How much of each note a section note's reference quotes. */
 const MAX_NOTE_QUOTE = 120;
@@ -212,12 +186,6 @@ const THEME_ICONS: Partial<Record<string, () => ReactNode>> = { light: SunIcon, 
 
 const NO_STEPS: FlowStep[] = [];
 
-async function writeClipboard(text: string) {
-  if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
-  await navigator.clipboard.writeText(text);
-}
-
-type Toast = { kind: "copied" | "failed" | "notice"; text: string; action?: { label: string; run: () => void } };
 /**
  * The open annotation, and how it and its item's other annotations were before
  * opening, for Escape: the "new version" choice is shared across the item.
@@ -326,7 +294,6 @@ function CanvasBoard({
   const viewportRef = useRef<HTMLDivElement>(null);
   const worldRef = useRef<HTMLDivElement>(null);
   const zoomLabelRef = useRef<HTMLSpanElement>(null);
-  const liveRef = useRef<HTMLDivElement>(null);
   const pickRef = useRef<HTMLDivElement>(null);
   /** The rectangle being drawn in annotate mode, in screen coordinates. */
   const drawRef = useRef<HTMLDivElement>(null);
@@ -364,8 +331,7 @@ function CanvasBoard({
   const targetIds = useMemo(() => new Set([...shownIds, ...sections.map((s) => sectionKey(s.id))]), [shownIds, sections]);
   /** The order sections are drawn in: larger first, so one inside another is never hidden behind it. */
   const sectionsByArea = useMemo(() => [...sections].sort((a, b) => b.width * b.height - a.width * a.height), [sections]);
-  const [toast, setToast] = useState<Toast | null>(null);
-  const toastTimer = useRef(0);
+  const { toast, setToast, toastTimer, liveRef, announce, copyReference, notify } = useNotices();
   const [frontId, setFrontId] = useState<string | null>(null);
   // The item last touched: where a router call came from, since the call itself does not say.
   const frontIdRef = useRef(frontId);
@@ -513,94 +479,7 @@ function CanvasBoard({
     [queueSave, render, setCamera],
   );
 
-  const announce = useCallback((text: string) => {
-    if (!liveRef.current) return;
-    liveRef.current.textContent = "";
-    requestAnimationFrame(() => {
-      if (liveRef.current) liveRef.current.textContent = text;
-    });
-  }, []);
-
-  const copyReference = useCallback(
-    async (text: string) => {
-      window.clearTimeout(toastTimer.current);
-      try {
-        await writeClipboard(text);
-        setToast({ kind: "copied", text });
-        announce(labels.copiedText(text));
-        toastTimer.current = window.setTimeout(() => setToast(null), TOAST_MS);
-      } catch {
-        setToast({ kind: "failed", text });
-      }
-    },
-    [announce],
-  );
-  const notify = useCallback(
-    (text: string, action?: Toast["action"], long = false) => {
-      window.clearTimeout(toastTimer.current);
-      setToast({ kind: "notice", text, action });
-      announce(text);
-      // A notice with an action, or a long one, stays long enough to read and reach.
-      toastTimer.current = window.setTimeout(() => setToast(null), action || long ? TOAST_ACTION_MS : TOAST_MS);
-    },
-    [announce],
-  );
-  // Warns once, when the canvas opens, about items a move or resize could not be saved for,
-  // instead of letting the first drag fail. Silent when the server is missing or too old to answer.
-  const warnedGenerated = useRef(false);
-  useEffect(() => {
-    if (shared || warnedGenerated.current || !items.length) return;
-    warnedGenerated.current = true;
-    fetch(`${EDIT_PATH}/check`)
-      .then((response) => (response.ok ? (response.json() as Promise<{ placeable?: unknown }>) : undefined))
-      .then((result) => {
-        if (!result || !Array.isArray(result.placeable)) return;
-        const ok = new Set(result.placeable);
-        const bad = items.filter((item) => !ok.has(item.id)).map((item) => item.id);
-        if (bad.length) notify(labels.registryGenerated(bad.slice(0, 3).join(", ") + (bad.length > 3 ? ` and ${bad.length - 3} more` : "")), undefined, true);
-      })
-      .catch(() => {});
-  }, [shared, items, notify]);
-  // A newer version of the skill than this canvas has: one notice per version, with a button that asks the agent
-  // to update (the agent knows whether the skill is a git checkout or an npx copy). With no agent listening,
-  // the same request is copied instead. Silent when the server cannot tell, so an old server shows nothing.
-  const askedUpdate = useRef(false);
-  useEffect(() => {
-    if (shared || askedUpdate.current || !items.length) return;
-    askedUpdate.current = true;
-    fetch(VERSION_PATH)
-      .then((response) => (response.ok ? (response.json() as Promise<{ current?: unknown; latest?: unknown; folder?: unknown }>) : undefined))
-      .then((v) => {
-        if (!v || typeof v.current !== "number" || typeof v.latest !== "number" || typeof v.folder !== "string" || v.latest <= v.current) return;
-        const key = `design-canvas:update-notice:${v.latest}`;
-        try {
-          if (localStorage.getItem(key)) return;
-          localStorage.setItem(key, "1");
-        } catch {
-          // Without storage the notice shows each time the canvas opens.
-        }
-        const request = labels.updateRequest(v.folder, v.current, v.latest);
-        notify(
-          labels.updateAvailable(v.latest),
-          {
-            label: labels.updateAsk,
-            run: () => {
-              void sendToAgent(request).then(async (result) => {
-                if (result.delivered) return notify(labels.updateSent);
-                try {
-                  await writeClipboard(request);
-                  notify(labels.updateCopied);
-                } catch {
-                  notify(labels.updateCopied, undefined, true);
-                }
-              });
-            },
-          },
-          true,
-        );
-      })
-      .catch(() => {});
-  }, [shared, items, notify]);
+  useOpeningChecks(items, notify);
   // Share (Share.tsx): what goes in the file, and the download.
   const {
     sharing,
@@ -612,7 +491,6 @@ function CanvasBoard({
     share,
     close: closeSharePanel,
   } = useShare({ items, notes, sections, positions, trash, notify });
-  useEffect(() => () => window.clearTimeout(toastTimer.current), []);
 
   // Annotations. Annotate mode turns clicks in previews into numbered pins. The
   // toolbar sends the unsent ones to a listening agent, or copies them, as one
@@ -666,35 +544,7 @@ function CanvasBoard({
     return new Set(mine.map((a) => a.itemId));
   }, [agentHandling, annotations, inFlight]);
 
-  const [fresh, setFresh] = useState<Record<string, Fresh>>(() => (shared ? {} : loadFresh(storageKey, ids)));
-  useEffect(() => {
-    if (!shared) saveFresh(storageKey, fresh);
-  }, [fresh, storageKey]);
-  // Seen: on screen, at a readable size, for SEEN_MS while the page is in front.
-  // Checked once a second, which also follows pans and zooms without listening to them.
-  useEffect(() => {
-    if (!Object.keys(fresh).length) return;
-    const since = new Map<string, number>();
-    const check = () => {
-      const view = viewportRef.current?.getBoundingClientRect();
-      if (!view || document.visibilityState !== "visible") return since.clear();
-      const now = performance.now();
-      const seen: string[] = [];
-      for (const id of Object.keys(fresh)) {
-        const box = elements.current.get(id)?.getBoundingClientRect();
-        const visibleW = box ? Math.min(box.right, view.right) - Math.max(box.left, view.left) : 0;
-        const visibleH = box ? Math.min(box.bottom, view.bottom) - Math.max(box.top, view.top) : 0;
-        const onScreen = !!box && box.width >= SEEN_WIDTH && visibleW >= box.width / 2 && visibleH >= box.height / 2;
-        if (!onScreen) since.delete(id);
-        else if (!since.has(id)) since.set(id, now);
-        else if (now - since.get(id)! >= SEEN_MS) seen.push(id);
-      }
-      if (seen.length) setFresh((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => !seen.includes(id))));
-    };
-    check();
-    const timer = window.setInterval(check, 500);
-    return () => window.clearInterval(timer);
-  }, [fresh]);
+  const [fresh, setFresh] = useFresh(storageKey, ids, viewportRef, elements);
 
   /** What an item renders now, tagged with the theme so a theme switch never reads as an update. */
   const printOf = useCallback(
@@ -4884,57 +4734,7 @@ function CanvasBoard({
             </button>
           </div>
         )}
-        {toast && (
-          <div className="canvas-toast">
-            {toast.kind === "copied" ? (
-              <span>{labels.copiedText(toast.text)}</span>
-            ) : toast.kind === "notice" ? (
-              <>
-                <span>{toast.text}</span>
-                {toast.action && (
-                  <button
-                    type="button"
-                    className="canvas-button"
-                    onClick={() => {
-                      toast.action?.run();
-                      setToast(null);
-                    }}
-                  >
-                    {toast.action.label}
-                  </button>
-                )}
-              </>
-            ) : (
-              <>
-                <span className="canvas-subtle">{labels.copyFailed}</span>
-                {/* A list of annotations keeps its lines; one reference fits a field. */}
-                {toast.text.includes("\n") ? (
-                  <textarea
-                    readOnly
-                    rows={4}
-                    value={toast.text}
-                    aria-label={labels.copyFailed}
-                    onFocus={(event) => event.currentTarget.select()}
-                    // biome-ignore lint/a11y/noAutofocus: the fallback appears only after a copy attempt.
-                    autoFocus
-                  />
-                ) : (
-                  <input
-                    readOnly
-                    value={toast.text}
-                    aria-label={labels.copyFailed}
-                    onFocus={(event) => event.currentTarget.select()}
-                    // biome-ignore lint/a11y/noAutofocus: the fallback appears only after a copy attempt.
-                    autoFocus
-                  />
-                )}
-                <button type="button" className="canvas-button" onClick={() => setToast(null)}>
-                  {labels.dismiss}
-                </button>
-              </>
-            )}
-          </div>
-        )}
+        {toast && <ToastView toast={toast} onClose={() => setToast(null)} />}
       </div>
       {shareOpen && (
         <SharePanel
