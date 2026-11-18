@@ -65,9 +65,17 @@ const test = base.extend<{ settledRegistry: void }>({
 // it cannot land during the next test.
 async function restoreRegistry(page: Page, original: string) {
   if (readFileSync(REGISTRY, 'utf8') === original) return
+  const served = await (await page.request.get('/registry.tsx')).text()
   const updated = page.waitForEvent('console', { predicate: (m) => m.text().includes('hot updated'), timeout: 10_000 }).catch(() => {})
   writeFileSync(REGISTRY, original)
   await updated
+  // Also until the dev server serves it: the file is back, so the settledRegistry fixture has
+  // nothing to do, and on a slow machine the next test's page could still load the version
+  // before (an item in the trash, say), as GitHub's smoke job once did.
+  await expect
+    .poll(async () => (await (await page.request.get('/registry.tsx')).text()) !== served, { timeout: 10_000 })
+    .toBe(true)
+    .catch(() => {})
 }
 
 // Whether the dev server serves the registry with an item in the trash. A write lands in the
