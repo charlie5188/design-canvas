@@ -20,6 +20,12 @@ const ASIDE_GAP = 40;
 const ASIDE_ROOM = 120;
 /** Canvas units kept above a section moved into "Set aside", for its title tab (about 28px on screen at 100%). */
 const SECTION_TAB_ROOM = 40;
+/**
+ * Room kept above each item in the frame for its caption, which grows upward from the
+ * item's name so that previews side by side line up (canvas.css, `.canvas-item-head`).
+ * About three lines; a longer caption reaches over the frame's top edge.
+ */
+const CAPTION_ROOM = 48;
 /** A note's height when the registry gives none: enough for a few lines. */
 const NOTE_HEIGHT_GUESS = 120;
 
@@ -140,7 +146,7 @@ export function planPick(item: CanvasItem, { items, trash, notes: noteList, sect
     const frameY = frame ? frame.y : top - ASIDE_PAD;
     for (const piece of pieces) {
       if (piece.kind === "item") {
-        moveItem(piece.entry, { x: Math.round(x), y: Math.round(top) });
+        moveItem(piece.entry, { x: Math.round(x), y: Math.round(top + CAPTION_ROOM) });
       } else {
         // The section, the sections inside it, and what they hold all shift by the same amount.
         const { unit } = piece;
@@ -162,7 +168,7 @@ export function planPick(item: CanvasItem, { items, trash, notes: noteList, sect
       x += piece.w + ASIDE_GAP;
     }
     const width = Math.round(x - ASIDE_GAP + ASIDE_PAD - frameX);
-    const height = Math.round(Math.max(...pieces.map((piece) => piece.h)) + ASIDE_PAD * 2);
+    const height = Math.round(Math.max(...pieces.map((piece) => piece.h + (piece.kind === "item" ? CAPTION_ROOM : 0))) + ASIDE_PAD * 2);
     if (frame) {
       edits.push({ kind: "section", id: frame.id, set: { width, height: Math.max(frame.height, height) } });
       inverse.push({ kind: "section", id: frame.id, set: { width: frame.width, height: frame.height } });
@@ -195,10 +201,10 @@ export function planAside(
   const frame = frames.find((s) => s.id === SET_ASIDE_ID);
   if (frame) {
     const x = frame.x + frame.width - ASIDE_PAD + ASIDE_GAP;
-    const place = { x: Math.round(x), y: Math.round(frame.y + ASIDE_PAD) };
+    const place = { x: Math.round(x), y: Math.round(frame.y + ASIDE_PAD + CAPTION_ROOM) };
     const grown = {
       width: Math.round(x + item.width + ASIDE_PAD - frame.x),
-      height: Math.round(Math.max(frame.height, height + ASIDE_PAD * 2)),
+      height: Math.round(Math.max(frame.height, CAPTION_ROOM + height + ASIDE_PAD * 2)),
     };
     return { place, edits: [moved(place), { kind: "section", id: frame.id, set: grown }], adds: [] };
   }
@@ -209,15 +215,15 @@ export function planAside(
   ];
   const x = visible.length ? Math.min(...visible.map((entry) => placeOf(entry).x)) : item.x;
   const top = bottoms.length ? Math.max(...bottoms) + ASIDE_ROOM + ASIDE_PAD : item.y;
-  const place = { x: Math.round(x), y: Math.round(top) };
+  const place = { x: Math.round(x), y: Math.round(bottoms.length ? top + CAPTION_ROOM : top) };
   const section: DirectAdd = {
     kind: "section",
     id: SET_ASIDE_ID,
     text: labels.setAside,
     x: place.x - ASIDE_PAD,
-    y: place.y - ASIDE_PAD,
+    y: place.y - CAPTION_ROOM - ASIDE_PAD,
     width: item.width + ASIDE_PAD * 2,
-    height: height + ASIDE_PAD * 2,
+    height: CAPTION_ROOM + height + ASIDE_PAD * 2,
   };
   return { place, edits: [moved(place)], adds: [section] };
 }
