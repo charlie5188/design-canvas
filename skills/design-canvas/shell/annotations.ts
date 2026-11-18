@@ -17,7 +17,7 @@
 // number of items that name it as `from`, and leaves once that number grows.
 
 import { MAX_REPLY } from "./channel.ts";
-import { renderedHtml } from "./dom";
+import { frameLayers, renderedHtml } from "./dom";
 import { labels } from "./labels";
 
 /** One earlier turn on a note. */
@@ -171,10 +171,11 @@ export function saveAnnotations(storageKey: string, annotations: Annotation[]) {
 export const limitText = (text: string) => text.slice(0, MAX_TEXT);
 
 /**
- * A short fingerprint of what an item renders: its preview markup, or the
- * frame's root for `viewport` items (same origin, so readable), without new
- * words shown in place of a text (dom.ts showPending). Undefined when
- * the content is not there yet, for example a frame still loading.
+ * A short fingerprint of what an item renders: its preview markup, or for
+ * `viewport` items the frame's root and what it portaled to the frame's body
+ * (same origin, so readable; dom.ts frameLayers), without new words shown in
+ * place of a text (dom.ts showPending). Undefined when the content is not
+ * there yet, for example a frame still loading.
  */
 export function fingerprintItem(preview: Element | null): string | undefined {
   if (!preview) return undefined;
@@ -182,8 +183,9 @@ export function fingerprintItem(preview: Element | null): string | undefined {
   let html: string | undefined;
   if (frame) {
     try {
-      const root = frame.contentDocument?.querySelector(".canvas-frame-root");
-      html = root ? renderedHtml(root) : undefined;
+      // An agent's change to a dialog the item portaled is as much a change as one to its root.
+      const layers = frame.contentDocument ? frameLayers(frame.contentDocument) : [];
+      html = layers.length ? layers.map(renderedHtml).join("\u0000") : undefined;
     } catch {
       return undefined;
     }

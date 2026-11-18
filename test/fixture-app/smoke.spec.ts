@@ -3113,6 +3113,104 @@ test('a pin stays on its element when its item is resized, in a frame too', asyn
   }
 })
 
+test('a dialog that a viewport item portals is the item too: Ask agent names its elements, and the pin stays on them', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  const example = readFileSync(EXAMPLE, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    // As products draw a search dialog: portaled to the body, the item's own root left empty. The
+    // button sits at the dialog's right end, so it moves when the item gets wider.
+    writeFileSync(
+      EXAMPLE,
+      `import { useState } from "react";
+import { createPortal } from "react-dom";
+${example}
+export function Portaled() {
+  const [opened, setOpened] = useState("");
+  return createPortal(
+    <div role="dialog" aria-label="Search" style={{ position: "fixed", top: 16, left: 16, right: 16, padding: 16, background: "white" }}>
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <button type="button" onClick={() => setOpened("Acme MSA")}>Acme MSA</button>
+      </div>
+      <p>{opened ? \`Opened \${opened}\` : "Nothing opened"}</p>
+    </div>,
+    document.body,
+  );
+}
+`,
+    )
+    const withDialog = original
+      .replace('import { Example } from "./items/Example";', 'import { Example, Portaled } from "./items/Example";')
+      .replace(/\];\s*$/, '  { id: "search", name: "Search", component: Portaled, x: 0, y: 240, width: 420, height: 220, viewport: true },\n];\n')
+    expect(withDialog).toContain('Portaled }')
+    writeFileSync(REGISTRY, withDialog)
+    await expect
+      .poll(async () => (await (await page.request.get('/registry.tsx')).text()).includes('id: "search"'), { timeout: 15_000 })
+      .toBe(true)
+    await expect
+      .poll(async () => (await (await page.request.get('/items/Example.tsx')).text()).includes('createPortal'), { timeout: 15_000 })
+      .toBe(true)
+    await page.goto('/')
+    const frame = page.frameLocator('.canvas-item[data-canvas-item="search"] iframe')
+    const button = frame.getByRole('button', { name: 'Acme MSA' })
+    const status = frame.getByRole('dialog', { name: 'Search' }).locator('p')
+    await expect(status).toHaveText('Nothing opened')
+    await page.waitForTimeout(600)
+
+    await page.getByRole('button', { name: 'Ask agent', exact: true }).click()
+    // Hovering outlines the dialog's button, as it does an element in the item's root.
+    const at = (await button.boundingBox())!
+    await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2)
+    await expect(frame.locator('.canvas-pick')).toBeVisible()
+    // A click names it and places a pin on it; the product's button is not pressed.
+    await page.mouse.click(at.x + at.width / 2, at.y + at.height / 2)
+    const note = page.getByRole('dialog', { name: 'Ask agent about Search › button “Acme MSA”' })
+    await expect(note).toBeVisible()
+    await expect(status).toHaveText('Nothing opened')
+    await note.getByRole('textbox').fill('Name the type too')
+    await note.getByRole('textbox').press('Enter')
+    await expect(note).toHaveCount(0)
+    const pin = page.locator('.canvas-item[data-canvas-item="search"] .canvas-pin')
+    const onButton = async () => {
+      const box = (await button.boundingBox())!
+      const point = await pin.evaluate((element) => {
+        const r = element.getBoundingClientRect()
+        return { x: r.x, y: r.y }
+      })
+      return point.x >= box.x - 2 && point.x <= box.x + box.width + 2 && point.y >= box.y - 2 && point.y <= box.y + box.height + 2
+    }
+    expect(await onButton()).toBe(true)
+    // The frame's empty space is no element of the item: a press there opens no note.
+    const item = (await page.locator('.canvas-item[data-canvas-item="search"] iframe').boundingBox())!
+    await page.mouse.click(item.x + 20, item.y + item.height - 30)
+    await expect(page.getByRole('dialog', { name: /^Ask agent about/ })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Ask agent', exact: true }).click()
+
+    // Wider, the button moves right, and its pin goes with it: it is found in the dialog again.
+    const before = (await button.boundingBox())!.x
+    const edge = (await page.locator('.canvas-item[data-canvas-item="search"] .canvas-item-edge[data-edge="e"]').boundingBox())!
+    await page.mouse.move(edge.x + edge.width / 2, edge.y + edge.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(edge.x + edge.width / 2 + 120, edge.y + edge.height / 2, { steps: 6 })
+    await page.mouse.up()
+    await expect.poll(async () => (await button.boundingBox())!.x, { timeout: 15_000 }).toBeGreaterThan(before + 80)
+    await expect.poll(onButton).toBe(true)
+
+    // Pressing the dialog's button uses the item, so it can be restarted.
+    await button.click()
+    await expect(status).toHaveText('Opened Acme MSA')
+    await expect(page.getByRole('button', { name: 'Restart Search' })).toHaveCount(1)
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+    if (readFileSync(EXAMPLE, 'utf8') !== example) {
+      const updated = page.waitForEvent('console', { predicate: (m) => m.text().includes('hot updated'), timeout: 10_000 }).catch(() => {})
+      writeFileSync(EXAMPLE, example)
+      await updated
+    }
+  }
+})
+
 test('annotations go straight to a listening agent', async ({ page, baseURL }) => {
   const errors = collectErrors(page)
   // The agent's side, as SKILL.md runs it: listen.sh prints what the page sends and exits.

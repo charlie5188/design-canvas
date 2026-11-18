@@ -257,13 +257,22 @@ export function FrameHost({
 
     // Element references and annotations, same as on the canvas page. The canvas
     // tells each frame when annotate mode turns on or off (annotatingRef).
+    // The item is the frame's whole body: the root, and what its components portal there, such
+    // as a dialog or a menu (dom.ts frameLayers). Limited to the root, a search dialog, which is
+    // all an item may show, could not be asked about at all. The body, the mount, and the root
+    // themselves are no element of the item: a press on the root's empty space names nothing.
+    const scope = document.body;
+    const pickIn = (target: Element) => {
+      const element = pickElement(target, scope);
+      return element && !element.contains(root) ? element : null;
+    };
     const pointer = { x: -1, y: -1 };
     const hidePick = () => {
       if (pickRef.current) pickRef.current.hidden = true;
     };
     const showPick = (target: EventTarget | null) => {
       const box = pickRef.current;
-      const element = target instanceof Element ? pickElement(target, root) : null;
+      const element = target instanceof Element ? pickIn(target) : null;
       if (!box || !element) return hidePick();
       const rect = element.getBoundingClientRect();
       Object.assign(box.style, {
@@ -310,7 +319,7 @@ export function FrameHost({
       const w = Math.round(area.right - area.left);
       const h = Math.round(area.bottom - area.top);
       if (w < 4 || h < 4) return;
-      const { names, more } = describeArea(root, area);
+      const { names, more } = describeArea(scope, area);
       postToCanvas({ type: "annotate-area", label: labels.areaRef(w, h, x, y, names, more), x, y, w, h });
     };
     const onPickMove = (event: PointerEvent) => {
@@ -354,7 +363,7 @@ export function FrameHost({
         return;
       }
       textEdit?.finish(true);
-      if ((!event.altKey && !annotatingRef.current) || !(event.target instanceof Element) || !root.contains(event.target)) return;
+      if ((!event.altKey && !annotatingRef.current) || !(event.target instanceof Element) || !scope.contains(event.target)) return;
       event.preventDefault();
       event.stopPropagation();
       if (annotatingRef.current && !event.altKey && event.button === 0 && event.type === "pointerdown") {
@@ -377,11 +386,11 @@ export function FrameHost({
         return;
       }
       if ((!event.altKey && !annotatingRef.current) || !(event.target instanceof Element)) return;
-      const element = pickElement(event.target, root);
+      const element = pickIn(event.target);
       if (!element) return;
       event.preventDefault();
       event.stopPropagation();
-      const label = describeElement(element, root);
+      const label = describeElement(element, scope);
       if (event.altKey) postToCanvas({ type: "pick", label });
       else postToCanvas({ type: "annotate", label, x: event.clientX, y: event.clientY });
     };
@@ -391,15 +400,15 @@ export function FrameHost({
         event.stopPropagation();
         return;
       }
-      if (!annotatingRef.current || event.altKey || !(event.target instanceof Element) || !root.contains(event.target)) return;
+      if (!annotatingRef.current || event.altKey || !(event.target instanceof Element) || !scope.contains(event.target)) return;
       event.preventDefault();
       event.stopPropagation();
-      const element = textTarget(event.target, root);
-      const named = pickElement(event.target, root);
+      const element = textTarget(event.target, scope);
+      const named = pickIn(event.target);
       if (!element || !named) return;
       hidePick();
       // Named before the edit, by the words as they were. Frame pixels are item pixels.
-      const label = describeElement(named, root);
+      const label = describeElement(named, scope);
       const { clientX: x, clientY: y } = event;
       postToCanvas({ type: "text-edit", on: true });
       // The canvas page has the keyboard (the first click's note took it), and a
