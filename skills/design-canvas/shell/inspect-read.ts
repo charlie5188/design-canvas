@@ -194,6 +194,14 @@ export function placedComponent(element: Element, system: DesignSystem, stop: un
 }
 
 /**
+ * A component's props as they are on screen now. The fiber kept from the selection can be
+ * React's other copy after a re-render (a preview, an edit), whose props are a render behind.
+ */
+export function propsNow(fiber: unknown): Record<string, unknown> {
+  return current(fiber as Fiber).memoizedProps ?? {};
+}
+
+/**
  * React keeps two copies of each component, the one on screen and the one it works on, and
  * an owner link can point at either. The one on screen is found as React itself finds it
  * (findCurrentFiberUsingSlowPath in react-dom): up the tree in step, then the root says.

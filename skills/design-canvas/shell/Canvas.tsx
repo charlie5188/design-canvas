@@ -98,7 +98,7 @@ import {
 } from "./dom";
 import { Icon } from "./icons";
 import { type InspectChanged, type InspectEdit, InspectPanel, RESET } from "./Inspect";
-import { type DesignSystem, pathOf as inspectPath, selectable, showProp, showStyle } from "./inspect-read";
+import { type DesignSystem, pathOf as inspectPath, propsNow, selectable, showProp, showStyle } from "./inspect-read";
 import { controlWords, type FlowStep, FlowView } from "./FlowView";
 import { LocationContext, linkName, locationIn, locationOf, opensNewTab, pathPart, RouteContext, ScreenRouter, screenAt, screenIndex, screensOf, searchPart, stateCount } from "./routes";
 import { labels } from "./labels";
@@ -2919,12 +2919,22 @@ function CanvasBoard({
    * changes nothing that is saved: `null`, or the next one, puts back what was there.
    */
   const previewing = useRef<(() => void) | null>(null);
+  /**
+   * What a prop had before the pointer started on its list. Kept for the whole run of
+   * previews, so moving on (secondary, then ghost, then primary) and leaving puts back that
+   * value, not one read in the middle of the run, while React may still be a render behind.
+   */
+  const previewBase = useRef<{ fiber: unknown; name: string; had: boolean; was: unknown } | null>(null);
   const inspectPreview = useCallback(
     (edit: InspectEdit | null) => {
       previewing.current?.();
       previewing.current = null;
       const current = inspectedRef.current;
-      if (!edit || !current || !designSystem) return;
+      if (!edit || !current || !designSystem) {
+        previewBase.current = null;
+        return;
+      }
+      if (edit.kind !== "prop") previewBase.current = null;
       // A value on show is judged by its edges: no box over them (also when the keys chose it).
       if (pickRef.current) pickRef.current.hidden = true;
       const { element } = current;
@@ -2948,9 +2958,12 @@ function CanvasBoard({
         const before = showStyle(element, edit.property, edit.value, designSystem);
         previewing.current = () => showStyle(element, edit.property, before, designSystem);
       } else {
-        const props = (edit.fiber as { memoizedProps?: Record<string, unknown> }).memoizedProps ?? {};
-        const had = edit.name in props;
-        const was = props[edit.name];
+        let base = previewBase.current;
+        if (!base || base.fiber !== edit.fiber || base.name !== edit.name) {
+          const props = propsNow(edit.fiber);
+          base = previewBase.current = { fiber: edit.fiber, name: edit.name, had: edit.name in props, was: props[edit.name] };
+        }
+        const { had, was } = base;
         showProp(edit.fiber, edit.name, edit.value);
         previewing.current = () => showProp(edit.fiber, edit.name, had ? was : undefined);
       }
@@ -3058,6 +3071,8 @@ function CanvasBoard({
       // A value on show for a moment goes first, so what the change replaces is what the code had.
       previewing.current?.();
       previewing.current = null;
+      const base = previewBase.current;
+      previewBase.current = null;
       const current = inspectedRef.current;
       if (!current || !designSystem) return;
       const { element } = current;
@@ -3086,9 +3101,11 @@ function CanvasBoard({
           if (entry) showProp(entry.fiber, edit.name, entry.had ? entry.original : undefined);
           record.props.delete(edit.name);
         } else {
-          const props = (edit.fiber as { memoizedProps?: Record<string, unknown> }).memoizedProps ?? {};
-          const had = entry ? entry.had : edit.name in props;
-          const original = entry ? entry.original : props[edit.name];
+          // what the code had: from before the previews, else as the component is on screen now
+          const props = propsNow(edit.fiber);
+          const before = base && base.fiber === edit.fiber && base.name === edit.name ? base : { had: edit.name in props, was: props[edit.name] };
+          const had = entry ? entry.had : before.had;
+          const original = entry ? entry.original : before.was;
           showProp(edit.fiber, edit.name, edit.value);
           record.props.set(edit.name, {
             component: edit.component,
@@ -5756,8 +5773,9 @@ function CanvasBoard({
     // Previews and their portals never navigate the canvas away. Their own
     // click handlers still run; only the browser's navigation is cancelled.
     const onLinkClick = (event: MouseEvent) => {
-      // A click that placed a annotation was already cancelled by the pick handler.
-      if (annotatingRef.current && event.defaultPrevented) return;
+      // A click that placed an annotation, or selected an element to inspect, was already
+      // cancelled by the pick handler: it follows no link.
+      if ((annotatingRef.current || inspectToolRef.current) && event.defaultPrevented) return;
       const anchor = previewLink(event);
       if (!anchor) return;
       event.preventDefault();
