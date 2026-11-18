@@ -228,6 +228,22 @@ export function Canvas(props: CanvasProps) {
   return <CanvasBoard {...props} storageKey={storageKey} />;
 }
 
+/**
+ * The board: everything on the canvas page and what the person does with it.
+ *
+ * A part with a clear edge has its own file and is only wired in here: the trash (Trash.tsx),
+ * Share (Share.tsx), notices (Notices.tsx), fresh tags (fresh.ts), the Inspect tool
+ * (inspect-edit.ts), the working-out of a pick (pick.ts), the camera (camera.ts), pin anchors
+ * (pin-anchors.ts), and links (links.ts). The views are Item.tsx, AnnotationView.tsx, Board.tsx,
+ * FlowView.tsx, Help.tsx, and Settings.tsx.
+ *
+ * What stays here is one piece, and is kept together on purpose: annotations, notes and
+ * sections (marks), moves and resizes, what is saved straight to the registry and its undo,
+ * sending to the agent, and the pointer and key handling. Each of them reads and changes the
+ * others' state, and the order of their effects and listeners matters, so moving one out would
+ * mean passing most of the board to it. Splitting it further needs a new design for that
+ * state, not a move.
+ */
 function CanvasBoard({
   items: itemsProp,
   notes: notesProp = NO_NOTES,
