@@ -175,6 +175,9 @@ export const labels = {
   closeTrash: "Close",
   putBack: (name: string) => `Put back ${name}`,
   putBackShort: "Put back",
+  setAsideFromTrash: (name: string) => `Set aside ${name}`,
+  setAsideFromTrashHint: "Put it in the Set aside section",
+  setAsideFailed: "Couldn't set it aside. Is the canvas's dev server running?",
   // The tool is a conversation with the agent, at the place the words are about:
   // a request for a change, or a question. "Ask" covers both, and names who answers.
   annotate: "Ask agent",

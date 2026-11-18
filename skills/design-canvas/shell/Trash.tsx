@@ -127,11 +127,18 @@ export function useTrash(list: TrashList, board: TrashBoard) {
     [itemsRef, kept, queueSave],
   );
 
-  /** Back on the canvas where it was, or beside its row if that spot was taken meanwhile. */
-  const restore = useCallback(
+  /** Out of the trash list, placed nowhere yet. */
+  const leave = useCallback(
     (item: CanvasItem) => {
       delete times.current[item.id];
       setTrash(idsRef.current.filter((id) => id !== item.id));
+    },
+    [idsRef, setTrash, times],
+  );
+  /** Back on the canvas where it was, or beside its row if that spot was taken meanwhile. */
+  const restore = useCallback(
+    (item: CanvasItem) => {
+      leave(item);
       setFrontId(item.id);
       requestAnimationFrame(() =>
         requestAnimationFrame(() => {
@@ -140,7 +147,7 @@ export function useTrash(list: TrashList, board: TrashBoard) {
         }),
       );
     },
-    [idsRef, placeFree, reveal, setFrontId, setTrash, times],
+    [leave, placeFree, reveal, setFrontId],
   );
   const putBack = useCallback(
     (item: CanvasItem) => {
@@ -148,6 +155,14 @@ export function useTrash(list: TrashList, board: TrashBoard) {
       saveTrashed(item, false);
     },
     [restore, saveTrashed],
+  );
+  /** Out of the trash, for the board to place: Set aside puts it in the "Set aside" frame (Canvas.tsx). */
+  const takeOut = useCallback(
+    (item: CanvasItem) => {
+      leave(item);
+      saveTrashed(item, false);
+    },
+    [leave, saveTrashed],
   );
   const moveToTrash = useCallback(
     (item: CanvasItem) => {
@@ -208,7 +223,7 @@ export function useTrash(list: TrashList, board: TrashBoard) {
     if (!trashedItems.length) setOpen(false);
   }, [trashedItems.length]);
 
-  return { trashedItems, times, open, setOpen, buttonRef, close, putBack, moveToTrash };
+  return { trashedItems, times, open, setOpen, buttonRef, close, putBack, takeOut, moveToTrash };
 }
 
 /** In the top bar while the trash holds something: how many items, and a press opens the list. */
@@ -458,16 +473,21 @@ function trashedWhen(at: number | undefined, group: string) {
  * - Back (or Escape) returns to the grid as it was: it stays drawn under the open card, so
  *   it keeps its scroll, and it scrolls to and marks the card last looked at, so the person
  *   knows where they were.
+ * - Set aside, beside Put back, takes the item out into the "Set aside" frame a pick fills,
+ *   for a person who dropped versions one by one instead of picking. The trash stays open on
+ *   the next item, so they can go on through it; Put back closes it and shows the item.
  */
 export function TrashDialog({
   items,
   times,
   onPutBack,
+  onSetAside,
   onClose,
 }: {
   items: CanvasItem[];
   times: Record<string, number>;
   onPutBack: (item: CanvasItem) => void;
+  onSetAside: (item: CanvasItem) => void;
   onClose: () => void;
 }) {
   const groups = useMemo(() => groupByDay(items, times), [items, times]);
@@ -622,6 +642,20 @@ export function TrashDialog({
                     </button>
                   </div>
                 )}
+                <button
+                  type="button"
+                  className="canvas-button"
+                  aria-label={labels.setAsideFromTrash(current.name)}
+                  data-tip={labels.setAsideFromTrashHint}
+                  onClick={() => {
+                    // The next item takes its place, or the one before it at the end.
+                    const next = items[index + 1] ?? items[index - 1];
+                    if (next) setCurrentId(next.id);
+                    onSetAside(current);
+                  }}
+                >
+                  {labels.setAside}
+                </button>
                 <button
                   type="button"
                   className="canvas-button canvas-button-primary canvas-trash-put-back"

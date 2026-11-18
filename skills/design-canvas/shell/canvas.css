@@ -2465,10 +2465,14 @@ html[data-canvas-alt] .canvas-frame-root * {
 [data-tip]:focus-visible::after {
   animation: canvas-fade-in var(--canvas-fast) var(--canvas-ease) 350ms backwards;
 }
+/* Every surface that opens over the work rises the same way: menus, popovers, panels, and the trash. */
 .canvas-trash-dialog,
 .canvas-share-popover,
 .canvas-help-popover,
-.canvas-item-menu {
+.canvas-backgrounds,
+.canvas-item-menu,
+.canvas-inspect,
+.canvas-inspect-popover {
   animation: canvas-rise-in var(--canvas-slow) var(--canvas-ease);
 }
 .canvas-trash {
@@ -2550,6 +2554,9 @@ html[data-canvas-alt] .canvas-frame-root * {
   .canvas-trash-detail,
   .canvas-share-popover,
   .canvas-help-popover,
+  .canvas-backgrounds,
+  .canvas-inspect,
+  .canvas-inspect-popover,
   .canvas-toast,
   .canvas-toolbar[data-place="pending"],
   .canvas-ghost-tag,
