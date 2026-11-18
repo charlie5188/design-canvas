@@ -175,3 +175,49 @@ export function planPick(item: CanvasItem, { items, trash, notes: noteList, sect
   inverse.push({ kind: "item", id: item.id, set: { picked: false } });
   return { others, placed, before, edits, inverse, adds, removes };
 }
+
+/**
+ * Where an item from the trash goes when the person sets it aside from there, instead of
+ * putting it back where it was: into the same `set-aside` frame a pick fills, at the right
+ * end of its row (the frame grows to hold it), or into a new frame below everything, as a
+ * first pick makes one. For a person who drops versions one by one into the trash rather
+ * than picking, so the ones worth keeping as a record end up where a pick puts them.
+ */
+export function planAside(
+  item: CanvasItem,
+  { items, trash, notes: noteList, sections: all, removed: gone, positions }: Omit<PickBoard, "marks">,
+): { place: Position; edits: DirectEdit[]; adds: DirectAdd[] } {
+  const frames = all.filter((s) => !gone.has(`section:${s.id}`));
+  const placeOf = (entry: CanvasItem): Position => positions[entry.id] ?? { x: entry.x, y: entry.y };
+  const visible = items.filter((entry) => entry.id !== item.id && !trash.includes(entry.id));
+  const height = ITEM_HEAD + item.height;
+  const moved = (place: Position): DirectEdit => ({ kind: "item", id: item.id, set: { ...place, ...(item.picked ? { picked: false } : {}) } });
+  const frame = frames.find((s) => s.id === SET_ASIDE_ID);
+  if (frame) {
+    const x = frame.x + frame.width - ASIDE_PAD + ASIDE_GAP;
+    const place = { x: Math.round(x), y: Math.round(frame.y + ASIDE_PAD) };
+    const grown = {
+      width: Math.round(x + item.width + ASIDE_PAD - frame.x),
+      height: Math.round(Math.max(frame.height, height + ASIDE_PAD * 2)),
+    };
+    return { place, edits: [moved(place), { kind: "section", id: frame.id, set: grown }], adds: [] };
+  }
+  const bottoms = [
+    ...visible.map((entry) => placeOf(entry).y + ITEM_HEAD + entry.height),
+    ...noteList.filter((n) => !gone.has(`note:${n.id}`)).map((n) => n.y + (n.height ?? NOTE_HEIGHT_GUESS)),
+    ...frames.map((f) => f.y + f.height),
+  ];
+  const x = visible.length ? Math.min(...visible.map((entry) => placeOf(entry).x)) : item.x;
+  const top = bottoms.length ? Math.max(...bottoms) + ASIDE_ROOM + ASIDE_PAD : item.y;
+  const place = { x: Math.round(x), y: Math.round(top) };
+  const section: DirectAdd = {
+    kind: "section",
+    id: SET_ASIDE_ID,
+    text: labels.setAside,
+    x: place.x - ASIDE_PAD,
+    y: place.y - ASIDE_PAD,
+    width: item.width + ASIDE_PAD * 2,
+    height: height + ASIDE_PAD * 2,
+  };
+  return { place, edits: [moved(place)], adds: [section] };
+}

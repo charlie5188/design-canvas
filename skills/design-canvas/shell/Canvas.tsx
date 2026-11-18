@@ -92,7 +92,7 @@ import { type FlowStep, FlowView } from "./FlowView";
 import { opensNewTab, screenIndex, screensOf } from "./routes";
 import { labels } from "./labels";
 import { useLinks } from "./links";
-import { planPick } from "./pick";
+import { planAside, planPick } from "./pick";
 import { usePinAnchors } from "./pin-anchors";
 import {
   type Bounds,
@@ -113,7 +113,7 @@ import { ToastView, useNotices, useOpeningChecks, writeClipboard } from "./Notic
 import { type Background, loadBackground, saveBackground, SettingsMenu } from "./Settings";
 import { ShareButton, SharePanel, useShare } from "./Share";
 import { type ThemeStore, useThemeId } from "./theme";
-import { TrashButton, TrashPopover, useTrash, useTrashList } from "./Trash";
+import { TrashButton, TrashDialog, useTrash, useTrashList } from "./Trash";
 import { type Box, type Guide, SNAP_DISTANCE, type Snap, snapBox } from "./snap";
 import { type CanvasItem, type CanvasNote, type CanvasSection, isSetAside } from "./types";
 import { DEFAULT_CAMERA, useCamera } from "./camera";
@@ -309,7 +309,7 @@ function CanvasBoard({
   // The trash (Trash.tsx): the items it holds are not on the canvas. Only the list is here,
   // since the rest of the board is built on which items are shown; moving items in and out is `useTrash`, below.
   const trashList = useTrashList(items, saved.trash, !!saved.camera);
-  const { ids: trash, idsRef: trashRef, kept: trashKept } = trashList;
+  const { ids: trash, idsRef: trashRef, kept: trashKept, times: trashTimes } = trashList;
   const shown = useMemo(() => items.filter((item) => !trash.includes(item.id)), [items, trash]);
   const shownIds = useMemo(() => new Set(shown.map((item) => item.id)), [shown]);
   // What an annotation can be on: a shown item, or a section (sectionKey).
@@ -341,6 +341,7 @@ function CanvasBoard({
         ids: trashRef.current,
         kept: [...trashKept.current],
         inRegistry: !shared,
+        at: trashTimes.current,
       }),
     [storageKey, theme],
   );
@@ -2176,11 +2177,13 @@ function CanvasBoard({
   );
   const {
     trashedItems,
+    times: trashedAt,
     open: trashOpen,
     setOpen: setTrashOpen,
     buttonRef: trashButtonRef,
     close: closeTrash,
     putBack,
+    takeOut,
     moveToTrash,
   } = useTrash(trashList, {
     items,
@@ -2381,6 +2384,43 @@ function CanvasBoard({
       await save;
     },
     [notify, queueSave],
+  );
+
+  // Set aside, from an item opened in the trash: out of the trash into the "Set aside" frame a
+  // pick fills, instead of back where it was (pick.ts planAside). The trash stays open on the
+  // next item. Its place goes into the registry with the frame in one write, marked as on its
+  // way like a pick's moves; the trash write is the trash's own (Trash.tsx takeOut).
+  const setAsideFromTrash = useCallback(
+    async (item: CanvasItem) => {
+      if (shared) return;
+      const { place, edits, adds } = planAside(item, {
+        ...boardNow.current,
+        items: itemsRef.current,
+        trash: trashRef.current,
+        positions: positionsRef.current,
+      });
+      takeOut(item);
+      const saving = { [item.id]: { ...place, state: "saving" as const } };
+      moveStatesRef.current = { ...moveStatesRef.current, ...saving };
+      setMoveStates((prev) => ({ ...prev, ...saving }));
+      positionsRef.current = { ...positionsRef.current, [item.id]: place };
+      setPositions(positionsRef.current);
+      queueSave();
+      const save = (async () => {
+        const result = await postRegistry({ edits, adds });
+        if (result && !result.rejected?.length && !result.missing?.includes(item.id)) return;
+        // Not written: the item stays out of the trash at that place, and its move is saved the usual way.
+        const { [item.id]: _, ...rest } = moveStatesRef.current;
+        moveStatesRef.current = rest;
+        setMoveStates(rest);
+        setTrashOpen(false);
+        notify(labels.setAsideFailed, undefined, true);
+      })();
+      savesInFlight.current.add(save);
+      void save.finally(() => savesInFlight.current.delete(save));
+      await save;
+    },
+    [notify, queueSave, setTrashOpen, takeOut],
   );
 
   // Unpick, on the Picked tag. Right after a pick (nothing saved since) it is the
@@ -4107,9 +4147,11 @@ function CanvasBoard({
         />
       )}
       {!shared && trashOpen && (
-        <TrashPopover
+        <TrashDialog
           items={trashedItems}
+          times={trashedAt.current}
           onClose={closeTrash}
+          onSetAside={(item) => void setAsideFromTrash(item)}
           onPutBack={(item) => {
             setTrashOpen(false);
             viewportRef.current?.focus({ preventScroll: true });

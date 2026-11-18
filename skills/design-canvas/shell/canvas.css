@@ -76,13 +76,17 @@ body,
    Each line colors what sits beside that way, never the way itself; a wrapper added
    on it needs its own line, or previews turn the chrome's color again. */
 :where(
-    .canvas-root > :not(.canvas-viewport, .canvas-trash-popover, .canvas-flow),
+    .canvas-root > :not(.canvas-viewport, .canvas-trash, .canvas-flow),
     .canvas-viewport > :not(.canvas-world),
     .canvas-world > :not(.canvas-item),
     .canvas-item > :not(.canvas-preview-wrap),
     .canvas-preview-wrap > :not(.canvas-preview),
-    .canvas-trash-popover > :not(.canvas-trash-list),
-    .canvas-trash-entry > :not(.canvas-trash-thumb),
+    .canvas-trash > :not(.canvas-trash-dialog),
+    .canvas-trash-dialog > :not(.canvas-trash-body),
+    .canvas-trash-body > :not(.canvas-trash-detail, .canvas-trash-grid),
+    .canvas-trash-detail > :not(.canvas-trash-stage),
+    .canvas-trash-grid > :not(.canvas-trash-card),
+    .canvas-trash-card > :not(.canvas-trash-stage),
     .canvas-flow > :not(.canvas-flow-stage),
     .canvas-flow-stage > :not(.canvas-flow-row),
     .canvas-flow-row > :not(.canvas-flow-screen),
@@ -152,7 +156,7 @@ body,
 .canvas-item-head,
 .canvas-toolbar,
 .canvas-toast,
-.canvas-trash-popover,
+.canvas-trash-dialog,
 .canvas-share-popover,
 .canvas-frame-missing {
   font-family: var(--canvas-font, system-ui, -apple-system, "Segoe UI", sans-serif);
@@ -1126,56 +1130,94 @@ html[data-canvas-alt] .canvas-frame-root * {
   inline-size: 360px;
   user-select: all;
 }
-/* Trash: opens under its button in the top bar, where the share panel opens. Each
-   entry is a live, scaled-down preview of the trashed item with its name; the whole
-   entry puts it back. */
+/* Trash: a large dialog over the dimmed canvas. Cards newest first under Today, Yesterday,
+   and Earlier; one opens large over the grid, usable, with Previous, Next, and Put back
+   (Trash.tsx). */
 /* Its hint would sit on the open trash. */
 .canvas-trash-button[aria-expanded="true"]::after {
   content: none;
 }
-.canvas-trash-popover,
 .canvas-share-popover {
   /* Over the Inspect panel (z-index 5), which takes the same corner. */
   z-index: 6;
 }
-.canvas-trash-popover {
+.canvas-trash {
   position: fixed;
-  inset-block-start: 64px;
-  inset-inline-end: 16px;
+  inset: 0;
+  /* Over the flow view (8) as well as the bars. */
+  z-index: 9;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(15 18 22 / 32%);
+}
+.canvas-trash-dialog {
   display: flex;
   flex-direction: column;
-  gap: 8px;
   box-sizing: border-box;
-  max-inline-size: calc(100vw - 32px);
-  /* Clear of the bars at the bottom. */
-  max-block-size: min(480px, calc(100vh - 64px - 76px));
-  padding: 10px;
+  inline-size: min(1080px, 100%);
+  block-size: min(720px, 100%);
+  overflow: hidden;
   border: 1px solid var(--canvas-border-color);
   border-radius: var(--canvas-radius-l);
   background: var(--canvas-surface-color);
   box-shadow: var(--canvas-shadow-overlay);
-  /* No color: its thumbnails keep the app's (see "The chrome's words" at the top). */
+  /* No color: its previews keep the app's (see "The chrome's words" at the top). */
   font-size: 13px;
+}
+.canvas-trash-dialog:focus {
+  outline: none;
+}
+/* The dialog clips what leaves it: hints open below, and controls at the right line theirs up with their end. */
+.canvas-trash [data-tip]::after {
+  inset-block: calc(100% + 8px) auto;
+}
+.canvas-trash .canvas-trash-head [data-tip]::after,
+.canvas-trash .canvas-trash-detail-name ~ [data-tip]::after,
+.canvas-trash .canvas-trash-detail-name ~ * [data-tip]::after {
+  inset-inline: auto 0;
 }
 .canvas-trash-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
-  padding: 0 6px;
+  padding: 10px 10px 10px 18px;
+  border-block-end: 1px solid var(--canvas-border-color);
 }
 .canvas-trash-title {
+  margin: 0;
+  font-size: 15px;
   font-weight: 600;
 }
-.canvas-trash-list {
-  display: grid;
-  grid-template-columns: repeat(var(--canvas-trash-columns, 3), 168px);
-  gap: 4px;
-  margin: 0;
-  padding: 0;
-  overflow: auto;
-  list-style: none;
+.canvas-trash-count {
+  flex: 1;
+  color: var(--canvas-subtle-color);
 }
-.canvas-trash-entry {
+.canvas-trash-body {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-block-size: 0;
+}
+/* The cards. */
+.canvas-trash-grid {
+  display: grid;
+  flex: 1;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  align-content: start;
+  gap: 6px 10px;
+  overflow: auto;
+  padding: 4px 16px 16px;
+}
+.canvas-trash-group-label {
+  grid-column: 1 / -1;
+  padding: 12px 4px 4px;
+  color: var(--canvas-subtle-color);
+  font-size: 12px;
+  font-weight: 600;
+}
+.canvas-trash-card {
   position: relative;
   display: flex;
   flex-direction: column;
@@ -1183,19 +1225,107 @@ html[data-canvas-alt] .canvas-frame-root * {
   padding: 6px;
   border-radius: var(--canvas-radius-m);
 }
-.canvas-trash-entry:hover {
+.canvas-trash-card:hover {
   background: var(--canvas-hover-color);
 }
-.canvas-trash-thumb {
+/* The card last opened, so the person sees where they were on coming back. */
+.canvas-trash-card[data-current] {
+  background: color-mix(in srgb, var(--canvas-focus-color) 14%, transparent);
+}
+.canvas-trash-card .canvas-trash-stage {
+  block-size: 170px;
+}
+.canvas-trash-card-name {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 0 4px 2px;
+  border: 0;
+  background: transparent;
+  color: var(--canvas-text-color);
+  font: inherit;
+  line-height: 1.35;
+  text-align: start;
+  cursor: default;
+}
+.canvas-trash-card-name > span:first-child {
+  flex: 1;
+  min-inline-size: 0;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+.canvas-trash-card-name::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: var(--canvas-radius-m);
+}
+.canvas-trash-card-name:focus-visible {
+  outline: none;
+}
+.canvas-trash-card-name:focus-visible::after {
+  outline: 2px solid var(--canvas-focus-color);
+  outline-offset: -2px;
+}
+.canvas-trash-time {
+  flex: none;
+  color: var(--canvas-subtle-color);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+/* A card opened large. It covers the grid, which stays drawn and scrolled underneath. */
+.canvas-trash-detail {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--canvas-surface-color);
+}
+.canvas-trash-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 10px 16px;
+}
+.canvas-trash-detail-name {
+  flex: 1;
+  min-inline-size: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.canvas-trash-steps {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-inline-end: 8px;
+}
+.canvas-trash-steps .canvas-button[aria-disabled="true"] {
+  color: var(--canvas-subtle-color);
+  opacity: 0.5;
+}
+.canvas-trash-position {
+  margin-inline-end: 6px;
+  color: var(--canvas-subtle-color);
+  font-variant-numeric: tabular-nums;
+}
+.canvas-trash-detail .canvas-trash-stage {
+  flex: 1;
+  margin: 0 12px 12px;
+}
+/* Where an item is drawn, in a card or opened. */
+.canvas-trash-stage {
   display: grid;
   place-items: center;
-  box-sizing: border-box;
-  block-size: 100px;
+  min-block-size: 0;
   overflow: hidden;
-  border: 1px solid var(--canvas-border-color);
-  border-radius: var(--canvas-radius-s);
+  border-radius: var(--canvas-radius-m);
   background: var(--canvas-bg-color);
-  pointer-events: none;
 }
 .canvas-trash-scaled {
   position: relative;
@@ -1203,6 +1333,10 @@ html[data-canvas-alt] .canvas-frame-root * {
   border-radius: 2px;
   background: var(--canvas-surface-color);
   box-shadow: 0 0 0 1px var(--canvas-border-color);
+  transition: opacity var(--canvas-slow) var(--canvas-ease);
+}
+.canvas-trash-scaled[data-loading] {
+  opacity: 0;
 }
 .canvas-trash-real {
   position: absolute;
@@ -1210,44 +1344,15 @@ html[data-canvas-alt] .canvas-frame-root * {
   inset-inline-start: 0;
   overflow: hidden;
   transform-origin: 0 0;
+  pointer-events: none;
 }
-.canvas-trash-name {
-  padding: 0 2px;
-  border: 0;
-  background: transparent;
-  color: var(--canvas-text-color);
-  font: inherit;
-  font-size: 12px;
-  line-height: 1.35;
-  text-align: start;
-  cursor: default;
+/* An opened card takes clicks and typing, so the person can try it before putting it back. */
+.canvas-trash-stage[data-usable] .canvas-trash-real {
+  pointer-events: auto;
 }
-.canvas-trash-name > span {
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow-wrap: anywhere;
-}
-.canvas-trash-name::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: var(--canvas-radius-m);
-}
-.canvas-trash-name:focus-visible {
-  outline: none;
-}
-.canvas-trash-name:focus-visible::after {
-  outline: 2px solid var(--canvas-focus-color);
-  outline-offset: -2px;
-}
-@media (max-width: 480px) {
-  .canvas-trash-popover {
-    inline-size: calc(100vw - 32px);
-  }
-  .canvas-trash-list {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+@media (max-width: 720px) {
+  .canvas-trash {
+    padding: 12px;
   }
 }
 
@@ -2309,14 +2414,17 @@ html[data-canvas-alt] .canvas-frame-root * {
       them back) glide to their new place, so the person sees where each one went.
       Canvas.tsx sets data-glide on the viewport for that moment only: a drag, a resize,
       and a hot update never glide.
-   Everything uses one curve and two lengths, changes no layout, and is off under
-   prefers-reduced-motion. Only the chrome is named here, never a preview's content:
+   4. One flourish: a note the person places sticks on like a sticker pressed onto the
+      board. It is their own mark on the canvas, and placed seldom enough to stay a small
+      pleasure. It never holds up typing: the field has focus from the first frame.
+   Apart from the flourish, everything uses one curve and two lengths, changes no layout,
+   and all of it is off under prefers-reduced-motion. Only the chrome is named here, never a preview's content:
    that is the app's own. */
 .canvas-handle,
 .canvas-name,
 .canvas-button,
 .canvas-item-action,
-.canvas-trash-entry,
+.canvas-trash-card,
 .canvas-ghost-delete,
 .canvas-item-menu-entry,
 .canvas-quick-ask,
@@ -2369,11 +2477,21 @@ html[data-canvas-alt] .canvas-frame-root * {
 [data-tip]:focus-visible::after {
   animation: canvas-fade-in var(--canvas-fast) var(--canvas-ease) 350ms backwards;
 }
-.canvas-trash-popover,
+/* Every surface that opens over the work rises the same way: menus, popovers, panels, and the trash. */
+.canvas-trash-dialog,
 .canvas-share-popover,
 .canvas-help-popover,
-.canvas-item-menu {
+.canvas-backgrounds,
+.canvas-item-menu,
+.canvas-inspect,
+.canvas-inspect-popover {
   animation: canvas-rise-in var(--canvas-slow) var(--canvas-ease);
+}
+.canvas-trash {
+  animation: canvas-fade-in var(--canvas-slow) var(--canvas-ease);
+}
+.canvas-trash-detail {
+  animation: canvas-fade-in var(--canvas-fast) var(--canvas-ease);
 }
 /* A notice comes down from the top, where it shows. */
 .canvas-toast {
@@ -2397,6 +2515,54 @@ html[data-canvas-alt] .canvas-frame-root * {
   transform-origin: 0 100%;
   animation: canvas-pin-in var(--canvas-slow) var(--canvas-ease);
 }
+/* A placed note: it drops in tilted and lifted (a bigger, softer shadow), lands with a small
+   squash, settles, and its corner folds down last. The card is placed with `transform`, so
+   the body moves inside it; the card's drop shadow follows the body's shape. The card fades
+   in, and its outline once the note has landed: an outline still while the note moves
+   inside it looked like a frame it fell out of. */
+.canvas-note-card[data-arriving] {
+  animation: canvas-note-land 460ms var(--canvas-ease);
+}
+.canvas-note-card[data-arriving] .canvas-note-body {
+  transform-origin: 50% 0;
+  animation: canvas-note-stick 460ms cubic-bezier(0.3, 0, 0.2, 1);
+}
+.canvas-note-card[data-arriving] .canvas-note-body::after {
+  transform-origin: 100% 100%;
+  animation: canvas-note-fold 220ms var(--canvas-ease) 320ms backwards;
+}
+@keyframes canvas-note-stick {
+  0% {
+    transform: translateY(-16px) rotate(-5deg) scale(1.06);
+  }
+  45% {
+    transform: translateY(1px) rotate(1deg) scale(1.01, 0.985);
+  }
+  72% {
+    transform: rotate(-0.4deg) scale(1.003);
+  }
+  100% {
+    transform: none;
+  }
+}
+@keyframes canvas-note-land {
+  0% {
+    opacity: 0;
+    filter: drop-shadow(0 2px 2px rgb(0 0 0 / 8%)) drop-shadow(0 20px 24px rgb(0 0 0 / 18%));
+    outline-color: transparent;
+  }
+  30% {
+    opacity: 1;
+  }
+  60% {
+    outline-color: transparent;
+  }
+}
+@keyframes canvas-note-fold {
+  from {
+    transform: scale(0);
+  }
+}
 .canvas-pin[data-area] .canvas-pin-bubble {
   transform-origin: 0 0;
 }
@@ -2418,7 +2584,8 @@ html[data-canvas-alt] .canvas-frame-root * {
   .canvas-name,
   .canvas-button,
   .canvas-item-action,
-  .canvas-trash-entry,
+  .canvas-trash-card,
+  .canvas-trash-scaled,
   .canvas-ghost-delete,
   .canvas-annotation-handle::before,
   .canvas-preview,
@@ -2442,14 +2609,22 @@ html[data-canvas-alt] .canvas-frame-root * {
   [data-tip]:focus-visible::after,
   .canvas-item-menu,
   .canvas-annotation-card,
-  .canvas-trash-popover,
+  .canvas-trash,
+  .canvas-trash-dialog,
+  .canvas-trash-detail,
   .canvas-share-popover,
   .canvas-help-popover,
+  .canvas-backgrounds,
+  .canvas-inspect,
+  .canvas-inspect-popover,
   .canvas-toast,
   .canvas-toolbar[data-place="pending"],
   .canvas-ghost-tag,
   .canvas-area,
   .canvas-pin-bubble,
+  .canvas-note-card[data-arriving],
+  .canvas-note-card[data-arriving] .canvas-note-body,
+  .canvas-note-card[data-arriving] .canvas-note-body::after,
   .canvas-flow {
     animation: none;
   }

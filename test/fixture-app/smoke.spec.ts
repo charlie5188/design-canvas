@@ -555,8 +555,22 @@ test('an item moves to the trash and is put back', async ({ page }) => {
     await expect(item).toHaveCount(0)
     await page.getByRole('button', { name: 'Trash, 1 item' }).click()
     const trash = page.getByRole('dialog', { name: 'Trash' })
-    await expect(trash.locator('.canvas-trash-thumb')).toContainText('Canvas is ready')
-    await expect(trash.locator('.canvas-trash-thumb h2')).toHaveCSS('color', APP_TEXT)
+    // Each item is a card with its live thumbnail, in the app's colors, under the day it went in:
+    // this browser kept the time across the reload.
+    await expect(trash.locator('.canvas-trash-group-label').first()).toHaveText('Today')
+    const card = trash.locator('.canvas-trash-card[data-trash-id="example"]')
+    await expect(card.locator('.canvas-trash-stage')).toContainText('Canvas is ready')
+    await expect(card.locator('.canvas-trash-stage h2')).toHaveCSS('color', APP_TEXT)
+    // A click only opens it large, as its own page that takes clicks; Escape goes back to the cards, with that one marked.
+    await card.getByRole('button', { name: /Example · replace me/ }).click()
+    const opened = trash.getByRole('region', { name: 'Example · replace me' })
+    await expect(opened.locator('iframe').contentFrame().getByText('Canvas is ready')).toBeVisible()
+    await expect(opened.locator('.canvas-trash-real')).not.toHaveAttribute('inert')
+    await expect(item).toHaveCount(0)
+    await page.keyboard.press('Escape')
+    await expect(opened).toHaveCount(0)
+    await expect(card).toHaveAttribute('data-current', '')
+    await card.getByRole('button', { name: /Example · replace me/ }).click()
     await trash.getByRole('button', { name: 'Put back Example · replace me' }).click()
     await expect(item).toContainText('Canvas is ready')
     await expect(page.getByRole('button', { name: /^Trash/ })).toHaveCount(0)
@@ -572,6 +586,48 @@ test('an item moves to the trash and is put back', async ({ page }) => {
     await expect(item).toContainText('Canvas is ready', { timeout: 10_000 })
     await expect(page.getByRole('button', { name: /^Trash/ })).toHaveCount(0)
     expect(readFileSync(REGISTRY, 'utf8')).toBe(original)
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
+test('an item in the trash can be set aside instead, and the trash stays open on the next one', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    writeFileSync(
+      REGISTRY,
+      withVersions(original).replace('id: "b",', 'id: "b", trashed: true,').replace('id: "c",', 'id: "c", trashed: true,'),
+    )
+    await servesId(page, 'c')
+    await page.goto('/')
+    await page.getByRole('button', { name: 'Trash, 2 items' }).click()
+    const trash = page.getByRole('dialog', { name: 'Trash' })
+    await trash.locator('.canvas-trash-card').first().getByRole('button').click()
+    const first = (await trash.locator('.canvas-trash-detail-name').textContent())!
+    const firstId = first === 'Version B' ? 'b' : 'c'
+    const secondId = firstId === 'b' ? 'c' : 'b'
+    await trash.getByRole('button', { name: `Set aside ${first}` }).click()
+    // The first one makes the frame, below everything, and leaves the trash; the trash shows the other one.
+    await expect.poll(() => setAsideFrames()).toHaveLength(1)
+    await expect.poll(() => entryOf(firstId)).not.toContain('trashed')
+    await expect(trash.locator('.canvas-trash-detail-name')).toHaveText(secondId === 'b' ? 'Version B' : 'Version C')
+    await expect(page.getByRole('button', { name: 'Trash, 1 item' })).toBeVisible()
+    const frame = setAsideFrames()[0]!
+    const xOf = (id: string) => Number(/\bx: (-?\d+)/.exec(entryOf(id))![1])
+    const yOf = (id: string) => Number(/\by: (-?\d+)/.exec(entryOf(id))![1])
+    expect(xOf(firstId)).toBeGreaterThan(frame[0])
+    expect(yOf(firstId)).toBeGreaterThan(frame[1])
+    expect(frame[1]).toBeGreaterThan(yOf('example'))
+    // The last one joins the row at its right end, the frame grows, and the empty trash closes.
+    await trash.getByRole('button', { name: /^Set aside Version/ }).click()
+    await expect(trash).toHaveCount(0)
+    await expect.poll(() => entryOf(secondId)).not.toContain('trashed')
+    await expect.poll(() => setAsideFrames()[0]![2]).toBeGreaterThan(frame[2])
+    expect(setAsideFrames()).toHaveLength(1)
+    expect(xOf(secondId)).toBeGreaterThan(xOf(firstId))
+    await expect(page.locator(`.canvas-item[data-canvas-item="${secondId}"]`)).toBeVisible()
     expect(errors).toEqual([])
   } finally {
     await restoreRegistry(page, original)
