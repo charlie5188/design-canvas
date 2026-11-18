@@ -56,12 +56,33 @@ export class Trail {
   private steps: Step[] = [];
   private dropped = 0;
   private timers = new Set<number>();
+  /** The presses and keys not settled yet, with the content as it was just before each. */
+  private waiting = new Map<Waiting, string | undefined>();
 
   reset() {
     this.steps = [];
     this.dropped = 0;
+    this.waiting.clear();
     for (const timer of this.timers) window.clearTimeout(timer);
     this.timers.clear();
+  }
+
+  /** A waiting step stays if the content changed after it, and leaves the list if not. */
+  private settle(step: Waiting, now: string | undefined, last: boolean) {
+    if (!this.waiting.has(step)) return;
+    if (now !== undefined && now !== this.waiting.get(step)) step.pending = false;
+    else if (last) this.steps = this.steps.filter((other) => other !== step);
+    else return;
+    this.waiting.delete(step);
+  }
+
+  /**
+   * Settles every waiting step against the content as it is now, before a new press or key
+   * changes it: otherwise a click that did nothing, quickly followed by one that did, would
+   * take the second one's change as its own.
+   */
+  private settleAll(now: string | undefined) {
+    for (const step of [...this.waiting.keys()]) this.settle(step, now, true);
   }
 
   private push(step: Step) {
@@ -91,17 +112,15 @@ export class Trail {
    */
   listen(target: EventTarget, root: () => Element | null | undefined, stateOf: () => string | undefined) {
     // A press or key takes its place in the list at once, so typing right after it comes after
-    // it, and stays there only if the content changed by the last look.
+    // it, and stays there only if the content changed by the last look, or by the next press.
     const after = (before: string | undefined, step: Waiting) => {
       step.pending = true;
       this.push(step);
+      this.waiting.set(step, before);
       LOOK_MS.forEach((wait, index) => {
         const timer = window.setTimeout(() => {
           this.timers.delete(timer);
-          if (!step.pending) return;
-          const now = stateOf();
-          if (now !== undefined && now !== before) step.pending = false;
-          else if (index === LOOK_MS.length - 1) this.steps = this.steps.filter((other) => other !== step);
+          this.settle(step, stateOf(), index === LOOK_MS.length - 1);
         }, wait);
         this.timers.add(timer);
       });
@@ -109,6 +128,7 @@ export class Trail {
     let pressed: string | undefined;
     const onDown = () => {
       pressed = stateOf();
+      this.settleAll(pressed);
     };
     const onClick = (event: Event) => {
       const element = elementOf(event.target);
@@ -145,12 +165,15 @@ export class Trail {
     };
     const onKey = (event: Event) => {
       const { key } = event as KeyboardEvent;
+      const now = stateOf();
+      // Any key, typing too: a letter changes what a field holds, which is not the press's doing.
+      this.settleAll(now);
       if (key !== "Enter" && key !== "Escape") return;
       const from = elementOf(event.target);
       const field = from && (tagIs(from, "input") || tagIs(from, "select")) ? from : null;
       // Enter in a text area is a new line, already heard as typing.
       if (key === "Enter" && from && tagIs(from, "textarea")) return;
-      after(stateOf(), { kind: "key", key, name: field ? nameOf(field) || labels.stepField : undefined });
+      after(now, { kind: "key", key, name: field ? nameOf(field) || labels.stepField : undefined });
     };
     const heard: [string, EventListener][] = [
       ["pointerdown", onDown],
