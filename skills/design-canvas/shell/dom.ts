@@ -42,6 +42,25 @@ export function wheelPixels(event: WheelEvent, pageHeight: number) {
   return { dx: event.deltaX * scale, dy: event.deltaY * scale };
 }
 
+// A `viewport` item's frame. The item renders into `.canvas-frame-root`, and what its components
+// portal to the frame's body (a dialog, a menu, a popover) is the item too: in the product it is
+// part of the same screen, and often all of it, as with a search dialog. So the item's elements
+// are picked, named, and found again in the frame's whole body. Beside the root, in the same
+// mount, are the canvas's own marks (the hover outline, an area being drawn), which are not.
+
+/**
+ * The parts of a frame that are the item: its root, then each layer portaled to the body, in
+ * page order. For reading what the item renders; the canvas's marks change on every hover.
+ */
+export function frameLayers(doc: Document): Element[] {
+  const root = doc.querySelector(".canvas-frame-root");
+  if (!root) return [];
+  const portaled = [...doc.body.children].filter((layer) => !layer.contains(root) && !NOT_SHOWN.has(layer.tagName));
+  return [root, ...portaled];
+}
+
+const NOT_SHOWN = new Set(["SCRIPT", "STYLE", "LINK", "TEMPLATE", "NOSCRIPT"]);
+
 // Element references: Alt/Option-click copies "Item name › button “Send”" so a
 // person can point at one control when talking to the model.
 

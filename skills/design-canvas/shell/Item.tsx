@@ -351,9 +351,11 @@ export function CanvasItemView({
     // Each run starts at the item's start, so it starts with no steps.
     trail.current.reset();
     const unhear: (() => void)[] = [];
+    // A frame's item is its whole body: a press in a dialog the item portaled there is a step too (dom.ts frameLayers).
     const frameRoot = () => {
       try {
-        return preview.querySelector<HTMLIFrameElement>("iframe[data-canvas-frame]")?.contentDocument?.querySelector(".canvas-frame-root");
+        const doc = preview.querySelector<HTMLIFrameElement>("iframe[data-canvas-frame]")?.contentDocument;
+        return doc?.querySelector(".canvas-frame-root") ? doc.body : null;
       } catch {
         return null;
       }

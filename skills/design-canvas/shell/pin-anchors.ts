@@ -69,7 +69,9 @@ export function usePinAnchors({
       let scale = 1;
       if (frame) {
         try {
-          root = frame.contentDocument?.querySelector(".canvas-frame-root") ?? null;
+          // The whole body, as the frame named the element (FrameHost.tsx): a dialog the item
+          // portaled there holds elements of the item too, and look-alikes are numbered across both.
+          root = frame.contentDocument?.querySelector(".canvas-frame-root") ? frame.contentDocument.body : null;
         } catch {
           root = null;
         }
