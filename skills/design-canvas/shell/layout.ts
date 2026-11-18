@@ -16,7 +16,8 @@ export type Bounds = { minX: number; minY: number; maxX: number; maxY: number };
 export type SavedTrash = { ids: string[]; kept: string[]; inRegistry: boolean };
 const NO_TRASH: SavedTrash = { ids: [], kept: [], inRegistry: false };
 
-export const ZOOM_MIN = 0.1;
+// As low as Figma goes, so Fit all still takes in a canvas that grew wide over many rounds.
+export const ZOOM_MIN = 0.02;
 export const ZOOM_MAX = 3;
 const COORD_LIMIT = 100_000;
 const VERSION = 1;
@@ -33,7 +34,7 @@ export const clampZoom = (z: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z)
  * do, so a press lands on 50% or 100% rather than 94% or 144%. Wheel and pinch
  * stay continuous. The ends are the zoom limits.
  */
-export const ZOOM_STOPS = [ZOOM_MIN, 0.25, 0.5, 1, 2, ZOOM_MAX];
+export const ZOOM_STOPS = [ZOOM_MIN, 0.05, 0.1, 0.25, 0.5, 1, 2, ZOOM_MAX];
 
 /** The next level above (direction 1) or below (-1) `z`; from between two levels, the nearer one in that direction. */
 export function nextZoomStop(z: number, direction: 1 | -1): number {
