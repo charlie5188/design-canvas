@@ -427,7 +427,7 @@ export function FlowView({
             data-tip={labels.interactToolHint}
             onClick={() => setAsking(false)}
           >
-            <Icon name="pointer" />
+            <Icon name="click" />
           </button>
           <button
             type="button"

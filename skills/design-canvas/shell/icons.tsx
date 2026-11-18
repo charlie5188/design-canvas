@@ -56,6 +56,17 @@ const SHAPES = {
   ),
   "chevron-down": <path d="M6 9l6 6l6 -6" />,
   "chevron-right": <path d="M9 6l6 6l-6 6" />,
+  // Interact: pressing what the prototype offers, not selecting (an arrow would say select).
+  click: (
+    <>
+      <path d="M3 12l3 0" />
+      <path d="M12 3l0 3" />
+      <path d="M7.8 7.8l-2.2 -2.2" />
+      <path d="M16.2 7.8l2.2 -2.2" />
+      <path d="M7.8 16.2l-2.2 2.2" />
+      <path d="M12 12l9 3l-4 2l-2 4l-3 -9" />
+    </>
+  ),
   clock: (
     <>
       <path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0" />
@@ -171,9 +182,6 @@ const SHAPES = {
       <path d="M20 21l2 -2l-2 -2" />
       <path d="M17 17l-2 2l2 2" />
     </>
-  ),
-  pointer: (
-    <path d="M7.904 17.563a1.2 1.2 0 0 0 2.228 .308l2.09 -3.093l4.907 4.907a1.067 1.067 0 0 0 1.509 0l1.047 -1.047a1.067 1.067 0 0 0 0 -1.509l-4.907 -4.907l3.113 -2.09a1.2 1.2 0 0 0 -.309 -2.228l-13.582 -3.904l3.904 13.563" />
   ),
   settings: (
     <>

@@ -267,7 +267,7 @@ const MoonIcon = () => <Icon name="moon" />;
 const THEME_ICONS: Partial<Record<string, () => ReactNode>> = { light: SunIcon, dark: MoonIcon };
 
 const AnnotateIcon = () => <Icon name="message-circle" />;
-const SelectIcon = () => <Icon name="pointer" />;
+const SelectIcon = () => <Icon name="click" />;
 const HandIcon = () => <Icon name="hand" />;
 // A pointer with code brackets: picking an element to see and change what it is made of in code.
 const InspectIcon = () => <Icon name="pointer-code" />;
