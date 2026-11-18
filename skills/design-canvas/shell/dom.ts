@@ -92,7 +92,8 @@ const clean = (text: string | null | undefined) => {
   return value.length > MAX_NAME ? `${value.slice(0, MAX_NAME - 1)}…` : value;
 };
 
-function nameOf(element: Element) {
+/** An element's accessible name, roughly: its label, a field's label or placeholder, or its text. */
+export function nameOf(element: Element) {
   const label = element.getAttribute("aria-label");
   if (label) return clean(label);
   const labelledBy = element.getAttribute("aria-labelledby");
@@ -103,13 +104,17 @@ function nameOf(element: Element) {
       .join(" ");
     if (clean(text)) return clean(text);
   }
-  if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) {
-    const fieldLabel = element.labels?.[0]?.textContent;
+  // By tag, not `instanceof`: Start here (start.ts) names fields inside a frame, whose
+  // elements belong to the frame's window.
+  const tag = element.tagName.toLowerCase();
+  if (tag === "input" || tag === "textarea" || tag === "select") {
+    const field = element as HTMLInputElement;
+    const fieldLabel = field.labels?.[0]?.textContent;
     if (clean(fieldLabel)) return clean(fieldLabel);
-    if ("placeholder" in element && element.placeholder) return clean(element.placeholder);
-    return clean(element.name);
+    if (tag !== "select" && field.placeholder) return clean(field.placeholder);
+    return clean(field.name);
   }
-  if (element instanceof HTMLImageElement) return clean(element.alt);
+  if (tag === "img") return clean((element as HTMLImageElement).alt);
   return clean(element.textContent) || clean(element.getAttribute("title"));
 }
 

@@ -2419,6 +2419,122 @@ export const Help = () => (
   }
 })
 
+test('Start here names the screen and the steps since the start, and `start` opens an item at a later screen', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  const example = readFileSync(EXAMPLE, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    writeFileSync(
+      EXAMPLE,
+      `import { useContext, useState } from "react";
+import { RouteContext } from "../canvas/routes";
+export const Example = () => (
+  <div style={{ padding: 16 }}>
+    <h2 style={{ margin: 0, fontSize: 18 }}>Plans</h2>
+    <a href="/checkout?plan=team">Choose</a>
+  </div>
+);
+export const Checkout = () => {
+  const [review, setReview] = useState(false);
+  return (
+    <div style={{ padding: 16 }}>
+      <h2 style={{ margin: 0, fontSize: 18 }}>Checkout</h2>
+      <p data-path>{useContext(RouteContext)}</p>
+      <label>Company <input /></label>
+      <button type="button" onClick={() => setReview(true)}>Review</button>
+      {review && <p>Confirm</p>}
+    </div>
+  );
+};
+`,
+    )
+    writeFileSync(
+      REGISTRY,
+      original
+        .replace('import { Example } from "./items/Example";', 'import { Checkout, Example } from "./items/Example";')
+        .replace('component: Example,', 'component: Example,\n    path: "/plans",\n    screens: { "/checkout": Checkout },')
+        .replace(
+          /\];\s*$/,
+          `  { id: "phone", name: "Phone", component: Example, path: "/plans", screens: { "/checkout": Checkout }, x: 0, y: 260, width: 375, height: 240, viewport: true },
+  { id: "started", name: "Started", component: Example, path: "/plans", screens: { "/checkout": Checkout }, start: "/checkout?plan=team", x: 500, y: 260, width: 300, height: 240 },
+];
+`,
+        ),
+    )
+    await expect
+      .poll(async () => (await (await page.request.get('/registry.tsx')).text()).includes('id: "started"'), { timeout: 15_000 })
+      .toBe(true)
+    await expect
+      .poll(async () => (await (await page.request.get('/items/Example.tsx')).text()).includes('Checkout'), { timeout: 15_000 })
+      .toBe(true)
+    await page.goto('/')
+    const plain = page.locator('.canvas-item[data-canvas-item="example"] .canvas-preview')
+    const frame = page.frameLocator('.canvas-item[data-canvas-item="phone"] iframe').locator('body')
+    await expect(frame.getByRole('heading')).toHaveText('Plans')
+    await page.waitForTimeout(600)
+    const note = page.locator('.canvas-pin[data-open] textarea')
+    for (const [id, name, item] of [
+      ['example', 'Example · replace me', plain],
+      ['phone', 'Phone', frame],
+    ] as const) {
+      const more = async () => {
+        await page.locator(`.canvas-item[data-canvas-item="${id}"] .canvas-name`).hover()
+        await page.getByRole('button', { name: `More actions for ${name}`, exact: true }).click()
+      }
+      // At its start, the item has nowhere else to start.
+      await more()
+      await expect(page.getByRole('button', { name: `Start ${name} here` })).toHaveCount(0)
+      await page.keyboard.press('Escape')
+      await item.getByRole('link', { name: 'Choose' }).click()
+      await expect(item.getByRole('heading'), name).toHaveText('Checkout')
+      await item.getByLabel('Company').fill('Acme')
+      // A click that changes nothing is not a step.
+      await item.getByRole('heading').click()
+      await item.getByRole('button', { name: 'Review' }).click()
+      await expect(item.getByText('Confirm'), name).toBeVisible()
+      // Past the last look for a change after a press (start.ts).
+      await page.waitForTimeout(600)
+      await more()
+      await page.getByRole('button', { name: `Start ${name} here` }).click()
+      await expect(note, name).toHaveValue(
+        [
+          'Start here: make this item, and the versions it is compared with, start where it is now.',
+          'Screen: /checkout?plan=team',
+          'After:',
+          '1. Pressed “Choose”',
+          '2. Typed “Acme” in “Company”',
+          '3. Pressed “Review”',
+        ].join('\n'),
+      )
+      // It changes this item and the ones beside it in place, not as a new version.
+      await expect(page.getByRole('checkbox', { name: 'Apply to a new version' })).not.toBeChecked()
+      // Escape takes a new note back.
+      await page.keyboard.press('Escape')
+      await expect(page.locator('.canvas-pin')).toHaveCount(0)
+      // Restart empties the steps along with the item.
+      await page.locator(`.canvas-item[data-canvas-item="${id}"] .canvas-name`).hover()
+      await page.getByRole('button', { name: `Restart ${name}` }).click()
+      await expect(item.getByRole('heading'), name).toHaveText('Plans')
+    }
+    // `start` opens the item at that screen, with its query, and there is nothing to restart.
+    const started = page.locator('.canvas-item[data-canvas-item="started"] .canvas-preview')
+    await expect(started.getByRole('heading')).toHaveText('Checkout')
+    await expect(started.locator('[data-path]')).toHaveText('/checkout')
+    await expect(page.getByRole('button', { name: 'Restart Started' })).toHaveCount(0)
+    // So does its own page.
+    await page.goto('/frame.html?item=started')
+    await expect(page.getByRole('heading')).toHaveText('Checkout')
+    expect(errors).toEqual([])
+  } finally {
+    if (readFileSync(EXAMPLE, 'utf8') !== example) {
+      const updated = page.waitForEvent('console', { predicate: (m) => m.text().includes('hot updated'), timeout: 10_000 }).catch(() => {})
+      writeFileSync(EXAMPLE, example)
+      await updated
+    }
+    await restoreRegistry(page, original)
+  }
+})
+
 test('an item opened alone follows its links as on the canvas, and never loads another page', async ({ page, context }) => {
   const original = readFileSync(REGISTRY, 'utf8')
   const example = readFileSync(EXAMPLE, 'utf8')

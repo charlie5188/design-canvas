@@ -234,7 +234,8 @@ export function Canvas(props: CanvasProps) {
  * A part with a clear edge has its own file and is only wired in here: the trash (Trash.tsx),
  * Share (Share.tsx), notices (Notices.tsx), fresh tags (fresh.ts), the Inspect tool
  * (inspect-edit.ts), the working-out of a pick (pick.ts), the camera (camera.ts), pin anchors
- * (pin-anchors.ts), and links (links.ts). The views are Item.tsx, AnnotationView.tsx, Board.tsx,
+ * (pin-anchors.ts), links (links.ts), and the steps Start here reports (start.ts, used by
+ * Item.tsx). The views are Item.tsx, AnnotationView.tsx, Board.tsx,
  * FlowView.tsx, Help.tsx, and Settings.tsx.
  *
  * What stays here is one piece, and is kept together on purpose: annotations, notes and
@@ -491,11 +492,12 @@ function CanvasBoard({
     [closeAnnotation, setOpen, versionsBefore],
   );
   const startAnnotation = useCallback(
-    (itemId: string, x: number, y: number, ref: string, area?: { w: number; h: number }, text = "", id = newAnnotationId()) => {
+    (itemId: string, x: number, y: number, ref: string, area?: { w: number; h: number }, text = "", id = newAnnotationId(), asked?: boolean) => {
       closeAnnotation();
       // The item's choice so far, or a new version by default: exploring keeps what was there.
+      // `asked`: the note says itself which it is, as Start here, which changes the item in place.
       const unsent = annotationsRef.current.filter((a) => a.itemId === itemId && !a.sent && !a.queued && a.text.trim());
-      const version = unsent.length ? !!unsent[unsent.length - 1]!.version : true;
+      const version = asked ?? (unsent.length ? !!unsent[unsent.length - 1]!.version : true);
       const onSection = sectionOf({ itemId }) !== null;
       const annotation: Annotation = {
         id,
@@ -605,6 +607,23 @@ function CanvasBoard({
       if (waiting) return openExisting(waiting.id);
       const preview = worldRef.current?.querySelector<HTMLElement>(`[data-canvas-preview="${CSS.escape(item.id)}"]`);
       if (preview) startAnnotation(item.id, 0, 0, item.name, { w: preview.offsetWidth, h: preview.offsetHeight });
+    },
+    [openExisting, startAnnotation],
+  );
+  // Start here (start.ts): a note about the whole item, written for the person, which they can
+  // change before sending. It changes the item in place, so not as a new version. A Start here
+  // note that still waits takes the new words, so pressing it again after going further does
+  // not make two.
+  const startHere = useCallback(
+    (item: CanvasItem, text: string) => {
+      const first = labels.startHereNote(undefined, [], 0);
+      const waiting = annotationsRef.current.find((a) => a.itemId === item.id && a.w && !a.sent && !a.queued && a.text.startsWith(first));
+      if (waiting) {
+        setAnnotations((prev) => prev.map((a) => (a.id === waiting.id ? { ...placeOf(a), text: limitText(text), version: false, ...threadOf(a) } : a)));
+        return openExisting(waiting.id);
+      }
+      const preview = worldRef.current?.querySelector<HTMLElement>(`[data-canvas-preview="${CSS.escape(item.id)}"]`);
+      if (preview) startAnnotation(item.id, 0, 0, item.name, { w: preview.offsetWidth, h: preview.offsetHeight }, text, undefined, false);
     },
     [openExisting, startAnnotation],
   );
@@ -3775,6 +3794,7 @@ function CanvasBoard({
               onTrash={shared ? undefined : moveToTrash}
               onCopyName={shared ? undefined : copyReference}
               onAsk={shared ? undefined : askItem}
+              onStartHere={shared ? undefined : startHere}
               route={routes[item.id]?.[routes[item.id]!.length - 1]}
               onRestart={restartRoute}
               onFlow={openFlow}
@@ -4062,7 +4082,7 @@ function CanvasBoard({
       {flowItem && (
         <FlowView
           item={flowItem}
-          current={Math.max(0, screenIndex(flowItem, routes[flowItem.id]?.[routes[flowItem.id]!.length - 1] ?? ""))}
+          current={Math.max(0, screenIndex(flowItem, routes[flowItem.id]?.[routes[flowItem.id]!.length - 1] ?? flowItem.start ?? ""))}
           learned={steps[flowItem.id] ?? NO_STEPS}
           onOpen={openScreen}
           onAsk={shared ? undefined : (index, state) => askFlow(flowItem, index, state)}

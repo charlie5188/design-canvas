@@ -92,6 +92,9 @@ export function FrameHost({
   });
   const itemRef = useRef(item);
   itemRef.current = item;
+  // Where the item starts: `start` when the agent set one (types.ts), except in the flow view,
+  // which shows each screen at its own place in the flow.
+  const startOf = (of: CanvasItem | undefined) => (context === "flow" ? undefined : of?.start);
   const stackRef = useRef(stack);
   stackRef.current = stack;
   const pickRef = useRef<HTMLDivElement>(null);
@@ -164,7 +167,7 @@ export function FrameHost({
     // alone (`?status=signed`) stays on the screen shown.
     const inside = (href: string) => {
       const current = itemRef.current;
-      const location = locationOf(href, stackRef.current[stackRef.current.length - 1] ?? current?.path ?? "/");
+      const location = locationOf(href, stackRef.current[stackRef.current.length - 1] ?? startOf(current) ?? current?.path ?? "/");
       const path = location && pathPart(location);
       if (!location || !path || !current || !screenAt(current, path)) return false;
       setStack((was) => (was[was.length - 1] === location ? was : [...was, location]));
@@ -467,6 +470,12 @@ export function FrameHost({
     };
   }, [inCanvas]);
 
+  // The screen shown, on the document, for the canvas to read: Start here names it (Item.tsx).
+  const screen = stack[stack.length - 1] ?? startOf(item) ?? item?.path ?? "";
+  useEffect(() => {
+    document.documentElement.dataset.canvasScreen = screen;
+  }, [screen]);
+
   // The app's router around the screen, when its components need one (routes.ts ScreenRouter).
   const Router = useContext(ScreenRouter);
   if (!item) return <p className="canvas-frame-missing">{labels.missingItem(id)}</p>;
@@ -501,7 +510,7 @@ export function FrameHost({
     );
   }
 
-  const route = stack[stack.length - 1];
+  const route = stack[stack.length - 1] ?? startOf(item);
   // The flow view shows one state of a screen in a frame of its own (types.ts `states`).
   const state = params.get("state");
   const Component = (state && item.states?.[route ? pathPart(route) : (item.path ?? "")]?.[state]) || (route && screenAt(item, route)) || item.component;

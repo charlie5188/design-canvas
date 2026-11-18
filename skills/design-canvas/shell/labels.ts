@@ -136,6 +136,27 @@ export const labels = {
   flowStep: (words: string) => `click "${words}"`,
   restart: (name: string) => `Restart ${name}`,
   restartHint: "Restart",
+  startHere: (name: string) => `Start ${name} here`,
+  startHereHint: "Start here",
+  /**
+   * The note Start here writes (start.ts): the request, the screen the item shows, and what the
+   * person did since its start. The agent reads "Start here" as SKILL.md, "Start here", says.
+   */
+  startHereNote: (screen: string | undefined, steps: string[], earlier: number) =>
+    [
+      "Start here: make this item, and the versions it is compared with, start where it is now.",
+      ...(screen ? [`Screen: ${screen}`] : []),
+      ...(steps.length ? ["After:", ...(earlier ? [`(${earlier} earlier step${earlier === 1 ? "" : "s"} not listed)`] : []), ...steps.map((step, index) => `${index + 1}. ${step}`)] : []),
+    ].join("\n"),
+  stepPress: (words: string) => `Pressed “${words}”`,
+  stepClick: (words: string) => `Clicked “${words}”`,
+  stepType: (value: string, field: string) => (value ? `Typed “${value}” in “${field}”` : `Cleared “${field}”`),
+  stepTypeHidden: (field: string) => `Typed in “${field}”`,
+  stepChoose: (value: string, field: string) => `Chose “${value}” in “${field}”`,
+  stepCheck: (checked: boolean, field: string) => `${checked ? "Checked" : "Unchecked"} “${field}”`,
+  stepKey: (key: string, field?: string) => (field ? `Pressed ${key} in “${field}”` : `Pressed ${key}`),
+  /** A field with no label, placeholder, or name. */
+  stepField: "a field",
   copyName: (name: string) => `Copy the name ${name}`,
   copyNameHint: "Copy name",
   moveToTrash: (name: string) => `Move ${name} to the trash`,
