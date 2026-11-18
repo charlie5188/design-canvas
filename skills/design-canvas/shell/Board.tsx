@@ -10,6 +10,7 @@ import { type KeyboardEvent, type PointerEvent as ReactPointerEvent, useEffect, 
 import { type BoardKind, type BoardMark, NOTE_WIDTH } from "./marks";
 import { Icon } from "./icons";
 import { labels } from "./labels";
+import { NoteText } from "./note-text";
 import type { CanvasNote, CanvasSection } from "./types";
 
 export type Corner = "nw" | "ne" | "sw" | "se";
@@ -200,7 +201,9 @@ export function NoteView({
       onPointerDown={(event) => interactive && handlers.move(event, ref)}
       onKeyDown={(event) => interactive && onKey(event, ref, handlers)}
     >
-      <div className="canvas-note-body">{note.text}</div>
+      <div className="canvas-note-body">
+        <NoteText text={note.text} />
+      </div>
       {interactive && <Border refer={ref} handlers={handlers} />}
       {interactive && selected && <Handles refer={ref} handlers={handlers} />}
     </div>
@@ -345,7 +348,7 @@ export function MarkView({
   const content = open ? (
     field
   ) : isNote ? (
-    <div className="canvas-note-body">{empty ? hint : mark.text}</div>
+    <div className="canvas-note-body">{empty ? hint : <NoteText text={mark.text} />}</div>
   ) : empty ? (
     hint
   ) : (

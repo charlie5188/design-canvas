@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig, loadConfigFromFile, mergeConfig, type Plugin, type UserConfig, version as viteVersion } from "vite";
+import { listImages } from "./registry-edit.ts";
 
 // Builds the canvas into one self-contained HTML file to share. The file opens
 // from disk with a double-click, needs no server, and imports into Figma as a
@@ -69,13 +70,37 @@ function inlinePublicFiles(html: string, publicDir: string | undefined) {
   return { html: result, missing: [...missing] };
 }
 
+/**
+ * The canvas's reference images, each with its picture as a data URL, as the script that
+ * leaves them on the page for images.ts. On the canvas page the dev server lists them;
+ * a shared file has no server, so they go inside it here.
+ */
+function builtImages(): string {
+  let source = "";
+  try {
+    source = readFileSync(resolve(canvasDir, "registry.tsx"), "utf8");
+  } catch {
+    return "";
+  }
+  const images = listImages(source).flatMap((image) => {
+    const file = resolve(canvasDir, "images", image.file);
+    const type = MEDIA[image.file.slice(image.file.lastIndexOf(".") + 1).toLowerCase()];
+    return type && existsSync(file) ? [{ ...image, url: `data:${type};base64,${readFileSync(file).toString("base64")}` }] : [];
+  });
+  // "<" written as an escape, so nothing in a file name can end the script tag.
+  return images.length ? `<script>window.__designCanvasImages=${JSON.stringify(images).replace(/</g, "\\u003c")}</script>` : "";
+}
+
 /** Moves everything the page uses into it, and marks it as a shared file, with when it was built (see bridge.ts). */
 function oneFile(publicDir: string | undefined): Plugin {
   return {
     name: "design-canvas:one-file",
     enforce: "post",
     transformIndexHtml: (html) =>
-      html.replace(/<html\b/i, `<html data-design-canvas="shared" data-design-canvas-built="${Date.now().toString(36)}"`),
+      html
+        .replace(/<html\b/i, `<html data-design-canvas="shared" data-design-canvas-built="${Date.now().toString(36)}"`)
+        // Before the page's own script, which reads them as it starts.
+        .replace(/<head[^>]*>/i, (head) => `${head}${builtImages()}`),
     generateBundle(_options, bundle) {
       const page = bundle["index.html"];
       if (page?.type !== "asset") return;

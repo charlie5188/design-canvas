@@ -234,6 +234,7 @@ export function CanvasItemView({
   working,
   agentWorking,
   fresh,
+  selected,
 }: {
   item: CanvasItem;
   position: Position;
@@ -281,6 +282,8 @@ export function CanvasItemView({
   agentWorking: boolean;
   /** Added or changed by the agent, and not seen yet. */
   fresh?: Fresh;
+  /** Selected on the canvas (a click on its name, Shift + click, or a box drawn over it): it moves and goes to the trash with the rest of the selection. */
+  selected?: boolean;
 }) {
   // An item has one place for its state, under the bottom-right corner of its
   // card (canvas.css says why there), and one state shows there at a time. In order: what the agent is doing; a change that
@@ -430,6 +433,7 @@ export function CanvasItemView({
       data-front={front || undefined}
       data-working={working || undefined}
       data-picked={picked || undefined}
+      data-selected={selected || undefined}
       style={{ transform: `translate(${position.x}px, ${position.y}px)`, inlineSize: item.width }}
       onPointerDownCapture={() => onFront(item.id)}
       onFocus={() => onFront(item.id)}

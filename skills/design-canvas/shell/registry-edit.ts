@@ -1,33 +1,36 @@
 // Writes a move, resize, text change, or trash change straight into registry.tsx,
 // so it lands in the source as soon as the person makes it, without a message to the agent.
 // Only the fields listed here are touched, and only inside the named array
-// (`notes`, `sections`, or `registry`), so nothing else in the file can change.
+// (`notes`, `sections`, `images`, or `registry`), so nothing else in the file can change.
 //
 // It works on the text of the file, not a parser: each entry is found by its
 // `id`, its own braces are matched, and a field is replaced at the top level of
 // that object. An edit that cannot be placed exactly is reported as missing and
 // is not written, so the change falls back to the agent.
 
-export type DirectKind = "note" | "section" | "item";
+export type DirectKind = "note" | "section" | "item" | "image";
 export type DirectEdit = { kind: DirectKind; id: string; set: Record<string, number | string | boolean> };
 export type ApplyResult = { source: string; applied: string[]; missing: string[] };
 
-const ARRAY: Record<DirectKind, string> = { note: "notes", section: "sections", item: "registry" };
+const ARRAY: Record<DirectKind, string> = { note: "notes", section: "sections", item: "registry", image: "images" };
 // A "flag" is written as `key: true` and removed when false, so an entry that does
 // not have it reads as it always did.
 const FIELDS: Record<DirectKind, Record<string, "number" | "string" | "flag">> = {
   note: { x: "number", y: "number", width: "number", height: "number", text: "string" },
   section: { x: "number", y: "number", width: "number", height: "number", title: "string" },
   item: { x: "number", y: "number", width: "number", height: "number", note: "string", trashed: "flag", picked: "flag" },
+  image: { x: "number", y: "number", width: "number", height: "number" },
 };
 const COORD_LIMIT = 100_000;
 const MAX_TEXT = 1000;
 const ID = /^[a-z0-9][a-z0-9-]{0,79}$/i;
+/** An image's file in the canvas's images/ folder: a plain name, never a path. */
+export const IMAGE_FILE = /^[a-z0-9][a-z0-9-]{0,79}\.(png|jpe?g|webp|gif)$/i;
 
 /** Checks an edit from the browser before it goes near the file. */
 export function validEdit(value: unknown): DirectEdit | undefined {
   const e = value as Partial<DirectEdit> | null;
-  if (!e || typeof e !== "object" || !(e.kind === "note" || e.kind === "section" || e.kind === "item")) return undefined;
+  if (!e || typeof e !== "object" || !(e.kind === "note" || e.kind === "section" || e.kind === "item" || e.kind === "image")) return undefined;
   if (typeof e.id !== "string" || !ID.test(e.id) || !e.set || typeof e.set !== "object") return undefined;
   const set: Record<string, number | string | boolean> = {};
   for (const [key, raw] of Object.entries(e.set)) {
@@ -256,20 +259,32 @@ export function applyEdits(source: string, edits: DirectEdit[]): ApplyResult {
   return { source: next, applied, missing };
 }
 
-// New notes and sections are appended to the end of their array.
+// New notes, sections, and images are appended to the end of their array.
 
-/** `id` is for putting a deleted entry back as it was; without it, the id is made from the text. */
-export type DirectAdd = { kind: "note" | "section"; text: string; x: number; y: number; width?: number; height?: number; id?: string };
-export type DirectRemove = { kind: "note" | "section"; id: string };
+/**
+ * `id` is for putting a deleted entry back as it was; without it, the id is made from the text.
+ * An image has no text: it names its `file` in the canvas's images/ folder, which the dev
+ * server wrote there (agent-channel.ts), and its id is made from that name.
+ */
+export type DirectAdd =
+  | { kind: "note" | "section"; text: string; x: number; y: number; width?: number; height?: number; id?: string }
+  | { kind: "image"; file: string; x: number; y: number; width: number; height: number; id?: string };
+export type DirectRemove = { kind: "note" | "section" | "image"; id: string };
 
 /** Checks a new entry from the browser before it goes near the file. */
 export function validAdd(value: unknown): DirectAdd | undefined {
-  const a = value as Partial<DirectAdd> | null;
-  if (!a || typeof a !== "object" || !(a.kind === "note" || a.kind === "section")) return undefined;
-  if (typeof a.text !== "string" || !a.text.trim() || a.text.length > MAX_TEXT) return undefined;
+  const a = value as { kind?: unknown; text?: unknown; file?: unknown; x?: unknown; y?: unknown; width?: unknown; height?: unknown; id?: unknown } | null;
+  if (!a || typeof a !== "object" || !(a.kind === "note" || a.kind === "section" || a.kind === "image")) return undefined;
   const num = (n: unknown) => (typeof n === "number" && Number.isFinite(n) && Math.abs(n) <= COORD_LIMIT ? Math.round(n) : undefined);
   const [x, y] = [num(a.x), num(a.y)];
   if (x === undefined || y === undefined) return undefined;
+  if (a.kind === "image") {
+    const [w, h] = [num(a.width), num(a.height)];
+    if (typeof a.file !== "string" || !IMAGE_FILE.test(a.file) || !w || !h || w < 0 || h < 0) return undefined;
+    if (a.id !== undefined && (typeof a.id !== "string" || !ID.test(a.id))) return undefined;
+    return { kind: "image", file: a.file, x, y, width: w, height: h, ...(a.id ? { id: a.id } : {}) };
+  }
+  if (typeof a.text !== "string" || !a.text.trim() || a.text.length > MAX_TEXT) return undefined;
   const width = a.width === undefined ? undefined : num(a.width);
   const height = a.height === undefined ? undefined : num(a.height);
   // A section is a frame, so it needs a size; a note's size is optional.
@@ -282,7 +297,7 @@ export function validAdd(value: unknown): DirectAdd | undefined {
 /** Checks a removal from the browser. Items are never removed from here. */
 export function validRemove(value: unknown): DirectRemove | undefined {
   const r = value as Partial<DirectRemove> | null;
-  if (!r || typeof r !== "object" || !(r.kind === "note" || r.kind === "section")) return undefined;
+  if (!r || typeof r !== "object" || !(r.kind === "note" || r.kind === "section" || r.kind === "image")) return undefined;
   return typeof r.id === "string" && ID.test(r.id) ? { kind: r.kind, id: r.id } : undefined;
 }
 
@@ -318,10 +333,23 @@ function newId(text: string, kind: DirectAdd["kind"], used: Set<string>): string
   return id;
 }
 
+const IMAGES_HEAD =
+  "/** Reference images pasted or dropped onto the canvas. The files are in images/. */\nexport const images: { id: string; file: string; x: number; y: number; width: number; height: number }[] = ";
+
 /** The source with the entry added at the end of its array, or undefined when the array cannot be found. */
 export function addEntry(source: string, add: DirectAdd): { source: string; id: string } | undefined {
   const array = ARRAY[add.kind];
-  const head = new RegExp(`export const ${array}\\b[^=]*=\\s*\\[`).exec(source);
+  const pattern = new RegExp(`export const ${array}\\b[^=]*=\\s*\\[`);
+  // A registry written before the canvas had images has no array for them: the first image adds it,
+  // with its type written out so the file needs no new import. It goes above `registry` and that
+  // array's own comment, so `registry` stays the last array in the file, where items are added.
+  if (add.kind === "image" && !pattern.test(source)) {
+    const items = /(?:\/\*\*(?:(?!\*\/)[\s\S])*\*\/\s*)?export const registry\b/.exec(source);
+    source = items
+      ? `${source.slice(0, items.index)}${IMAGES_HEAD}[];\n\n${source.slice(items.index)}`
+      : `${source.replace(/\s*$/, "")}\n\n${IMAGES_HEAD}[];\n`;
+  }
+  const head = pattern.exec(source);
   if (!head) return undefined;
   const open = head.index + head[0].length - 1;
   let depth = 0;
@@ -344,13 +372,51 @@ export function addEntry(source: string, add: DirectAdd): { source: string; id: 
   if (close < 0) return undefined;
   const body = source.slice(open + 1, close);
   const used = new Set([...body.matchAll(/\bid\s*:\s*(["'])(.*?)\1/g)].map((m) => m[2]!));
-  const id = add.id && !used.has(add.id) ? add.id : newId(add.text, add.kind, used);
-  const key = add.kind === "note" ? "text" : "title";
+  const id = add.id && !used.has(add.id) ? add.id : newId(add.kind === "image" ? add.file.replace(/\.\w+$/, "") : add.text, add.kind, used);
+  const words = add.kind === "image" ? `file: ${JSON.stringify(add.file)}` : `${add.kind === "note" ? "text" : "title"}: ${JSON.stringify(add.text)}`;
   const size = `${add.width ? `, width: ${add.width}` : ""}${add.height ? `, height: ${add.height}` : ""}`;
-  const entry = `{ id: ${JSON.stringify(id)}, ${key}: ${JSON.stringify(add.text)}, x: ${add.x}, y: ${add.y}${size} },`;
+  const entry = `{ id: ${JSON.stringify(id)}, ${words}, x: ${add.x}, y: ${add.y}${size} },`;
   const empty = !body.trim();
   // After the last entry, adding a comma if it has none; into an empty array, on its own line.
   const at = open + 1 + body.trimEnd().length;
   const comma = !empty && !body.trimEnd().endsWith(",") ? "," : "";
   return { source: `${source.slice(0, at)}${comma}\n  ${entry}${empty ? "\n" : ""}${source.slice(at)}`, id };
+}
+
+/** One image as the registry lists it. */
+export type ListedImage = { id: string; file: string; x: number; y: number; width: number; height: number };
+
+/**
+ * The images the registry lists, read from its text. The page asks the dev server for
+ * them (images.ts), and a shared file gets them as it is built (share.config.mts), so
+ * neither needs main.tsx to pass them in. An entry that is not whole, or whose values
+ * are computed, is left out.
+ */
+export function listImages(source: string): ListedImage[] {
+  const head = new RegExp(`export const ${ARRAY.image}\\b[^=]*=\\s*\\[`).exec(source);
+  if (!head) return [];
+  const open = head.index + head[0].length;
+  const masked = mask(source.slice(open));
+  // Masked, the array's own entries are the only braces left before its closing bracket.
+  const close = masked.indexOf("]");
+  const found: ListedImage[] = [];
+  for (const match of masked.slice(0, close < 0 ? undefined : close).matchAll(/\{[^{}]*\}/g)) {
+    const body = source.slice(open + match.index, open + match.index + match[0].length);
+    const keys = mask(body.slice(1, -1));
+    const valueOf = (key: string) => {
+      const at = new RegExp(`(^|[^\\w$.])${key}\\s*:\\s*`).exec(keys);
+      return at ? body.slice(1 + at.index + at[0].length) : undefined;
+    };
+    const text = (key: string) => /^(["'])((?:(?!\1)[^\\])*)\1/.exec(valueOf(key) ?? "")?.[2];
+    const number = (key: string) => {
+      const value = /^-?\d+(\.\d+)?(?=\s*[,}])/.exec(valueOf(key) ?? "")?.[0];
+      return value === undefined ? undefined : Number(value);
+    };
+    const [id, file] = [text("id"), text("file")];
+    const [x, y, width, height] = [number("x"), number("y"), number("width"), number("height")];
+    if (!id || !ID.test(id) || !file || !IMAGE_FILE.test(file)) continue;
+    if (x === undefined || y === undefined || !width || !height || width < 0 || height < 0) continue;
+    found.push({ id, file, x, y, width, height });
+  }
+  return found;
 }

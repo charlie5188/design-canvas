@@ -1,4 +1,4 @@
-import type { CanvasItem, CanvasNote, CanvasSection } from "./canvas/types";
+import type { CanvasImage, CanvasItem, CanvasNote, CanvasSection } from "./canvas/types";
 import { Example } from "./items/Example";
 
 /**
@@ -15,6 +15,12 @@ export const notes: CanvasNote[] = [];
  * `{ id: "set-aside", title: "Set aside", x: 0, y: 300, width: 800, height: 400 }`
  */
 export const sections: CanvasSection[] = [];
+
+/**
+ * Reference images the person pasted or dropped onto the canvas. The canvas writes these
+ * and puts the files in images/; read a file when a note points at it.
+ */
+export const images: CanvasImage[] = [];
 
 /**
  * Add, rename, or remove canvas items here. The canvas reads these, the notes, and the sections, and nothing else.

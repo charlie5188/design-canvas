@@ -29,14 +29,14 @@
 // for the page to download. Only the canvas page may ask.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { access, chmod, constants, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { access, chmod, constants, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import type { Plugin } from "vite";
-import { AGENT_EVENT, AGENT_PATH, type AgentReply, EDIT_PATH, MAX_REPLY, NOTE_ID, PROPS_PATH, REPLY_EVENT, SHARE_PATH, THEME_PATH, VERSION_PATH } from "./channel.ts";
+import { AGENT_EVENT, AGENT_PATH, type AgentReply, EDIT_PATH, IMAGE_PATH, MAX_IMAGE_BYTES, MAX_REPLY, NOTE_ID, PROPS_PATH, REPLY_EVENT, SHARE_PATH, THEME_PATH, VERSION_PATH } from "./channel.ts";
 import { componentProps, sourceProps } from "./props-types.ts";
 import { standIns } from "./stand-ins.ts";
 import { readStylesheet, tailwindTheme } from "./tailwind-theme.ts";
-import { addEntry, applyEdits, type DirectAdd, type DirectEdit, type DirectRemove, placeableItems, removeEntry, validAdd, validEdit, validRemove } from "./registry-edit.ts";
+import { addEntry, applyEdits, type DirectAdd, type DirectEdit, type DirectRemove, listImages, placeableItems, removeEntry, validAdd, validEdit, validRemove } from "./registry-edit.ts";
 
 export type AgentState = "off" | "listening" | "working";
 /** What the page hears: `finished` only on the update that ends `handling` because the agent said done. */
@@ -111,13 +111,13 @@ function send(response: ServerResponse, status: number, body: string, type = "te
 }
 const sendJson = (response: ServerResponse, body: unknown) => send(response, 200, JSON.stringify(body), "application/json");
 
-function readBody(request: IncomingMessage): Promise<string> {
+function readBody(request: IncomingMessage, limit = MAX_BODY): Promise<string> {
   return new Promise((resolve, reject) => {
     let body = "";
     request.setEncoding("utf8");
     request.on("data", (chunk: string) => {
       body += chunk;
-      if (body.length > MAX_BODY) {
+      if (body.length > limit) {
         reject(new Error("too large"));
         request.destroy();
       }
@@ -483,6 +483,72 @@ function channel(): Plugin {
               (result) => sendJson(response, result),
               (error: unknown) => send(response, 500, error instanceof Error ? error.message : String(error)),
             );
+          },
+          () => send(response, 413, "Too large"),
+        );
+      });
+
+      // A pasted or dropped image. The page sends the picture and where it goes; the file is
+      // written into the canvas's images/ folder under a name made here, never one the page
+      // gives, and then listed in registry.tsx in the same queue as every other canvas edit.
+      // Removing an image only takes its entry out (EDIT_PATH): the file stays, so Undo can
+      // list it again, and nothing on disk is ever deleted from the page.
+      server.middlewares.use(IMAGE_PATH, (request, response, next) => {
+        // The images the registry lists, for the page to draw (images.ts).
+        if (request.method === "GET" && (request.url ?? "/") === "/") {
+          // A same-origin GET carries no Origin header, so the Host check alone applies; it reads only the image entries.
+          if (!localHost(request)) return send(response, 403, "Not allowed");
+          readFile(join(server.config.root, "registry.tsx"), "utf8").then(
+            (source) => sendJson(response, { images: listImages(source) }),
+            (error: unknown) => send(response, 500, error instanceof Error ? error.message : String(error)),
+          );
+          return;
+        }
+        if (request.method !== "POST" || (request.url ?? "/") !== "/") return next();
+        if (!fromCanvasPage(request)) return send(response, 403, "Not allowed");
+        // Base64 is a third longer than the bytes it carries.
+        readBody(request, Math.ceil(MAX_IMAGE_BYTES * 1.4) + 1024).then(
+          async (body) => {
+            let parsed: { data?: unknown; x?: unknown; y?: unknown; width?: unknown; height?: unknown } = {};
+            try {
+              parsed = JSON.parse(body) as typeof parsed;
+            } catch {
+              // Falls through to the 400 below.
+            }
+            const picture = typeof parsed.data === "string" ? /^data:image\/(png|jpeg|webp|gif);base64,([A-Za-z0-9+/]+=*)$/.exec(parsed.data) : null;
+            if (!picture) return send(response, 400, "Expected { data: a PNG, JPEG, WebP, or GIF data URL, x, y, width, height }");
+            const bytes = Buffer.from(picture[2]!, "base64");
+            if (!bytes.length || bytes.length > MAX_IMAGE_BYTES) return send(response, 413, "Too large");
+            const folder = join(server.config.root, "images");
+            const registry = join(server.config.root, "registry.tsx");
+            let written: string | undefined;
+            try {
+              await mkdir(folder, { recursive: true });
+              const taken = new Set((await readdir(folder)).map((name) => name.replace(/\.\w+$/, "")));
+              let n = 1;
+              while (taken.has(`image-${n}`)) n++;
+              const file = `image-${n}.${picture[1] === "jpeg" ? "jpg" : picture[1]}`;
+              const add = validAdd({ kind: "image", file, x: parsed.x, y: parsed.y, width: parsed.width, height: parsed.height });
+              if (!add) return send(response, 400, "Invalid image");
+              written = join(folder, file);
+              // "wx": never over a file that is already there.
+              await writeFile(written, bytes, { flag: "wx" });
+              const job = writing.then(async () => {
+                for (let attempt = 1; ; attempt++) {
+                  const original = await readFile(registry, "utf8");
+                  const added = addEntry(original, add);
+                  if (!added) throw new Error("registry.tsx has no place for images");
+                  if (await replaceFile(registry, added.source, original)) return added.id;
+                  if (attempt === EDIT_ATTEMPTS) throw new Error("registry.tsx kept changing while the canvas saved; try again");
+                }
+              });
+              writing = job.catch(() => {});
+              sendJson(response, { id: await job, file });
+            } catch (error) {
+              // A file with no entry would only be clutter.
+              if (written) await rm(written, { force: true }).catch(() => {});
+              send(response, 500, error instanceof Error ? error.message : String(error));
+            }
           },
           () => send(response, 413, "Too large"),
         );

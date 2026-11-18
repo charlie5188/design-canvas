@@ -19,7 +19,7 @@ export const labels = {
     {
       title: "Move around",
       rows: [
-        { what: "Pan", how: "Drag, or `Space` + drag" },
+        { what: "Pan", how: "Scroll, or `Space` + drag" },
         { what: "Zoom", how: "`⌘/Ctrl` + scroll" },
         { what: "Zoom to an area", how: "`Z` + drag" },
         { what: "Zoom in at a point", how: "`Z` + click" },
@@ -35,6 +35,9 @@ export const labels = {
       title: "Items",
       rows: [
         { what: "Move", how: "Drag the name" },
+        { what: "Select several", how: "Drag on empty canvas, or `Shift` + click", local: true },
+        { what: "Move or delete the selection", how: "Drag one of them, or `Delete`", local: true },
+        { what: "Add a reference image", how: "Paste it, or drop the file", local: true },
         { what: "Keep a move straight", how: "`Shift` + drag" },
         { what: "Resize", how: "Drag the border" },
         { what: "An item's actions", how: "Hover the item" },
@@ -311,6 +314,10 @@ export const labels = {
     `Update the design-canvas skill to its newest version (${latest}; this canvas has ${current}), then run its scripts/update.sh on this canvas folder: ${folder}. Check that the canvas still opens, and tell me what changed in one line.`,
   updateSent: "Sent to the agent",
   updateCopied: "Copied the update request. Paste it to the agent.",
+  deletedMany: (n: number) => `Removed ${n} from the canvas`,
+  imageLabel: "Reference image",
+  imageNotSaved: "Couldn't add the image. The dev server writes it into the canvas folder, so it must be running.",
+  imageUnreadable: "Couldn't read that image. Try a PNG or a JPEG.",
   noteDeleted: "Note deleted",
   sectionDeleted: "Section deleted",
   noteRestored: "Note put back",
