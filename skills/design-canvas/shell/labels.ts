@@ -111,6 +111,9 @@ export const labels = {
   moreHint: "More",
   /** One-press requests in a new note about a whole item. The words go into the note, to send or to change first. */
   quickAsks: [
+    // Flow is first: an item's screen count, the way into the flow view, shows only once the item
+    // has more than one screen, so this request is how people find that a flow can be asked for.
+    { label: "Flow", text: "Add the other screens of its flow." },
     { label: "Phone", text: "Show this at phone width." },
     { label: "States", text: "Add its empty, loading, and error states." },
     { label: "Languages", text: "Show this in the other languages the app has." },

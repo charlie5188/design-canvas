@@ -2503,7 +2503,7 @@ test("an item's actions sit at its top right: Ask with quick requests, Pick, and
     const note = page.getByRole('dialog', { name: 'Ask agent about Version B' })
     await expect(note).toBeVisible()
     const quick = note.getByRole('group', { name: 'Quick requests' })
-    await expect(quick.getByRole('button')).toHaveText(['Phone', 'States', 'Languages'])
+    await expect(quick.getByRole('button')).toHaveText(['Flow', 'Phone', 'States', 'Languages'])
     await quick.getByRole('button', { name: 'States' }).click()
     await expect(note.getByRole('textbox')).toHaveValue('Add its empty, loading, and error states.')
     await expect(note.getByRole('textbox')).toBeFocused()
