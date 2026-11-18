@@ -142,8 +142,8 @@ const TOAST_ACTION_MS = 8000;
 const FLIP_MARGIN = 16;
 const ADD_GAP = 96;
 const REVEAL_MARGIN = 48;
-/** The notice row that opens just above the toolbar. */
-const TOAST_ROW = 64;
+/** The notice row that opens under the top bars, at the top centre. */
+const TOAST_ROW = 48;
 const MIN_FIT_SIZE = 100;
 /** Room the top bars take, so a revealed or fitted item never sits under them. */
 const CHROME_TOP = 72;
@@ -1847,7 +1847,7 @@ function CanvasBoard({
     setSharing(true);
     try {
       const file = await downloadSharedFile();
-      // The panel opens where notices and the trash show.
+      // One of the share panel, the trash, and a notice at a time: on a narrow window they overlap.
       window.clearTimeout(toastTimer.current);
       setToast(null);
       setTrashOpen(false);
@@ -3801,11 +3801,11 @@ function CanvasBoard({
       const w = viewport.clientWidth;
       const h = viewport.clientHeight;
       const m = REVEAL_MARGIN;
-      // Revealed items stop above the toolbar and its notices, which would
-      // otherwise cover a new version just as it arrives.
+      // Revealed items stop above the toolbar, and below the top bars and the notice
+      // under them, which would otherwise cover a new version just as it arrives.
       const toolbar = viewport.parentElement?.querySelector(".canvas-toolbar")?.getBoundingClientRect();
-      const bottom = toolbar ? Math.max(m, viewport.getBoundingClientRect().bottom - toolbar.top + TOAST_ROW) : m;
-      const top = Math.max(m, CHROME_TOP);
+      const bottom = toolbar ? Math.max(m, viewport.getBoundingClientRect().bottom - toolbar.top + 16) : m;
+      const top = Math.max(m, CHROME_TOP + TOAST_ROW);
       const visible =
         bounds.minX * z + x >= m &&
         bounds.minY * z + y >= top &&
@@ -6004,60 +6004,9 @@ function CanvasBoard({
       <div ref={pickRef} className="canvas-pick" hidden aria-hidden="true" />
       <div ref={drawRef} className="canvas-draw" hidden aria-hidden="true" />
       <div ref={sizeTipRef} className="canvas-size-tip" hidden aria-hidden="true" />
-      {toast && (
-        <div className="canvas-toast">
-          {toast.kind === "copied" ? (
-            <span>{labels.copiedText(toast.text)}</span>
-          ) : toast.kind === "notice" ? (
-            <>
-              <span>{toast.text}</span>
-              {toast.action && (
-                <button
-                  type="button"
-                  className="canvas-button"
-                  onClick={() => {
-                    toast.action?.run();
-                    setToast(null);
-                  }}
-                >
-                  {toast.action.label}
-                </button>
-              )}
-            </>
-          ) : (
-            <>
-              <span className="canvas-subtle">{labels.copyFailed}</span>
-              {/* A list of annotations keeps its lines; one reference fits a field. */}
-              {toast.text.includes("\n") ? (
-                <textarea
-                  readOnly
-                  rows={4}
-                  value={toast.text}
-                  aria-label={labels.copyFailed}
-                  onFocus={(event) => event.currentTarget.select()}
-                  // biome-ignore lint/a11y/noAutofocus: the fallback appears only after a copy attempt.
-                  autoFocus
-                />
-              ) : (
-                <input
-                  readOnly
-                  value={toast.text}
-                  aria-label={labels.copyFailed}
-                  onFocus={(event) => event.currentTarget.select()}
-                  // biome-ignore lint/a11y/noAutofocus: the fallback appears only after a copy attempt.
-                  autoFocus
-                />
-              )}
-              <button type="button" className="canvas-button" onClick={() => setToast(null)}>
-                {labels.dismiss}
-              </button>
-            </>
-          )}
-        </div>
-      )}
-      {/* Four groups, each where designers expect it: tools at the bottom centre, the view bottom right, the
-          file's own controls top right, and the changes waiting for the agent, only when there are any, top
-          centre. The tools bar comes first: item reveals measure the first bar for the bottom margin. */}
+      {/* Controls where designers expect them: tools at the bottom centre, the view bottom right, the
+          file's own controls top right. What the canvas tells the person is at the top centre (see
+          canvas-messages below). The tools bar comes first: item reveals measure the first bar for the bottom margin. */}
       <div className="canvas-toolbar" data-place="tools" role="toolbar" aria-label={labels.toolsBar}>
           {/* One tool at a time. Interact is the default; Escape or V returns to it. */}
           <button
@@ -6178,7 +6127,7 @@ function CanvasBoard({
             aria-controls={trashOpen ? "canvas-trash" : undefined}
             data-tip={labels.trashHeading}
             onClick={() => {
-              // The trash opens where notices and the share panel show.
+              // One of the trash, the share panel, and a notice at a time: on a narrow window they overlap.
               setToast(null);
               setSharedFile(null);
               setTrashOpen((open) => !open);
@@ -6234,28 +6183,84 @@ function CanvasBoard({
         )}
         <Help />
       </div>
-      {/* Only while something is still to apply: the one place to apply or drop every change, so it is hard to miss.
-          What the agent is working on says so with a tag on each object instead. */}
-      {!shared && unsentCount > 0 && (
-        <div className="canvas-toolbar" data-place="pending" role="group" aria-label={labels.changesBar}>
-          {hasChanges && (
-            <button
-              type="button"
-              className="canvas-button"
-              aria-label={labels.discardChanges}
-              data-tip={labels.discardChanges}
-              onClick={discardChanges}
-            >
-              <EraserIcon />
-              {labels.discardShort}
+      {/* The one place the canvas tells the person something: the changes waiting for the agent, and
+          under them a notice for a few seconds. A notice never hides the bar: it often points at it
+          ("1 isn't sent yet"), and "Copied" then shows right under the button that copied. */}
+      <div className="canvas-messages">
+        {/* Only while something is still to apply: the one place to apply or drop every change, so it is hard to miss.
+            What the agent is working on says so with a tag on each object instead. */}
+        {!shared && unsentCount > 0 && (
+          <div className="canvas-toolbar" data-place="pending" role="group" aria-label={labels.changesBar}>
+            {hasChanges && (
+              <button
+                type="button"
+                className="canvas-button"
+                aria-label={labels.discardChanges}
+                data-tip={labels.discardChanges}
+                onClick={discardChanges}
+              >
+                <EraserIcon />
+                {labels.discardShort}
+              </button>
+            )}
+            <button type="button" className="canvas-button canvas-button-primary" onClick={() => void sendAnnotations()}>
+              {agentOn ? <SendIcon /> : <CopyIcon />}
+              {agentOn ? labels.sendAnnotations(unsentCount) : labels.copyAnnotations(unsentCount)}
             </button>
-          )}
-          <button type="button" className="canvas-button canvas-button-primary" onClick={() => void sendAnnotations()}>
-            {agentOn ? <SendIcon /> : <CopyIcon />}
-            {agentOn ? labels.sendAnnotations(unsentCount) : labels.copyAnnotations(unsentCount)}
-          </button>
-        </div>
-      )}
+          </div>
+        )}
+        {toast && (
+          <div className="canvas-toast">
+            {toast.kind === "copied" ? (
+              <span>{labels.copiedText(toast.text)}</span>
+            ) : toast.kind === "notice" ? (
+              <>
+                <span>{toast.text}</span>
+                {toast.action && (
+                  <button
+                    type="button"
+                    className="canvas-button"
+                    onClick={() => {
+                      toast.action?.run();
+                      setToast(null);
+                    }}
+                  >
+                    {toast.action.label}
+                  </button>
+                )}
+              </>
+            ) : (
+              <>
+                <span className="canvas-subtle">{labels.copyFailed}</span>
+                {/* A list of annotations keeps its lines; one reference fits a field. */}
+                {toast.text.includes("\n") ? (
+                  <textarea
+                    readOnly
+                    rows={4}
+                    value={toast.text}
+                    aria-label={labels.copyFailed}
+                    onFocus={(event) => event.currentTarget.select()}
+                    // biome-ignore lint/a11y/noAutofocus: the fallback appears only after a copy attempt.
+                    autoFocus
+                  />
+                ) : (
+                  <input
+                    readOnly
+                    value={toast.text}
+                    aria-label={labels.copyFailed}
+                    onFocus={(event) => event.currentTarget.select()}
+                    // biome-ignore lint/a11y/noAutofocus: the fallback appears only after a copy attempt.
+                    autoFocus
+                  />
+                )}
+                <button type="button" className="canvas-button" onClick={() => setToast(null)}>
+                  {labels.dismiss}
+                </button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
       {sharedFile && <SharePanel file={sharedFile.name} missing={sharedFile.missing} onClose={closeSharePanel} />}
       {flowItem && (
         <FlowView
