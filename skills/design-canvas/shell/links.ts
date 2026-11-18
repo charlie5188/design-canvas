@@ -69,16 +69,17 @@ export function useLinks({ shown, setFrontId, frontIdRef, positionsRef, worldRef
       const from = shown.find((item) => item.id === (fromId ?? frontIdRef.current));
       // Where the link goes, with its query (`?status=signed`), as the item will remember it.
       // A query alone (`router.push("?status=signed")`) stays on the screen the item shows.
-      const here = from ? (routesRef.current[from.id]?.[routesRef.current[from.id]!.length - 1] ?? from.path ?? "/") : "/";
+      const here = from ? (routesRef.current[from.id]?.[routesRef.current[from.id]!.length - 1] ?? from.start ?? from.path ?? "/") : "/";
       const location = locationOf(href, here);
       const path = location && pathPart(location);
       if (!location || !path) return notify(blank ? labels.newTabBlocked(named) : labels.linkBlocked(named));
-      // An item at its first screen that is sent to its first screen, with no query, has gone
-      // nowhere: nothing is noted, so it does not offer Restart for it.
+      // An item at its start that is sent to its start, with no other query, has gone
+      // nowhere: nothing is noted, so it does not offer Restart for it. The start is its
+      // first screen, or `start` when the agent set one (types.ts).
       const push = (item: CanvasItem) =>
         setRoutes((was) => {
           const stack = was[item.id] ?? [];
-          const first = !stack.length && screenAt(item, path) === item.component && !searchPart(location);
+          const first = !stack.length && (item.start ? location === item.start : screenAt(item, path) === item.component && !searchPart(location));
           if (stack[stack.length - 1] === location || first) return was;
           return { ...was, [item.id]: [...stack, location] };
         });
@@ -87,7 +88,7 @@ export function useLinks({ shown, setFrontId, frontIdRef, positionsRef, worldRef
         // so a path that reaches here from one is not its own.
         if (from && !from.viewport && screenAt(from, path)) {
           const stack = routesRef.current[from.id] ?? [];
-          const was = Math.max(0, screenIndex(from, stack[stack.length - 1] ?? from.path ?? ""));
+          const was = Math.max(0, screenIndex(from, stack[stack.length - 1] ?? from.start ?? from.path ?? ""));
           const to = screenIndex(from, path);
           const press = lastPress.current;
           const label = press && press.id === from.id && performance.now() - press.at < 1500 ? press.words : undefined;

@@ -5,7 +5,7 @@ description: Build or update a local design canvas of live, real product compone
 
 # Design canvas
 
-A freeform canvas of live previews: the app's real components, synthetic data, no backend. People pan, zoom, drag items by their name or grip, drag an item's border to resize it like an OS window (the new width and height are saved into `registry.tsx`), restart an item they have used, see every screen of a flow side by side, open an item alone in a new tab, move items to the trash and put them back, pick the version they choose (which sets the versions beside it aside), switch the app's themes, Alt/Option-click any element to copy a reference for the conversation, send you requests and questions straight from the canvas and read your answers beside their pins, add notes and sections that explain the canvas to whoever you share it with, and download the canvas as one HTML file to share. You change content in source files. The canvas shell is already built and tested, so never rebuild it.
+A freeform canvas of live previews: the app's real components, synthetic data, no backend. People pan, zoom, drag items by their name or grip, drag an item's border to resize it like an OS window (the new width and height are saved into `registry.tsx`), restart an item they have used, ask for an item to start at the moment they brought it to, see every screen of a flow side by side, open an item alone in a new tab, move items to the trash and put them back, pick the version they choose (which sets the versions beside it aside), switch the app's themes, Alt/Option-click any element to copy a reference for the conversation, send you requests and questions straight from the canvas and read your answers beside their pins, add notes and sections that explain the canvas to whoever you share it with, and download the canvas as one HTML file to share. You change content in source files. The canvas shell is already built and tested, so never rebuild it.
 
 Rules adapted from `create-canvas` in ibelick/ui-skills (MIT).
 
@@ -83,7 +83,7 @@ Before adding items, make one real app component render. Work through `reference
 
 Edit `registry.tsx` and `items/`. Leave `canvas/` as installed; shell fixes belong in the skill (see "Changing the shell").
 
-Each registry entry has a stable `id`, a unique readable `name` such as `Pricing card · compact`, an optional one-line `note`, `component`, `x`, `y`, `width`, `height`, and optional `viewport` and `from`. The canvas itself writes two more, `trashed` and `picked`, when the person trashes or picks an item.
+Each registry entry has a stable `id`, a unique readable `name` such as `Pricing card · compact`, an optional one-line `note`, `component`, `x`, `y`, `width`, `height`, and optional `viewport`, `from`, `path`, `screens`, `states`, and `start`. The canvas itself writes two more, `trashed` and `picked`, when the person trashes or picks an item.
 
 Write each entry out by hand, in `registry`, `notes`, and `sections` alike. Its `id`, `x`, `y`, `width`, and `height` must be plain literals (`id: "pricing-compact"`, `x: 440`), not built by a loop, `map`, template string, variable, or arithmetic. A spread of shared values, such as `...SIZE`, is fine: a saved size or position is written after it, so it takes effect. The canvas saves moves and resizes by finding the entry's literal `id` in `registry.tsx` and replacing those numbers in place; anything computed cannot be found, so the change is not saved and waits for the agent ("no plain id, or a computed value"). When several items are alike, write each one out instead of generating them.
 
@@ -140,9 +140,33 @@ A product's screens point at each other by path: `<Link href="/checkout">`, `rou
 - Add to `screens` only the screens that the interaction being tried passes through: its main path, and a branch (an error, a declined card) only when the request is about it. Leave every other link as it is in the code, without a screen: the page's navigation, header, footer, and links to settings, help, or other features. A click on one shows the notice, which tells the person it is outside this prototype. This holds for "the whole flow" too: the flow is the job from where it starts to where it ends, not every page a link can reach. When the request is about part of one screen, such as a dialog, a filter, or a form, the item usually needs no other screen. Each extra screen costs build time and adds a step to the flow view that nobody asked to judge. Add a screen when the person asks for it.
 - Only a link that opens a new tab in the product (`target="_blank"`) leaves the item: the view jumps to the nearest other item that shows that path and centres it, and the first item stays as it is. Place such an item beside the flow it belongs to.
 - One item is one solution: when a solution has a flow, keep all its screens in one item, and put the versions side by side, so the person tries each as a user would. An item with more than one screen shows how many beside its name, and a press there opens every screen side by side, with arrows for the links between them. List `screens` in the order a person goes through them, main path first, then each branch (an error, a declined card) after it: the main path is laid out in that order, and a screen that its previous one does not lead to goes in a row under the screen that does. From there the person can ask about one screen, which reaches you as `Name › screen /checkout`, about an element on it, as `Name › screen /checkout › button “Pay”`, or about the whole flow, as `Name › the whole flow (/plans → /checkout → /done)`: change that screen's component, or the flow's screens and their order. Add a screen as an item of its own only when the person asks to compare or comment on one step beside other items.
-- The person returns a flow to its start with Restart, beside the item's name. Nothing about the screen shown is saved: a reload starts every item at its first screen.
+- The person returns a flow to its start with Restart, beside the item's name. Nothing about the screen shown is saved: a reload starts every item at its start, its first screen or its `start` (see "Start here").
 - A router's `back()` returns to the screen before. `usePathname()` gives the path of the screen shown, `useSearchParams()` its query, and `useParams()` the values its `[param]` parts matched (`{ id: "msa-acme" }` on `/contracts/[id]`). So a filter kept in the URL (`router.push("/contracts?status=signed")`) works: the path decides the screen, and the item keeps the query, also through Back. `next/navigation` and React Router (6 or later) have stand-ins in the built-in kit, so a page component that uses `<Link>`, `NavLink`, `useNavigate`, `useParams`, or `useSearchParams` works as an item as it is. For another router (TanStack Router, for one), make its stand-in dispatch `NAVIGATE_EVENT` and `BACK_EVENT` from `canvas/bridge` and read `RouteContext` and `LocationContext` from `canvas/routes`, as `canvas/stand-ins/next-navigation.ts` does; set it per screen through `ScreenRouter` when its components need a router around them, as `canvas/stand-ins/react-router.tsx` does.
 - Not handled: hashes, `window.open`, and a path only the server knows, such as a redirect.
+
+### Start here
+
+Every item opens at its first screen, so versions can be compared from the same point. When they differ only in a later step, such as one screen of a flow, an open dialog, or a filled form, that point hides the difference, and the person clicks back to it after each Restart or reload. So once an item has left its start, its More menu has **Start here**. It opens a note on the whole item, which the person can change before sending:
+
+```text
+1. Upgrade · stacked
+   Start here: make this item, and the versions it is compared with, start where it is now.
+   Screen: /checkout?plan=pro
+   After:
+   1. Pressed “Upgrade”
+   2. Typed “Acme” in “Company”
+   3. Pressed “Continue”
+```
+
+`Screen` is the screen the item showed, and `After` lists what the person did since the item's start: presses and keys that changed something, and the last value typed or chosen in each field. Make the item open exactly there, in code, so Restart, a reload, the item's own page, and the shared file all open there:
+
+- A later screen: set `start` on the item to that screen's path, with its query if it has one: `start: "/checkout?plan=pro"`. Keep `component`, `path`, and `screens` as they are: the flow view still lays out every screen from the first, and a link back to an earlier screen still works.
+- Something open or filled in on that screen: give it to the screen as data, through props the component already has (`defaultOpen`, `defaultValue`, a selected tab) or the item's synthetic data and providers. Wrap the screen in `items/` to pass them, and use the wrapper as that screen: `component`, or its entry in `screens`.
+- Only when no prop or data can do it: a few of the listed steps run once when the screen mounts, in that wrapper. Say so in the item's `note` (`Starts by pressing “Upgrade”`), because a change to the component can break them.
+- Do not add a prop to a product component only for a start without saying so. When it needs one, reply which component and prop, and leave that item as it was until the person agrees.
+- The versions it is compared with: the items linked to it by `from` (the item it was made from, the items made from it, and the other items made from the same one), and the items in the same section. Start each of them at the same point, with its own components: its steps can have other words. A version that has no such point, such as one that never opens that dialog, stays as it is.
+- Reply on the note with the items that now start there and any that do not, and why, in one or two sentences, also when everything went as asked. The item can look as it did when the person sent the note, so the pin does not clear by itself.
+- To take a start back, when the person asks, remove `start` and the wrapper.
 
 ### Planned directions
 
@@ -223,7 +247,7 @@ A note is not always a request. People also ask, at the thing they are looking a
 
 - **A question.** Change nothing for it, and add no new version, also when its item is on the message's last line. Answer on its pin.
 - **A change you could not make, or made in another way.** Reply on its pin: what you did, and why, in one or two sentences. The person reads the reason at the thing it is about, not in the chat.
-- **A change you made as asked.** Do not reply. Its pin clears by itself when the item changes, and that is the answer.
+- **A change you made as asked.** Do not reply. Its pin clears by itself when the item changes, and that is the answer. A Start here note is the exception (see "Start here").
 
 Reply with the note's id, from the last line of its entry:
 

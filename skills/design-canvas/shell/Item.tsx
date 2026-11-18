@@ -5,12 +5,13 @@ import { type Annotation, fingerprintItem } from "./annotations";
 import { type BoardEdge, DiscardButton, SAVE_OVERDUE_MS, useOverdue, WorkingBeam, WorkingTag } from "./Board";
 import { frameUrl, hasAddress } from "./bridge";
 import type { Fresh } from "./fresh";
-import { AnnotateIcon, CopyIcon, GripIcon, Icon, MoreIcon, OpenIcon, PickIcon, RestartIcon, RouteIcon, StatesIcon, TrashIcon } from "./icons";
+import { AnnotateIcon, CopyIcon, GripIcon, Icon, MoreIcon, OpenIcon, PickIcon, RestartIcon, RouteIcon, StartHereIcon, StatesIcon, TrashIcon } from "./icons";
 import { labels } from "./labels";
 import type { Position } from "./layout";
 import type { MoveSent } from "./marks";
 import { ItemFrame, Preview } from "./Preview";
 import { LocationContext, locationIn, pathPart, RouteContext, ScreenRouter, screenAt, screensOf, stateCount } from "./routes";
+import { Trail } from "./start";
 import type { CanvasItem } from "./types";
 
 const MOVE_STEP = 8;
@@ -25,10 +26,13 @@ function ItemMore({
   item,
   onTrash,
   onCopyName,
+  onStartHere,
 }: {
   item: CanvasItem;
   onTrash?: (item: CanvasItem) => void;
   onCopyName?: (name: string) => void;
+  /** Present once the item has left its start (start.ts). */
+  onStartHere?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLSpanElement>(null);
@@ -63,6 +67,22 @@ function ItemMore({
       </button>
       {open && (
         <span className="canvas-item-menu" role="group" aria-label={labels.more(item.name)}>
+          {/* First: when it shows, the person has just brought the item somewhere, and this is
+              the one entry about where it is now. Seldom used, so in the menu, not beside Restart. */}
+          {onStartHere && (
+            <button
+              type="button"
+              className="canvas-item-menu-entry"
+              aria-label={labels.startHere(item.name)}
+              onClick={() => {
+                setOpen(false);
+                onStartHere();
+              }}
+            >
+              <StartHereIcon />
+              {labels.startHereHint}
+            </button>
+          )}
           {/* A new tab keeps the canvas, its camera, and preview state intact.
               A shared file shown inside another page has no address to open. */}
           {hasAddress && (
@@ -199,6 +219,7 @@ export function CanvasItemView({
   onTrash,
   onCopyName,
   onAsk,
+  onStartHere,
   route,
   onRestart,
   onFlow,
@@ -232,6 +253,8 @@ export function CanvasItemView({
   onCopyName?: (name: string) => void;
   /** Opens a note about the whole item. Absent in a shared file, which has no agent. */
   onAsk?: (item: CanvasItem) => void;
+  /** Opens a "Start here" note on the item with these words (start.ts). Absent in a shared file. */
+  onStartHere?: (item: CanvasItem, text: string) => void;
   /** The path of the screen a plain item shows now, when a link took it past its first one (routes.ts). */
   route?: string;
   /** Restart: the item goes back to its first screen. */
@@ -286,6 +309,8 @@ export function CanvasItemView({
   const [used, setUsed] = useState(false);
   const previewRef = useRef<HTMLDivElement>(null);
   const before = useRef<string | undefined>(undefined);
+  // What the person did since the item's start, for Start here (start.ts).
+  const trail = useRef(new Trail());
   const stateOf = useCallback(() => {
     const preview = previewRef.current;
     const print = fingerprintItem(preview);
@@ -320,7 +345,18 @@ export function CanvasItemView({
       }
     };
     const heard: [EventTarget, string, () => void][] = [];
-    const hear = (target: EventTarget) => {
+    // Each run starts at the item's start, so it starts with no steps.
+    trail.current.reset();
+    const unhear: (() => void)[] = [];
+    const frameRoot = () => {
+      try {
+        return preview.querySelector<HTMLIFrameElement>("iframe[data-canvas-frame]")?.contentDocument?.querySelector(".canvas-frame-root");
+      } catch {
+        return null;
+      }
+    };
+    const hear = (target: EventTarget, root: () => Element | null | undefined = () => preview) => {
+      unhear.push(trail.current.listen(target, root, stateOf));
       for (const [type, handler] of [
         ["pointerdown", touch],
         ["keydown", touch],
@@ -338,15 +374,21 @@ export function CanvasItemView({
     const frame = preview.querySelector<HTMLIFrameElement>("iframe[data-canvas-frame]");
     const hearFrame = () => {
       try {
-        if (frame?.contentDocument) hear(frame.contentDocument);
+        if (frame?.contentDocument) hear(frame.contentDocument, frameRoot);
       } catch {
         // Not readable: this item gets no Restart.
       }
     };
     hearFrame();
-    frame?.addEventListener("load", hearFrame);
+    // A frame that loads again is at its start again (a hot update can reload it).
+    const frameLoaded = () => {
+      trail.current.reset();
+      hearFrame();
+    };
+    frame?.addEventListener("load", frameLoaded);
     return () => {
-      frame?.removeEventListener("load", hearFrame);
+      frame?.removeEventListener("load", frameLoaded);
+      for (const stop of unhear) stop();
       for (const [target, type, handler] of heard) target.removeEventListener(type, handler, true);
       for (const timer of timers) window.clearTimeout(timer);
     };
@@ -357,8 +399,24 @@ export function CanvasItemView({
     setRun((n) => n + 1);
     onRestart(item.id);
   };
+  // Start here: the note names the screen shown and what led to it. A frame keeps its own
+  // screen and says which on its document (FrameHost.tsx); a plain item's is `route`.
+  const startHere = () => {
+    let screen = route ?? item.start ?? item.path;
+    if (item.viewport) {
+      try {
+        screen = previewRef.current?.querySelector<HTMLIFrameElement>("iframe[data-canvas-frame]")?.contentDocument?.documentElement.dataset.canvasScreen || screen;
+      } catch {
+        // Not readable: the item's own path stands for it.
+      }
+    }
+    const { steps, earlier } = trail.current.lines();
+    onStartHere?.(item, labels.startHereNote(screen, steps, earlier));
+  };
   // The screen shown: the item's own component, or the one a link inside it led to.
-  const Shown = (route && screenAt(item, route)) || item.component;
+  // With no route yet, the item is at its start: `start` when the agent set one (types.ts).
+  const at = route ?? item.start;
+  const Shown = (at && screenAt(item, at)) || item.component;
   // The app's router around it, when its components need one (routes.ts ScreenRouter).
   const Router = useContext(ScreenRouter);
   const screenCount = screensOf(item).length;
@@ -484,7 +542,7 @@ export function CanvasItemView({
                 <PickIcon />
               </button>
             )}
-            <ItemMore item={item} onTrash={onTrash} onCopyName={onCopyName} />
+            <ItemMore item={item} onTrash={onTrash} onCopyName={onCopyName} onStartHere={(used || !!route) && onStartHere ? startHere : undefined} />
           </span>
         </span>
         {caption && <ItemCaption text={caption} editable={editable} onSave={(text) => onCaption(item, text)} />}
@@ -501,8 +559,8 @@ export function CanvasItemView({
           ) : (
             // The path, query, and params are there for a router stand-in's `usePathname`,
             // `useSearchParams`, and `useParams`. A frame provides its own.
-            <RouteContext.Provider value={route ? pathPart(route) : (item.path ?? null)}>
-              <LocationContext.Provider value={route || item.path ? locationIn(item, route ?? item.path ?? "") : null}>
+            <RouteContext.Provider value={at ? pathPart(at) : (item.path ?? null)}>
+              <LocationContext.Provider value={at || item.path ? locationIn(item, at ?? item.path ?? "") : null}>
                 {Router ? (
                   <Router>
                     <Preview key={run} component={Shown} />

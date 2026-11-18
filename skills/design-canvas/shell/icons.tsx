@@ -99,6 +99,12 @@ const SHAPES = {
       <path d="M15 4h5v5" />
     </>
   ),
+  flag: (
+    <>
+      <path d="M5 5a5 5 0 0 1 7 0a5 5 0 0 0 7 0v9a5 5 0 0 1 -7 0a5 5 0 0 0 -7 0v-9z" />
+      <path d="M5 21v-7" />
+    </>
+  ),
   folder: (
     <path d="M5 4h4l3 3h7a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-11a2 2 0 0 1 2 -2" />
   ),
@@ -292,6 +298,7 @@ export const ReplyIcon = () => <Icon name="message-circle" size={14} />;
 export const QueuedIcon = () => <Icon name="clock" size={14} />;
 export const HelpIcon = () => <Icon name="help" />;
 export const RestartIcon = () => <Icon name="player-skip-back" />;
+export const StartHereIcon = () => <Icon name="flag" />;
 export const MoreIcon = () => <Icon name="dots" />;
 export const RouteIcon = () => <Icon name="route" size={14} />;
 export const StatesIcon = () => <Icon name="stack-2" size={14} />;

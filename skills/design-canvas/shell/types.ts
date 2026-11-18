@@ -36,6 +36,14 @@ export type CanvasItem = {
    */
   screens?: Record<string, ComponentType>;
   /**
+   * The screen the item opens at, when the comparison is about a later step of its
+   * flow: one of its `screens` paths, with a query if it needs one
+   * ("/checkout?plan=pro"). The canvas, a reload, Restart, and the item's own page
+   * all start there; the flow view still lays out every screen from the first.
+   * Written by the agent for a "Start here" note (SKILL.md).
+   */
+  start?: string;
+  /**
    * More states of a screen, by the screen's path and then by name: empty, an error, loading,
    * a long name. They are part of this item, not versions of it: the flow view shows them on
    * their screen, to switch between, and the canvas shows only the first state. The item's own
