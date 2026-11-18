@@ -445,8 +445,8 @@ body,
   pointer-events: none;
 }
 /* Fixed controls in four groups, each where a design tool puts it: tools at the
-   bottom centre, the view bottom right, trash bottom left, and the file's own
-   controls top right. The bottom holds only controls. What the canvas tells the
+   bottom centre, the view bottom right, and the file's own controls (trash,
+   share, settings, help) top right. The bottom holds only controls. What the canvas tells the
    person is at the top centre (.canvas-messages): the changes waiting for the
    agent, and notices. */
 .canvas-toolbar,
@@ -473,9 +473,6 @@ body,
 }
 .canvas-toolbar[data-place="view"] {
   inset-inline-end: 16px;
-}
-.canvas-toolbar[data-place="trash"] {
-  inset-inline-start: 16px;
 }
 .canvas-toolbar[data-place="top"] {
   inset-block: 16px auto;
@@ -516,7 +513,7 @@ body,
 .canvas-toolbar[data-place="top"] [data-tip]:focus-visible::after {
   inset-inline: auto 0;
 }
-.canvas-toolbar[data-place="top"] .canvas-icon-button[data-tip]::after,
+.canvas-toolbar[data-place="top"] [data-tip]::after,
 .canvas-toolbar[data-place="pending"] [data-tip]::after {
   inset-block: calc(100% + 8px) auto;
 }
@@ -1129,23 +1126,29 @@ html[data-canvas-alt] .canvas-frame-root * {
   inline-size: 360px;
   user-select: all;
 }
-/* Trash: opens above the toolbar like a Dock stack. Each entry is a live,
-   scaled-down preview of the trashed item with its name; the whole entry puts
-   it back. */
+/* Trash: opens under its button in the top bar, where the share panel opens. Each
+   entry is a live, scaled-down preview of the trashed item with its name; the whole
+   entry puts it back. */
 /* Its hint would sit on the open trash. */
 .canvas-trash-button[aria-expanded="true"]::after {
   content: none;
 }
+.canvas-trash-popover,
+.canvas-share-popover {
+  /* Over the Inspect panel (z-index 5), which takes the same corner. */
+  z-index: 6;
+}
 .canvas-trash-popover {
   position: fixed;
-  inset-block-end: 64px;
-  inset-inline-start: 16px;
+  inset-block-start: 64px;
+  inset-inline-end: 16px;
   display: flex;
   flex-direction: column;
   gap: 8px;
   box-sizing: border-box;
   max-inline-size: calc(100vw - 32px);
-  max-block-size: min(480px, calc(100vh - 96px));
+  /* Clear of the bars at the bottom. */
+  max-block-size: min(480px, calc(100vh - 64px - 76px));
   padding: 10px;
   border: 1px solid var(--canvas-border-color);
   border-radius: var(--canvas-radius-l);

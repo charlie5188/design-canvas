@@ -1847,7 +1847,7 @@ function CanvasBoard({
     setSharing(true);
     try {
       const file = await downloadSharedFile();
-      // One of the share panel, the trash, and a notice at a time: on a narrow window they overlap.
+      // One of the share panel, the trash, and a notice at a time: they open in the same corner.
       window.clearTimeout(toastTimer.current);
       setToast(null);
       setTrashOpen(false);
@@ -6125,28 +6125,9 @@ function CanvasBoard({
           <ResetIcon />
         </button>
       </div>
-      {!shared && trashedItems.length > 0 && (
-        <div className="canvas-toolbar" data-place="trash" role="toolbar" aria-label={labels.trashHeading}>
-          <button
-            ref={trashButtonRef}
-            type="button"
-            className="canvas-button canvas-trash-button"
-            aria-label={labels.trash(trashedItems.length)}
-            aria-expanded={trashOpen}
-            aria-controls={trashOpen ? "canvas-trash" : undefined}
-            data-tip={labels.trashHeading}
-            onClick={() => {
-              // One of the trash, the share panel, and a notice at a time: on a narrow window they overlap.
-              setToast(null);
-              setSharedFile(null);
-              setTrashOpen((open) => !open);
-            }}
-          >
-            <TrashIcon />
-            {trashedItems.length}
-          </button>
-        </div>
-      )}
+      {/* The file's own controls, top right, in two groups: what is in the file (the trash, while it
+          holds something, and share), then the canvas itself (settings, help). The trash comes and goes
+          at the group's left end, so nothing under the pointer moves. */}
       <div className="canvas-toolbar" data-place="top" role="toolbar" aria-label={labels.canvasBar}>
         {theme && theme.options.length > 1 && (
           <>
@@ -6171,9 +6152,28 @@ function CanvasBoard({
             <span className="canvas-separator" aria-hidden="true" />
           </>
         )}
-        <SettingsMenu value={background} onChange={setBackground} />
         {!shared && (
           <>
+            {trashedItems.length > 0 && (
+              <button
+                ref={trashButtonRef}
+                type="button"
+                className="canvas-button canvas-trash-button"
+                aria-label={labels.trash(trashedItems.length)}
+                aria-expanded={trashOpen}
+                aria-controls={trashOpen ? "canvas-trash" : undefined}
+                data-tip={labels.trashHeading}
+                onClick={() => {
+                  // One of the trash, the share panel, and a notice at a time: they open in the same corner.
+                  setToast(null);
+                  setSharedFile(null);
+                  setTrashOpen((open) => !open);
+                }}
+              >
+                <TrashIcon />
+                {trashedItems.length}
+              </button>
+            )}
             {/* While the file builds, the icon pulses and the button takes no second click. */}
             <button
               ref={shareButtonRef}
@@ -6190,6 +6190,7 @@ function CanvasBoard({
             <span className="canvas-separator" aria-hidden="true" />
           </>
         )}
+        <SettingsMenu value={background} onChange={setBackground} />
         <Help />
       </div>
       {/* The one place the canvas tells the person something: the changes waiting for the agent, and
