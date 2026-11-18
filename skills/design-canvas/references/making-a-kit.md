@@ -38,7 +38,7 @@ Public variables (`NEXT_PUBLIC_*`, `VITE_*`) from the app's `.env` files reach t
 
 ## 6. Framework-only modules
 
-For Next.js apps these are swapped for stand-ins in `mocks/` automatically:
+For Next.js apps these are swapped for the shell's stand-ins (`canvas/stand-ins/`) automatically, also in a canvas installed before them once it is updated:
 - `next/link`, `next/image`, `next/navigation` (with the query and `[param]` values of the item's screen), `next/dynamic`, `next/script`, and `next/head`.
 - `next/cache`, `next/headers`, and `server-only`, which do nothing on the canvas.
 - A file that starts with `"use server"`: each server action in it becomes a stand-in that saves nothing and resolves after a moment, so a client component that calls one (a form's `action`, a button's handler) still renders and shows its pending state.
@@ -47,9 +47,9 @@ Router calls such as `router.push` stay on the canvas with a notice.
 
 A page that is a server component (an `async` page that loads its own data, `next/headers`, `cookies()`, route handlers) cannot render on the canvas. Put its few lines of page markup in the item, around the client components beneath it, and pass them the data as props from a file in the canvas folder (`items/contracts-data.ts`). Do not import the page itself.
 
-For React Router (6 or later) the installer gives each item its own router, driven by the canvas (`mocks/react-router.tsx`, set in `providers.tsx`): `<Link>`, `NavLink`, `useNavigate`, `useParams`, `useSearchParams`, and `useLocation` work, so a page component can be an item as it is. A data router's loaders and actions (`useLoaderData`, `useActionData`) do not run, since they reach the backend: render the component beneath them and pass the data as props, as for a Next.js server page.
+For React Router (6 or later) the installer gives each item its own router, driven by the canvas (`canvas/stand-ins/react-router.tsx`, set in `providers.tsx`): `<Link>`, `NavLink`, `useNavigate`, `useParams`, `useSearchParams`, and `useLocation` work, so a page component can be an item as it is. A data router's loaders and actions (`useLoaderData`, `useActionData`) do not run, since they reach the backend: render the component beneath them and pass the data as props, as for a Next.js server page.
 
-Other frameworks (Remix, Gatsby, Expo web): alias each framework-only module to a small mock in `mocks/` the same way. To make a mocked navigation stay on the canvas, dispatch `design-canvas:navigate` with the URL as `detail`, as `mocks/next-navigation.ts` does.
+Other frameworks (Remix, Gatsby, Expo web): alias each framework-only module to a small mock in `mocks/` the same way (an alias of yours wins over a shell stand-in for the same module). To make a mocked navigation stay on the canvas, dispatch `design-canvas:navigate` with the URL as `detail`, as `canvas/stand-ins/next-navigation.ts` does.
 
 ## 7. Themes
 

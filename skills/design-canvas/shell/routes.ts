@@ -29,7 +29,7 @@ import type { CanvasItem } from "./types";
 
 /**
  * The path that the item around a component shows now, for a router stand-in's
- * `usePathname` (kits/react-vite/mocks/next-navigation.ts). Null where the item names no path.
+ * `usePathname` (stand-ins/next-navigation.ts). Null where the item names no path.
  */
 export const RouteContext = createContext<string | null>(null);
 
@@ -44,7 +44,7 @@ export const LocationContext = createContext<Location | null>(null);
 /**
  * A router the app's components need around them (React Router's `<Link>` and hooks throw
  * outside one), set by the kit's providers.tsx: each screen of an item is rendered inside it,
- * inside the item's location (kits/react-vite/mocks/react-router.tsx). Null for none.
+ * inside the item's location (stand-ins/react-router.tsx). Null for none.
  */
 export const ScreenRouter = createContext<ComponentType<{ children: ReactNode }> | null>(null);
 

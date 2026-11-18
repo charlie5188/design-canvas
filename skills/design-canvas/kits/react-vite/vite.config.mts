@@ -75,71 +75,9 @@ function pathAliases(): Alias[] {
   return [];
 }
 
-// Next.js modules that only work inside Next are swapped for small stand-ins.
+// Framework modules that cannot run here (Next.js, React Router) have stand-ins in the shell,
+// wired by agentChannel() (canvas/stand-ins.ts). Your own go in mocks/, aliased below.
 const pkg = readJsonc(resolve(appDir, "package.json"));
-const usesNext = Boolean(pkg.dependencies?.next ?? pkg.devDependencies?.next);
-const mock = (file: string) => resolve(canvasDir, "mocks", file);
-const nextAliases: Alias[] = usesNext
-  ? [
-      { find: /^next\/link$/, replacement: mock("next-link.tsx") },
-      { find: /^next\/image$/, replacement: mock("next-image.tsx") },
-      { find: /^next\/navigation$/, replacement: mock("next-navigation.ts") },
-      { find: /^next\/dynamic$/, replacement: mock("next-dynamic.tsx") },
-      { find: /^next\/(script|head)$/, replacement: mock("next-script.tsx") },
-      // Server modules a client component reaches through a server action: no server here.
-      { find: /^next\/cache$/, replacement: mock("next-cache.ts") },
-      { find: /^next\/headers$/, replacement: mock("next-headers.ts") },
-      { find: /^server-only$/, replacement: mock("empty.ts") },
-    ]
-  : [];
-
-// A file that starts with "use server" holds server actions. Imported by a client component
-// (a form's action, a button's handler), it would bring server code into the page, which
-// fails and leaves the whole canvas blank. On the canvas each action becomes a stand-in that
-// saves nothing, waits a moment so a pending state shows, and says so in the console.
-const USE_SERVER = /^(?:\s|\/\/[^\n]*\n|\/\*[\s\S]*?\*\/)*["']use server["']/;
-const serverActions: Plugin = {
-  name: "design-canvas:server-actions",
-  enforce: "pre",
-  transform(code, id) {
-    if (!usesNext || id.includes("node_modules") || !/\.[cm]?[jt]sx?$/.test(id.split("?")[0]!) || !USE_SERVER.test(code)) return;
-    const names = new Set<string>();
-    for (const match of code.matchAll(/export\s+(?:async\s+)?function\s*\*?\s*([\w$]+)/g)) names.add(match[1]!);
-    for (const match of code.matchAll(/export\s+(?:const|let|var)\s+([\w$]+)/g)) names.add(match[1]!);
-    for (const match of code.matchAll(/export\s*\{([^}]*)\}/g)) {
-      for (const part of match[1]!.split(",")) {
-        const name = part.split(/\s+as\s+/).pop()?.trim();
-        if (name && name !== "default") names.add(name);
-      }
-    }
-    const lines = [
-      "const stub = (name) => async () => {",
-      "  console.info(`design-canvas: the server action ${name} does not run on the canvas.`);",
-      "  await new Promise((resolve) => setTimeout(resolve, 300));",
-      "};",
-      ...[...names].map((name) => `export const ${name} = stub(${JSON.stringify(name)});`),
-      /export\s+default\b/.test(code) ? `export default stub("default");` : "",
-    ];
-    return { code: lines.join("\n"), map: null };
-  },
-};
-
-// next/font runs in Next's compiler only; on the canvas every font is a no-op.
-const nextFont: Plugin = {
-  name: "design-canvas:next-font",
-  enforce: "pre",
-  transform(code, id) {
-    if (!usesNext || id.includes("node_modules") || !code.includes("next/font/")) return;
-    return code.replace(
-      /import\s+(?:(\w+)\s*,?\s*)?(?:\{([^}]*)\})?\s*from\s*["']next\/font\/(?:google|local)["'];?/g,
-      (_match, defaultName: string | undefined, named: string | undefined) =>
-        [defaultName, ...(named ?? "").split(",").map((part) => part.split(/\s+as\s+/).pop()?.trim())]
-          .filter(Boolean)
-          .map((name) => `const ${name} = () => ({ className: "", variable: "", style: {} });`)
-          .join("\n"),
-    );
-  },
-};
 
 // Vite apps: reuse the app's own React, Tailwind, and SVG plugins. Framework
 // plugins (routers, SSR, PWA) stay out; they expect the app's entry and routes.
@@ -224,11 +162,11 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => {
     // Root-relative assets such as "/logo.svg" come from the app's public folder.
     publicDir: existsSync(resolve(appDir, "public")) ? resolve(appDir, "public") : false,
     // agentChannel: the page sends annotations straight to an agent running scripts/listen.sh.
-    plugins: [agentChannel(), nextFont, serverActions, tailwindSources, ...reused, ...(await tailwindPlugins(reused))],
+    plugins: [agentChannel(), tailwindSources, ...reused, ...(await tailwindPlugins(reused))],
     // The app's PostCSS setup, such as Tailwind; Vite would otherwise search from the canvas folder.
     css: { postcss: appDir },
     define: { "process.env": JSON.stringify({ NODE_ENV: "development", ...env }) },
-    resolve: { alias: [...nextAliases, ...pathAliases()], dedupe: ["react", "react-dom"] },
+    resolve: { alias: [...pathAliases()], dedupe: ["react", "react-dom"] },
     ...automaticJsx,
     // Each canvas has its own port, picked at install from its folder path. Strict:
     // moving to the next free port would let an open tab of one canvas reload

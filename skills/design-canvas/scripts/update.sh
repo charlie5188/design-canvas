@@ -42,6 +42,35 @@ channel_note() {
     echo "This canvas cannot send annotations to the agent yet: add agentChannel() from ./canvas/agent-channel.ts to the plugins in its vite config, and allowImportingTsExtensions and noEmit to its tsconfig, as kits/react-vite does."
 }
 
+# Kit files belong to the canvas and are never replaced; say what an older canvas still needs
+# from the kit's newer setup, for the agent to do (and the user to approve, where it is the app).
+kit_notes() {
+  local app_rel app parent
+  app_rel="$(sed -nE 's/^const appDir = resolve\(canvasDir, "([^"]*)"\);.*/\1/p' "$dir"/vite.config.* 2>/dev/null | head -1)"
+  app="$(cd "$dir/${app_rel:-../..}" 2>/dev/null && pwd)" || return 0
+  [[ -f "$app/package.json" ]] || return 0
+  parent="$(perl -MFile::Spec -e 'print File::Spec->abs2rel($ARGV[0], $ARGV[1])' "$(cd "$dir/.." && pwd)" "$app")"
+  node "$skill_dir/scripts/check-app.mjs" "$app" "${parent%%/*}" | while IFS= read -r line; do if [[ -n "$line" ]]; then echo "$line"; fi; done
+  # A canvas's tsconfig.json extends the app's; once the app leaves the canvas folder out, the
+  # canvas's type check finds no files unless the canvas sets its own exclude.
+  if [[ -f "$dir/tsconfig.json" ]] && ! grep -qs '"exclude"' "$dir/tsconfig.json" &&
+    grep -qs "\"${parent%%/*}\"" "$app/tsconfig.json"; then
+    echo "The app's tsconfig.json leaves ${parent%%/*} out, so this canvas's type check finds no files: add \"exclude\": [\"./node_modules\"] to $dir/tsconfig.json."
+  fi
+  # The stand-ins moved from the kit's mocks/ into the shell (canvas/stand-ins/), which now takes their place.
+  local old
+  old="$(cd "$dir" && ls mocks/next-*.ts mocks/next-*.tsx mocks/empty.ts mocks/react-router.tsx 2>/dev/null | tr '\n' ' ')"
+  if [[ -n "$old" ]]; then
+    echo "The shell's stand-ins (canvas/stand-ins/) now replace ${old% }: delete them unless you changed one on purpose."
+  fi
+  if grep -qs '"./mocks/react-router"' "$dir/providers.tsx"; then
+    echo "In providers.tsx, import CanvasRouter from \"./canvas/stand-ins/react-router\" instead of \"./mocks/react-router\"."
+  elif node -e 'const p = require(process.argv[1]); const d = { ...p.devDependencies, ...p.dependencies }; process.exit(["react-router", "react-router-dom"].some((n) => Number(String(d[n] || "").replace(/[^0-9.]/g, "").split(".")[0]) >= 6) ? 0 : 1)' "$app/package.json" &&
+    ! grep -qs "ScreenRouter" "$dir/providers.tsx"; then
+    echo "The app uses React Router: give each item a router driven by the canvas. In providers.tsx, import { ScreenRouter } from \"./canvas/routes\" and { CanvasRouter } from \"./canvas/stand-ins/react-router\", and wrap the children in <ScreenRouter.Provider value={CanvasRouter}>."
+  fi
+}
+
 if [[ -z "$changes" ]]; then
   echo "The canvas is already up to date: $dir"
 else
@@ -51,4 +80,5 @@ fi
 # Written after the sync, so a canvas that was already current still learns its version.
 cp "$skill_dir/VERSION" "$dir/canvas/VERSION"
 channel_note
+kit_notes || true
 bash "$skill_dir/scripts/check-version.sh" || true

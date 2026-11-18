@@ -34,6 +34,7 @@ import { basename, dirname, join } from "node:path";
 import type { Plugin } from "vite";
 import { AGENT_EVENT, AGENT_PATH, type AgentReply, EDIT_PATH, MAX_REPLY, NOTE_ID, PROPS_PATH, REPLY_EVENT, SHARE_PATH, THEME_PATH, VERSION_PATH } from "./channel.ts";
 import { componentProps, sourceProps } from "./props-types.ts";
+import { standIns } from "./stand-ins.ts";
 import { readStylesheet, tailwindTheme } from "./tailwind-theme.ts";
 import { addEntry, applyEdits, type DirectAdd, type DirectEdit, type DirectRemove, placeableItems, removeEntry, validAdd, validEdit, validRemove } from "./registry-edit.ts";
 
@@ -247,7 +248,13 @@ const DEVTOOLS_HOOK = `if (!window.__REACT_DEVTOOLS_GLOBAL_HOOK__) {
   };
 }`;
 
-export function agentChannel(): Plugin {
+// With it, the framework stand-ins (stand-ins.ts): every canvas's vite config already loads
+// agentChannel(), so a shell update brings them to canvases installed before they existed.
+export function agentChannel(): Plugin[] {
+  return [channel(), standIns()];
+}
+
+function channel(): Plugin {
   let root = "";
   return {
     name: "design-canvas:agent",

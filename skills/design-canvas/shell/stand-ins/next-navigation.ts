@@ -1,6 +1,6 @@
 import { useContext } from "react";
-import { BACK_EVENT, NAVIGATE_EVENT } from "../canvas/bridge";
-import { LocationContext, RouteContext } from "../canvas/routes";
+import { BACK_EVENT, NAVIGATE_EVENT } from "../bridge";
+import { LocationContext, RouteContext } from "../routes";
 
 // next/navigation on the canvas: router calls stay on the canvas. A path that an item
 // shows (its `path` or one of its `screens`, see canvas/routes.ts) goes to that screen;

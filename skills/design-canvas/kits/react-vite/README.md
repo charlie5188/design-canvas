@@ -16,7 +16,7 @@ reports it in use, check the page title there: this canvas may be running alread
 - `items/`: the previews and their synthetic data.
 - `providers.tsx`: the app stylesheet and the providers previews need.
 - `canvas-theme.ts` and `theme.css`: the app's themes and the chrome's tokens.
-- `mocks/`: stand-ins for Next.js modules, used only when the app uses Next.
+- `mocks/`: your own stand-ins for modules that cannot run on the canvas. The shell's (`canvas/stand-ins/`) cover Next.js and React Router.
 - `canvas/`: the shared canvas shell. Change it in the skill, not here.
 
 Using the canvas: drag empty space to pan. Drag an item's name or grip to move
