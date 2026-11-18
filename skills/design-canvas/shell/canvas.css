@@ -1251,22 +1251,23 @@ html[data-canvas-alt] .canvas-frame-root * {
   }
 }
 
-/* After Share: the file's name and the ways to pass it on, under the Share button. */
+/* Share: what goes in the file, under the Share button, before it downloads. */
 .canvas-share-popover {
   position: fixed;
   inset-block-start: 64px;
   inset-inline-end: 16px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   box-sizing: border-box;
-  inline-size: min(400px, calc(100vw - 32px));
+  inline-size: min(360px, calc(100vw - 32px));
   padding: 10px 10px 14px 16px;
   border: 1px solid var(--canvas-border-color);
   border-radius: var(--canvas-radius-l);
   background: var(--canvas-surface-color);
   box-shadow: var(--canvas-shadow-overlay);
   color: var(--canvas-text-color);
+  font-size: 14px;
 }
 .canvas-share-head {
   display: flex;
@@ -1278,27 +1279,90 @@ html[data-canvas-alt] .canvas-frame-root * {
   font-weight: 600;
   overflow-wrap: anywhere;
 }
-.canvas-share-missing {
-  margin: 0;
+.canvas-share-fields {
+  display: grid;
+  gap: 10px;
+  padding-inline-end: 6px;
+}
+/* A label column, then the field: the checkbox lines up under the field. */
+.canvas-share-row {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+.canvas-share-label {
   color: var(--canvas-subtle-color);
   font-size: 13px;
-  overflow-wrap: anywhere;
 }
-.canvas-share-ways {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
+.canvas-share-select {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-inline-size: 0;
 }
-.canvas-share-ways li {
-  display: grid;
-  grid-template-columns: 52px 1fr;
-  gap: 8px;
-  line-height: 1.4;
+.canvas-share-select select {
+  appearance: none;
+  inline-size: 100%;
+  block-size: 30px;
+  padding: 0 28px 0 10px;
+  border: 0;
+  border-radius: var(--canvas-radius-m);
+  background: var(--canvas-hover-color);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  cursor: pointer;
 }
-.canvas-share-way {
+.canvas-share-select select:focus-visible {
+  outline: 2px solid var(--canvas-focus-color);
+  outline-offset: 1px;
+}
+.canvas-share-select svg {
+  position: absolute;
+  inset-inline-end: 8px;
+  inline-size: 14px;
+  block-size: 14px;
   color: var(--canvas-subtle-color);
+  pointer-events: none;
+}
+.canvas-share-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.canvas-share-row + .canvas-share-check {
+  margin-inline-start: 64px;
+}
+.canvas-share-check input {
+  margin: 0;
+  accent-color: var(--canvas-fill-color);
+}
+.canvas-share-summary {
+  margin: 0;
+  padding-inline-end: 6px;
+  color: var(--canvas-subtle-color);
+  font-size: 13px;
+  text-wrap: pretty;
+}
+.canvas-share-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-inline-end: 4px;
+}
+.canvas-share-hint {
+  color: var(--canvas-subtle-color);
+  font-size: 12px;
+  line-height: 1.4;
+  text-wrap: pretty;
+}
+.canvas-share-foot .canvas-button-primary {
+  flex: none;
 }
 
 /* Notes and sections.

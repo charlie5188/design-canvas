@@ -126,17 +126,28 @@ export async function sendToAgent(text: string): Promise<{ delivered: boolean; s
  * Has the dev server build the canvas into one HTML file and downloads it.
  * Rejects with the server's reason when the build fails.
  */
-export async function downloadSharedFile(): Promise<{ name: string; missing: string[] }> {
-  const response = await fetch(SHARE_PATH, { method: "POST" });
+/**
+ * Builds the shared file without what `leaveOut` names (registry ids) and downloads it as `name`.
+ * Resolves with what could not go inside.
+ */
+export async function downloadSharedFile(
+  leaveOut: { items: string[]; notes: string[]; sections: string[] },
+  name: string,
+): Promise<{ name: string; missing: string[] }> {
+  const response = await fetch(SHARE_PATH, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ leaveOut }),
+  });
   // A canvas whose vite.config lacks agentChannel() has no such endpoint.
   if (!response.ok) throw new Error(response.status === 404 ? "the canvas's vite config lacks agentChannel()" : await response.text());
   const file = (await response.json()) as SharedFile;
   const url = URL.createObjectURL(new Blob([file.html], { type: "text/html" }));
   const link = document.createElement("a");
   link.href = url;
-  link.download = file.name;
+  link.download = name;
   link.click();
   // The download has started from the object URL by the next task.
   setTimeout(() => URL.revokeObjectURL(url), 0);
-  return { name: file.name, missing: file.missing };
+  return { name, missing: file.missing };
 }

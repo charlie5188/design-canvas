@@ -129,10 +129,46 @@ function readBody(request: IncomingMessage): Promise<string> {
 // name at run time, where no bundler follows them into the page.
 const load = (name: string): Promise<unknown> => import(/* @vite-ignore */ name);
 
+/** What a shared file leaves out, by registry id: the trash, and what lies outside what the person chose to share. */
+export type LeaveOut = { items: string[]; notes: string[]; sections: string[] };
+const SHARE_ID = /^[a-z0-9][a-z0-9-]{0,79}$/i;
+/** A leave-out list from the browser, checked before it goes near the build. */
+function validLeaveOut(value: unknown): LeaveOut | undefined {
+  const ids = (list: unknown) => (Array.isArray(list) && list.every((id) => typeof id === "string" && SHARE_ID.test(id)) ? (list as string[]) : undefined);
+  const raw = (value ?? {}) as Record<string, unknown>;
+  const items = ids(raw.items ?? []);
+  const notes = ids(raw.notes ?? []);
+  const sections = ids(raw.sections ?? []);
+  return items && notes && sections ? { items, notes, sections } : undefined;
+}
+
+/**
+ * Takes entries out of registry.tsx as the shared file is built, never on disk: what the file
+ * leaves out is then not in it at all (its component's code included), not only hidden.
+ */
+function leaveOutOfRegistry(root: string, leave: LeaveOut): Plugin {
+  const registry = join(root, "registry.tsx").replace(/\\/g, "/");
+  return {
+    name: "design-canvas:leave-out",
+    enforce: "pre",
+    transform(code, id) {
+      if (id.split("?")[0]!.replace(/\\/g, "/") !== registry) return undefined;
+      let source = code;
+      const kinds = [["item", leave.items], ["note", leave.notes], ["section", leave.sections]] as const;
+      for (const [kind, ids] of kinds) for (const entry of ids) source = removeEntry(source, kind, entry) ?? source;
+      return { code: source, map: null };
+    },
+  };
+}
+
 /** Builds the canvas at `root` into one HTML file with its share.config.mts, in memory. */
-async function buildSharedFile(root: string): Promise<SharedFile> {
+async function buildSharedFile(root: string, leave?: LeaveOut): Promise<SharedFile> {
   const vite = (await load("vite")) as typeof import("vite");
-  const result = await vite.build({ configFile: `${root}/canvas/share.config.mts`, build: { write: false } });
+  const result = await vite.build({
+    configFile: `${root}/canvas/share.config.mts`,
+    build: { write: false },
+    ...(leave ? { plugins: [leaveOutOfRegistry(root, leave)] } : {}),
+  });
   const files = (Array.isArray(result) ? result : [result]).flatMap(
     (entry) => (entry as { output?: { fileName: string; source?: unknown }[] }).output ?? [],
   );
@@ -490,17 +526,32 @@ export function agentChannel(): Plugin {
         );
       });
 
-      // One build at a time: a second click while it runs gets the same file.
-      let sharing: Promise<SharedFile> | undefined;
+      // One build per choice at a time: a second click while it runs gets the same file.
+      const sharing = new Map<string, Promise<SharedFile>>();
       server.middlewares.use(SHARE_PATH, (request, response, next) => {
         if (request.method !== "POST" || (request.url ?? "/") !== "/") return next();
         if (!fromCanvasPage(request)) return send(response, 403, "Not allowed");
-        sharing ??= buildSharedFile(server.config.root).finally(() => {
-          sharing = undefined;
-        });
-        sharing.then(
-          (file) => sendJson(response, file),
-          (error: unknown) => send(response, 500, error instanceof Error ? error.message : String(error)),
+        readBody(request).then(
+          (body) => {
+            let leave: LeaveOut | undefined;
+            try {
+              leave = validLeaveOut(body.trim() ? (JSON.parse(body) as { leaveOut?: unknown }).leaveOut : undefined);
+            } catch {
+              leave = undefined;
+            }
+            if (!leave) return send(response, 400, "Bad request");
+            const key = JSON.stringify(leave);
+            let build = sharing.get(key);
+            if (!build) {
+              build = buildSharedFile(server.config.root, leave).finally(() => sharing.delete(key));
+              sharing.set(key, build);
+            }
+            build.then(
+              (file) => sendJson(response, file),
+              (error: unknown) => send(response, 500, error instanceof Error ? error.message : String(error)),
+            );
+          },
+          () => send(response, 400, "Bad request"),
         );
       });
     },

@@ -62,7 +62,7 @@ Then ask your agent, for example:
 
 ## Share a canvas
 
-Click Share (the share icon) at the top right of the canvas, or ask the agent to share the canvas. You get one HTML file, `<canvas-name>-<date>.html`.
+Click Share (the share icon) at the top right of the canvas, choose the whole canvas or one section, and click Download. Or ask the agent to share the canvas. You get one HTML file named for the canvas and the day. Your notes for the agent and the trash never go in.
 
 - **Open it.** Double-click the file. It runs in any browser, with no setup, server, or agent.
 - **Send it.** Share it like any file, in Slack, email, or Drive.
@@ -167,7 +167,7 @@ npx skills add charlie5188/design-canvas --skill '*'
 
 ### キャンバスを共有する
 
-キャンバス右上の Share（共有アイコン）をクリックするか、エージェントに共有を頼みます。`<キャンバス名>-<日付>.html` という 1 つの HTML ファイルができます。
+キャンバス右上の Share（共有アイコン）をクリックし、キャンバス全体か 1 つのセクションを選んで Download をクリックします。エージェントに共有を頼むこともできます。キャンバス名と日付が付いた 1 つの HTML ファイルができ、エージェントに送るノートとゴミ箱の中身は入りません。
 
 - **開く。** ファイルをダブルクリックします。準備、サーバー、エージェントなしで、どのブラウザでも動きます。
 - **送る。** Slack、メール、Drive など、普通のファイルと同じように共有できます。

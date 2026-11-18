@@ -1224,18 +1224,41 @@ function TrashPopover({
   );
 }
 
+/** What to share: the whole canvas or one section (its id), and whether set-aside versions go too. */
+type ShareChoice = { section: string | null; setAside: boolean };
+/** What a choice puts in the file, and the registry ids the file leaves out. */
+type ShareContents = { items: number; notes: number; setAside: number; leaveOut: { items: string[]; notes: string[]; sections: string[] } };
+
 /**
- * After Share downloads the file: its name, any file it could not hold, and the
- * ways to pass it on. It confirms the download too, so no notice shows.
+ * Before Share downloads the file: what goes in it. A canvas collects many explorations, and the
+ * reader often needs one, so a canvas with sections offers each. Set-aside versions are the record
+ * of a decision and go too, unless the person unticks them. The summary says what the reader gets,
+ * and that the notes for the agent and the trash never go. The download then says so in a notice.
  */
-function SharePanel({ file, missing, onClose }: { file: string; missing: string[]; onClose: () => void }) {
-  const closeRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => closeRef.current?.focus({ preventScroll: true }), []);
+function SharePanel({
+  scopes,
+  whole,
+  contents,
+  busy,
+  onDownload,
+  onClose,
+}: {
+  scopes: { id: string; title: string; items: number }[];
+  whole: number;
+  contents: (choice: ShareChoice) => ShareContents;
+  busy: boolean;
+  onDownload: (choice: ShareChoice) => void;
+  onClose: () => void;
+}) {
+  const [choice, setChoice] = useState<ShareChoice>({ section: null, setAside: true });
+  const now = contents(choice);
+  const downloadRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => downloadRef.current?.focus({ preventScroll: true }), []);
   return (
     <div
       className="canvas-share-popover"
       role="dialog"
-      aria-label={labels.shared(file)}
+      aria-label={labels.shareTitle}
       onKeyDown={(event) => {
         if (event.key !== "Escape") return;
         event.preventDefault();
@@ -1244,26 +1267,50 @@ function SharePanel({ file, missing, onClose }: { file: string; missing: string[
       }}
     >
       <div className="canvas-share-head">
-        <span className="canvas-share-title">{labels.shared(file)}</span>
-        <button
-          ref={closeRef}
-          type="button"
-          className="canvas-button canvas-icon-button"
-          aria-label={labels.dismiss}
-          onClick={onClose}
-        >
+        <span className="canvas-share-title">{labels.shareTitle}</span>
+        <button type="button" className="canvas-button canvas-icon-button" aria-label={labels.dismiss} onClick={onClose}>
           <CloseIcon />
         </button>
       </div>
-      {missing.length > 0 && <p className="canvas-share-missing">{labels.sharedMissing(missing)}</p>}
-      <ul className="canvas-share-ways">
-        {labels.shareWays.map(([way, how]) => (
-          <li key={way}>
-            <span className="canvas-share-way">{way}</span>
-            <span>{how}</span>
-          </li>
-        ))}
-      </ul>
+      {/* Only a real choice is offered: a canvas without sections is shared whole. */}
+      {(scopes.length > 0 || now.setAside > 0) && (
+        <div className="canvas-share-fields">
+          {scopes.length > 0 && (
+            <label className="canvas-share-row">
+              <span className="canvas-share-label">{labels.shareScope}</span>
+              <span className="canvas-share-select">
+                <select value={choice.section ?? ""} onChange={(event) => setChoice({ ...choice, section: event.currentTarget.value || null })}>
+                  <option value="">{`${labels.shareWhole} · ${labels.shareCount(whole)}`}</option>
+                  {scopes.map((scope) => (
+                    <option key={scope.id} value={scope.id}>{`${scope.title} · ${labels.shareCount(scope.items)}`}</option>
+                  ))}
+                </select>
+                <Icon name="chevron-down" />
+              </span>
+            </label>
+          )}
+          {now.setAside > 0 && (
+            <label className="canvas-share-check">
+              <input type="checkbox" checked={choice.setAside} onChange={(event) => setChoice({ ...choice, setAside: event.currentTarget.checked })} />
+              {labels.shareSetAside(now.setAside)}
+            </label>
+          )}
+        </div>
+      )}
+      <p className="canvas-share-summary">{labels.shareSummary(now.items, now.notes)}</p>
+      <div className="canvas-share-foot">
+        <span className="canvas-share-hint">{labels.shareHint}</span>
+        <button
+          ref={downloadRef}
+          type="button"
+          className="canvas-button canvas-button-primary"
+          disabled={busy}
+          aria-busy={busy}
+          onClick={() => onDownload(choice)}
+        >
+          {busy ? labels.sharing : labels.shareDownload}
+        </button>
+      </div>
     </div>
   );
 }
@@ -1839,26 +1886,84 @@ function CanvasBoard({
       })
       .catch(() => {});
   }, [shared, items, notify]);
-  // Share: the dev server builds the canvas into one HTML file and the browser downloads it.
+  // Share: the panel says what goes in the file (SharePanel); the dev server builds the canvas
+  // into one HTML file without the rest, and the browser downloads it.
   const [sharing, setSharing] = useState(false);
-  const [sharedFile, setSharedFile] = useState<{ name: string; missing: string[] } | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
   const shareButtonRef = useRef<HTMLButtonElement>(null);
-  const share = useCallback(async () => {
-    setSharing(true);
-    try {
-      const file = await downloadSharedFile();
-      // One of the share panel, the trash, and a notice at a time: they open in the same corner.
-      window.clearTimeout(toastTimer.current);
-      setToast(null);
-      setTrashOpen(false);
-      setSharedFile(file);
-    } catch (error) {
-      const reason = (error instanceof Error ? error.message : String(error)).split("\n")[0].slice(0, 160);
-      notify(labels.shareFailed(reason), undefined, true);
-    } finally {
-      setSharing(false);
-    }
-  }, [notify]);
+  // What is inside a frame is what the person sees inside it: by the centre, at the positions
+  // they have now, as a section's own notes and moves count it.
+  const shareCentres = useMemo(() => {
+    const centre = (x: number, y: number, w: number, h: number) => ({ x: x + w / 2, y: y + h / 2 });
+    return {
+      items: new Map(items.map((item) => {
+        const at = positions[item.id] ?? item;
+        return [item.id, centre(at.x, at.y, item.width, ITEM_HEAD + item.height)];
+      })),
+      notes: new Map(notes.map((note) => [note.id, centre(note.x, note.y, note.width ?? 220, note.height ?? 80)])),
+      sections: new Map(sections.map((section) => [section.id, centre(section.x, section.y, section.width, section.height)])),
+    };
+  }, [items, notes, sections, positions]);
+  const shareContents = useCallback(
+    (choice: ShareChoice): ShareContents => {
+      const holds = (frame: CanvasSection, at: { x: number; y: number } | undefined) =>
+        !!at && at.x >= frame.x && at.x <= frame.x + frame.width && at.y >= frame.y && at.y <= frame.y + frame.height;
+      const scope = choice.section ? sections.find((section) => section.id === choice.section) : undefined;
+      const inScope = (at: { x: number; y: number } | undefined) => !scope || holds(scope, at);
+      const setAsideFrames = sections.filter((section) => isSetAside(section) && section !== scope && inScope(shareCentres.sections.get(section.id)));
+      const setAsideItems = items.filter(
+        (item) => !trash.includes(item.id) && inScope(shareCentres.items.get(item.id)) && setAsideFrames.some((f) => holds(f, shareCentres.items.get(item.id))),
+      );
+      const dropped = choice.setAside ? [] : setAsideFrames;
+      const kept = (at: { x: number; y: number } | undefined) => inScope(at) && !dropped.some((f) => holds(f, at));
+      const keptItems = items.filter((item) => !trash.includes(item.id) && kept(shareCentres.items.get(item.id)));
+      const keptNotes = notes.filter((note) => kept(shareCentres.notes.get(note.id)));
+      const keptSections = sections.filter(
+        (section) => section === scope || (!dropped.includes(section) && kept(shareCentres.sections.get(section.id))),
+      );
+      const out = <T extends { id: string }>(all: T[], keep: T[]) => all.filter((entry) => !keep.includes(entry)).map((entry) => entry.id);
+      return {
+        items: keptItems.length,
+        notes: keptNotes.length,
+        setAside: setAsideItems.length,
+        leaveOut: { items: out(items, keptItems), notes: out(notes, keptNotes), sections: out(sections, keptSections) },
+      };
+    },
+    [items, notes, sections, trash, shareCentres],
+  );
+  // Each titled section a person may share alone, in reading order. Set-aside frames are not offered:
+  // they are the losing side of a decision, which goes with it or not at all (the checkbox).
+  const shareScopes = useMemo(
+    () =>
+      sections
+        .filter((section) => section.title.trim() && !isSetAside(section))
+        .sort((a, b) => a.y - b.y || a.x - b.x)
+        .map((section) => ({ id: section.id, title: section.title.trim(), items: shareContents({ section: section.id, setAside: true }).items })),
+    [sections, shareContents],
+  );
+  const share = useCallback(
+    async (choice: ShareChoice) => {
+      setSharing(true);
+      try {
+        // The file is named for the canvas (and the section shared), not its folder, with the day it was made.
+        const now = new Date();
+        const date = [now.getFullYear(), now.getMonth() + 1, now.getDate()].map((n) => String(n).padStart(2, "0")).join("-");
+        const title = document.title.replace(/\s*·\s*canvas\s*$/, "").trim() || "canvas";
+        const section = choice.section ? sections.find((s) => s.id === choice.section)?.title.trim() : undefined;
+        const name = `${[title, section].filter(Boolean).join(" · ")} ${date}`.replace(/[\\/:*?"<>|]+/g, "-");
+        const file = await downloadSharedFile(shareContents(choice).leaveOut, `${name}.html`);
+        setShareOpen(false);
+        shareButtonRef.current?.focus({ preventScroll: true });
+        notify(file.missing.length ? `${labels.shared(file.name)}. ${labels.sharedMissing(file.missing)}` : labels.shared(file.name), undefined, file.missing.length > 0);
+      } catch (error) {
+        const reason = (error instanceof Error ? error.message : String(error)).split("\n")[0].slice(0, 160);
+        notify(labels.shareFailed(reason), undefined, true);
+      } finally {
+        setSharing(false);
+      }
+    },
+    [notify, sections, shareContents],
+  );
   useEffect(() => () => window.clearTimeout(toastTimer.current), []);
 
   // Annotations. Annotate mode turns clicks in previews into numbered pins. The
@@ -4437,19 +4542,19 @@ function CanvasBoard({
   }, [items, restore, setTrash, trashChecks]);
 
   const closeSharePanel = useCallback(() => {
-    setSharedFile(null);
+    setShareOpen(false);
     shareButtonRef.current?.focus({ preventScroll: true });
   }, []);
   // Like the trash, the share panel closes on a press outside it.
   useEffect(() => {
-    if (!sharedFile) return;
+    if (!shareOpen) return;
     const onDown = (event: PointerEvent) => {
       if (event.target instanceof Element && event.target.closest(".canvas-share-popover, .canvas-share-button")) return;
-      setSharedFile(null);
+      setShareOpen(false);
     };
     window.addEventListener("pointerdown", onDown, true);
     return () => window.removeEventListener("pointerdown", onDown, true);
-  }, [sharedFile]);
+  }, [shareOpen]);
 
   const closeTrash = useCallback(() => {
     setTrashOpen(false);
@@ -6166,7 +6271,7 @@ function CanvasBoard({
                 onClick={() => {
                   // One of the trash, the share panel, and a notice at a time: they open in the same corner.
                   setToast(null);
-                  setSharedFile(null);
+                  setShareOpen(false);
                   setTrashOpen((open) => !open);
                 }}
               >
@@ -6179,11 +6284,19 @@ function CanvasBoard({
               ref={shareButtonRef}
               type="button"
               className="canvas-button canvas-icon-button canvas-share-button"
-              disabled={sharing}
               aria-busy={sharing}
+              aria-expanded={shareOpen}
               aria-label={sharing ? labels.sharing : labels.share}
               data-tip={sharing ? labels.sharing : labels.share}
-              onClick={() => void share()}
+              onClick={() => {
+                // One of the share panel, the trash, and a notice at a time: they open in the same corner.
+                if (!shareOpen) {
+                  window.clearTimeout(toastTimer.current);
+                  setToast(null);
+                  setTrashOpen(false);
+                }
+                setShareOpen((open) => !open);
+              }}
             >
               <ShareIcon />
             </button>
@@ -6271,7 +6384,16 @@ function CanvasBoard({
           </div>
         )}
       </div>
-      {sharedFile && <SharePanel file={sharedFile.name} missing={sharedFile.missing} onClose={closeSharePanel} />}
+      {shareOpen && (
+        <SharePanel
+          scopes={shareScopes}
+          whole={shareContents({ section: null, setAside: true }).items}
+          contents={shareContents}
+          busy={sharing}
+          onDownload={(choice) => void share(choice)}
+          onClose={closeSharePanel}
+        />
+      )}
       {flowItem && (
         <FlowView
           item={flowItem}

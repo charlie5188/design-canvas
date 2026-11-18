@@ -178,10 +178,10 @@ Run `scripts/share.sh` on a canvas with a `viewport` item, and open the file fro
 - Wheel, pinch, Space-drag, and Alt-click over a `viewport` item reach the canvas, as on the dev server.
 - The open-alone icon opens the same file with `?item=<id>`, which shows that item alone. Inside another page the file has no address to open, so the icon is not there.
 - Inside another page, every `viewport` frame renders, and wheel over one still pans the canvas.
-- Items in the trash on the canvas start in the shared file's trash, not on the canvas.
+- Items in the trash are not in a file made with the Share button at all; a file made with `share.sh` keeps them out of sight.
 - Reload keeps the layout. A newer shared file of the same canvas opens as it was shared, not with the layout saved in an older one.
-- On the dev server, the Share icon button (tooltip "Share as an HTML file") dims, pulses, and takes no second click while the file builds, then downloads `<canvas-name>-<date>.html` without reloading the page.
-- After the download, a panel under the Share button names the file, any file it could not include, and how to open it, send it, or put it in Figma or Notion. Escape, its close button, or a press outside closes it and returns focus to Share; opening the trash closes it too.
+- On the dev server, the Share icon button (tooltip "Share as an HTML file") opens a panel under it, "Share as a file", with focus on Download. A canvas with titled sections offers "Whole canvas · N items" or each section (not set-aside frames), in reading order; a canvas with set-aside versions in the chosen range offers "Include set-aside versions (N)", ticked. A canvas with neither shows no choice. A line says how many items and notes the file will hold, and that notes for the agent and the trash stay out; it follows each choice. What is inside a section is what has its centre inside the frame, where the person has it now.
+- Download builds the file without what is left out (their words and code are not in the file), shows "Preparing the file…" meanwhile, and downloads `<canvas title> <date>.html` (or `<canvas title> · <section> <date>.html`) without reloading the page. The panel closes, focus returns to Share, and the notice at the top centre says "Downloaded …", with any file it could not include. Escape, the close button, or a press outside closes the panel and returns focus to Share; opening the trash closes it too.
 
 ## Layout
 

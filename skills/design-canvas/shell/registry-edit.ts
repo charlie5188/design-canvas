@@ -287,7 +287,7 @@ export function validRemove(value: unknown): DirectRemove | undefined {
 }
 
 /** The source without that entry, or undefined when it cannot be found exactly once. */
-export function removeEntry(source: string, kind: DirectRemove["kind"], id: string): string | undefined {
+export function removeEntry(source: string, kind: DirectKind, id: string): string | undefined {
   const entry = entryOf(source, kind, id);
   if (!entry) return undefined;
   let start = entry.open;
