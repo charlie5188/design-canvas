@@ -6,6 +6,8 @@
 export type Camera = { x: number; y: number; z: number };
 export type Position = { x: number; y: number };
 export type Bounds = { minX: number; minY: number; maxX: number; maxY: number };
+/** About the height of an item's title above its preview, for telling which items a section holds. */
+export const ITEM_HEAD = 48;
 /**
  * The trash as this browser saved it. `ids`: most recent first; in a shared file,
  * the whole trash. `kept`: items the registry could not take, kept here instead.

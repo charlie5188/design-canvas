@@ -1,7 +1,5 @@
 import {
-  type ComponentType,
   createContext,
-  type CSSProperties,
   memo,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
@@ -13,7 +11,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { downloadSharedFile, sendToAgent, useAgentReplies, useAgentStatus } from "./agent";
+import { sendToAgent, useAgentReplies, useAgentStatus } from "./agent";
 import {
   type BoardEdge,
   type BoardHandlers,
@@ -63,6 +61,7 @@ import {
   sharedStorageKey,
 } from "./bridge";
 import { FrameHost } from "./FrameHost";
+import { Preview } from "./Preview";
 import {
   type Annotation,
   fingerprintItem,
@@ -107,6 +106,7 @@ import {
   type Camera,
   clampZoom,
   fitBounds,
+  ITEM_HEAD,
   loadLayout,
   nextZoomStop,
   ZOOM_MAX,
@@ -116,9 +116,11 @@ import {
   saveLayout,
   zoomAt,
 } from "./layout";
+import { ShareButton, SharePanel, useShare } from "./Share";
 import { type ThemeStore, useThemeId } from "./theme";
+import { TrashButton, TrashPopover, useTrash, useTrashList } from "./Trash";
 import { type Box, type Guide, SNAP_DISTANCE, type Snap, snapBox } from "./snap";
-import type { CanvasItem, CanvasNote, CanvasSection } from "./types";
+import { type CanvasItem, type CanvasNote, type CanvasSection, isSetAside, SET_ASIDE_ID } from "./types";
 import { EDIT_PATH, VERSION_PATH } from "./channel.ts";
 import type { DirectAdd, DirectEdit, DirectRemove } from "./registry-edit.ts";
 import "./canvas.css";
@@ -130,12 +132,6 @@ const MOVE_STEP = 8;
 const DRAG_THRESHOLD = 3;
 const SAVE_DELAY = 400;
 const SAVE_MAX_WAIT = 2000;
-/**
- * How long a trash write the registry took may still hide what the registry says.
- * Its own update arrives well within it; after it, a change made in source right
- * after the write (by the agent or another tab) shows instead of staying hidden.
- */
-const TRASH_WRITE_GRACE = 3000;
 const TOAST_MS = 2500;
 const TOAST_ACTION_MS = 8000;
 /** Space a note keeps from the viewport edge before it opens on the other side. */
@@ -150,18 +146,11 @@ const CHROME_TOP = 72;
 const FIT_PADDING = 72;
 /** Two presses this close, without moving, are a double-click. */
 const DOUBLE_TAP_MS = 400;
-/** About the height of an item's title above its preview, for telling which items a section holds. */
-const ITEM_HEAD = 48;
 /** Room a section's title takes above its frame, in canvas units. */
 const SECTION_TITLE_ROOM = 32;
-// The section a pick makes for the versions that were not picked. The agent's own
-// set-aside sections, drawn around one dropped item where it stands, have ids that
-// start with this one (SKILL.md, "Decision notes"); items in either kind are out of the running.
-const SET_ASIDE_ID = "set-aside";
 // How long until a pin's element is looked for again, and how many times in a row.
 const ANCHOR_RETRY_MS = 400;
 const ANCHOR_RETRIES = 6;
-const isSetAside = (section: { id: string }) => section.id === SET_ASIDE_ID || section.id.startsWith(`${SET_ASIDE_ID}-`);
 /** Inside the set-aside frame: room around the items, and between them. */
 const ASIDE_PAD = 24;
 const ASIDE_GAP = 40;
@@ -234,11 +223,6 @@ const standalone = (list: BoardMark[], all: BoardMark[]) => {
   return list.filter((m) => !folded.has(m.id));
 };
 
-/** Previews never rerender because of the camera, a move, or a copy. */
-const Preview = memo(function Preview({ component: Component }: { component: ComponentType }) {
-  return <Component />;
-});
-
 /** Viewport items live in their own document, so breakpoints see the item size. */
 const ItemFrame = memo(function ItemFrame({ item }: { item: CanvasItem }) {
   return (
@@ -282,8 +266,6 @@ const SentIcon = () => <Icon name="check" size={14} />;
 /** On a pin whose note the agent answered. */
 const ReplyIcon = () => <Icon name="message-circle" size={14} />;
 const QueuedIcon = () => <Icon name="clock" size={14} />;
-const ShareIcon = () => <Icon name="share-2" />;
-const CloseIcon = () => <Icon name="x" />;
 const HelpIcon = () => <Icon name="help" />;
 const RestartIcon = () => <Icon name="player-skip-back" />;
 const MoreIcon = () => <Icon name="dots" />;
@@ -1141,172 +1123,6 @@ function CanvasItemView({
   );
 }
 
-/** Room for a thumbnail inside its border. */
-const THUMB_WIDTH = 154;
-const THUMB_HEIGHT = 98;
-
-/**
- * A trashed item drawn small but live: its component (or its frame page, for
- * `viewport` items) at real size, scaled down, so versions that share a name
- * pattern stay easy to tell apart. Inert, so it never takes focus or clicks;
- * it exists only while the trash is open.
- */
-function TrashThumb({ item }: { item: CanvasItem }) {
-  const scale = Math.min(THUMB_WIDTH / item.width, THUMB_HEIGHT / item.height, 1);
-  // An attribute, not a prop: React 18 and 19 write the `inert` prop differently.
-  const inert = useCallback((element: HTMLElement | null) => element?.setAttribute("inert", ""), []);
-  return (
-    <div className="canvas-trash-thumb" aria-hidden="true">
-      <div className="canvas-trash-scaled" style={{ inlineSize: item.width * scale, blockSize: item.height * scale }}>
-        <div
-          ref={inert}
-          className="canvas-trash-real"
-          style={{ inlineSize: item.width, blockSize: item.height, transform: `scale(${scale})` }}
-        >
-          {item.viewport ? (
-            <iframe
-              className="canvas-frame"
-              {...frameSource(item.id, "page")}
-              title={item.name}
-              width={item.width}
-              height={item.height}
-              tabIndex={-1}
-            />
-          ) : (
-            <Preview component={item.component} />
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/**
- * Opens above the toolbar, like a Dock stack: the most recently trashed item
- * first. Picking one puts it back where it was.
- */
-function TrashPopover({
-  items,
-  onPutBack,
-  onClose,
-}: {
-  items: CanvasItem[];
-  onPutBack: (item: CanvasItem) => void;
-  onClose: () => void;
-}) {
-  const firstRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => firstRef.current?.focus({ preventScroll: true }), []);
-  return (
-    <div
-      id="canvas-trash"
-      className="canvas-trash-popover"
-      role="dialog"
-      aria-label={labels.trashHeading}
-      style={{ "--canvas-trash-columns": Math.min(items.length, 3) } as CSSProperties}
-      onKeyDown={(event) => {
-        if (event.key !== "Escape") return;
-        event.preventDefault();
-        event.stopPropagation();
-        onClose();
-      }}
-    >
-      <div className="canvas-trash-head">
-        <span className="canvas-trash-title">{labels.trashHeading}</span>
-        <span className="canvas-subtle">{labels.trashHint}</span>
-      </div>
-      <ul className="canvas-trash-list">
-        {items.map((item, index) => (
-          <li key={item.id} className="canvas-trash-entry">
-            <TrashThumb item={item} />
-            {/* The name is the button; its hit area covers the whole entry. */}
-            <button
-              ref={index === 0 ? firstRef : undefined}
-              type="button"
-              className="canvas-trash-name"
-              aria-label={labels.putBack(item.name)}
-              onClick={() => onPutBack(item)}
-            >
-              <span>{item.name}</span>
-            </button>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-/** What a share puts in the file: how many items, and the registry ids the file leaves out. */
-type ShareContents = { items: number; leaveOut: { items: string[]; notes: string[]; sections: string[] } };
-
-/**
- * Before Share downloads the file: what goes in it. A canvas collects many explorations, and the
- * reader often needs one, so a canvas with sections offers the whole canvas or one section; one
- * without sections offers no choice. The download then says so in a notice.
- */
-function SharePanel({
-  scopes,
-  whole,
-  busy,
-  onDownload,
-  onClose,
-}: {
-  scopes: { id: string; title: string; items: number }[];
-  whole: number;
-  busy: boolean;
-  /** `section`: the id of the one section to share, or null for the whole canvas. */
-  onDownload: (section: string | null) => void;
-  onClose: () => void;
-}) {
-  const [section, setSection] = useState<string | null>(null);
-  const downloadRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => downloadRef.current?.focus({ preventScroll: true }), []);
-  return (
-    <div
-      className="canvas-share-popover"
-      role="dialog"
-      aria-label={labels.shareTitle}
-      onKeyDown={(event) => {
-        if (event.key !== "Escape") return;
-        event.preventDefault();
-        event.stopPropagation();
-        onClose();
-      }}
-    >
-      <div className="canvas-share-head">
-        <span className="canvas-share-title">{labels.shareTitle}</span>
-        <button type="button" className="canvas-button canvas-icon-button" aria-label={labels.dismiss} onClick={onClose}>
-          <CloseIcon />
-        </button>
-      </div>
-      {scopes.length > 0 && (
-        <label className="canvas-share-row">
-          <span className="canvas-share-label">{labels.shareScope}</span>
-          <span className="canvas-share-select">
-            <select value={section ?? ""} onChange={(event) => setSection(event.currentTarget.value || null)}>
-              <option value="">{`${labels.shareWhole} · ${labels.shareCount(whole)}`}</option>
-              {scopes.map((scope) => (
-                <option key={scope.id} value={scope.id}>{`${scope.title} · ${labels.shareCount(scope.items)}`}</option>
-              ))}
-            </select>
-            <Icon name="chevron-down" />
-          </span>
-        </label>
-      )}
-      <p className="canvas-share-hint">{labels.shareHint}</p>
-      <button
-        ref={downloadRef}
-        type="button"
-        className="canvas-button canvas-button-primary canvas-share-download"
-        disabled={busy}
-        aria-busy={busy}
-        onClick={() => onDownload(section)}
-      >
-        {busy ? labels.sharing : labels.shareDownload}
-      </button>
-    </div>
-  );
-}
-
 type Toast = { kind: "copied" | "failed" | "notice"; text: string; action?: { label: string; run: () => void } };
 /**
  * The open annotation, and how it and its item's other annotations were before
@@ -1603,35 +1419,16 @@ function CanvasBoard({
   positionsRef.current = positions;
   // New registry entries appear at their source position until placed.
   const resolved = (item: CanvasItem) => positions[item.id] ?? { x: item.x, y: item.y };
-  // The trash hides items on the canvas only; their code stays in the registry,
-  // so any of them can be put back. Most recently trashed first. On the dev server
-  // the registry holds it (`trashed`), written only when the person moves an item in
-  // or out, so a shared file, the next session, and every open tab show the same
-  // trash, and no tab overwrites another. The browser keeps the order, the items the
-  // registry could not take, and, from an older shell, a trash it had only here,
-  // written into the registry once (see SavedTrash). A shared file cannot write, so
-  // it starts from the registry and keeps what a viewer changes in the browser.
-  const [trash, setTrashState] = useState<string[]>(() => {
-    const inRegistry = items.filter((item) => item.trashed).map((item) => item.id);
-    if (shared) return saved.camera ? saved.trash.ids : inRegistry;
-    const member = new Set([...inRegistry, ...saved.trash.kept, ...(saved.trash.inRegistry ? [] : saved.trash.ids)]);
-    return [...new Set([...saved.trash.ids.filter((id) => member.has(id)), ...member])];
-  });
-  const trashRef = useRef(trash);
-  /** Items whose `trashed` the registry could not take, so their place in the trash is kept in this browser. */
-  const trashKept = useRef(new Set(saved.trash.kept));
+  // The trash (Trash.tsx): the items it holds are not on the canvas. Only the list is here,
+  // since the rest of the board is built on which items are shown; moving items in and out is `useTrash`, below.
+  const trashList = useTrashList(items, saved.trash, !!saved.camera);
+  const { ids: trash, idsRef: trashRef, kept: trashKept } = trashList;
   const shown = useMemo(() => items.filter((item) => !trash.includes(item.id)), [items, trash]);
   const shownIds = useMemo(() => new Set(shown.map((item) => item.id)), [shown]);
   // What an annotation can be on: a shown item, or a section (sectionKey).
   const targetIds = useMemo(() => new Set([...shownIds, ...sections.map((s) => sectionKey(s.id))]), [shownIds, sections]);
   /** The order sections are drawn in: larger first, so one inside another is never hidden behind it. */
   const sectionsByArea = useMemo(() => [...sections].sort((a, b) => b.width * b.height - a.width * a.height), [sections]);
-  const trashedItems = useMemo(
-    () => trash.flatMap((id) => items.find((item) => item.id === id) ?? []),
-    [items, trash],
-  );
-  const [trashOpen, setTrashOpen] = useState(false);
-  const trashButtonRef = useRef<HTMLButtonElement>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const toastTimer = useRef(0);
   const [frontId, setFrontId] = useState<string | null>(null);
@@ -1781,15 +1578,6 @@ function CanvasBoard({
     [queueSave, render, setCamera],
   );
 
-  const setTrash = useCallback(
-    (next: string[]) => {
-      trashRef.current = next;
-      setTrashState(next);
-      queueSave();
-    },
-    [queueSave],
-  );
-
   const announce = useCallback((text: string) => {
     if (!liveRef.current) return;
     liveRef.current.textContent = "";
@@ -1878,74 +1666,17 @@ function CanvasBoard({
       })
       .catch(() => {});
   }, [shared, items, notify]);
-  // Share: the panel says what goes in the file (SharePanel); the dev server builds the canvas
-  // into one HTML file without the rest, and the browser downloads it.
-  const [sharing, setSharing] = useState(false);
-  const [shareOpen, setShareOpen] = useState(false);
-  const shareButtonRef = useRef<HTMLButtonElement>(null);
-  // What is inside a frame is what the person sees inside it: by the centre, at the positions
-  // they have now, as a section's own notes and moves count it.
-  const shareCentres = useMemo(() => {
-    const centre = (x: number, y: number, w: number, h: number) => ({ x: x + w / 2, y: y + h / 2 });
-    return {
-      items: new Map(items.map((item) => {
-        const at = positions[item.id] ?? item;
-        return [item.id, centre(at.x, at.y, item.width, ITEM_HEAD + item.height)];
-      })),
-      notes: new Map(notes.map((note) => [note.id, centre(note.x, note.y, note.width ?? 220, note.height ?? 80)])),
-      sections: new Map(sections.map((section) => [section.id, centre(section.x, section.y, section.width, section.height)])),
-    };
-  }, [items, notes, sections, positions]);
-  const shareContents = useCallback(
-    (section: string | null): ShareContents => {
-      const holds = (frame: CanvasSection, at: { x: number; y: number } | undefined) =>
-        !!at && at.x >= frame.x && at.x <= frame.x + frame.width && at.y >= frame.y && at.y <= frame.y + frame.height;
-      const scope = section ? sections.find((s) => s.id === section) : undefined;
-      const inScope = (at: { x: number; y: number } | undefined) => !scope || holds(scope, at);
-      const keptItems = items.filter((item) => !trash.includes(item.id) && inScope(shareCentres.items.get(item.id)));
-      const keptNotes = notes.filter((note) => inScope(shareCentres.notes.get(note.id)));
-      const keptSections = sections.filter((s) => s === scope || inScope(shareCentres.sections.get(s.id)));
-      const out = <T extends { id: string }>(all: T[], keep: T[]) => all.filter((entry) => !keep.includes(entry)).map((entry) => entry.id);
-      return {
-        items: keptItems.length,
-        leaveOut: { items: out(items, keptItems), notes: out(notes, keptNotes), sections: out(sections, keptSections) },
-      };
-    },
-    [items, notes, sections, trash, shareCentres],
-  );
-  // Each titled section a person may share alone, in reading order. Set-aside frames are not offered:
-  // they are the losing side of a decision, and go with the canvas or the section they sit in.
-  const shareScopes = useMemo(
-    () =>
-      sections
-        .filter((section) => section.title.trim() && !isSetAside(section))
-        .sort((a, b) => a.y - b.y || a.x - b.x)
-        .map((section) => ({ id: section.id, title: section.title.trim(), items: shareContents(section.id).items })),
-    [sections, shareContents],
-  );
-  const share = useCallback(
-    async (only: string | null) => {
-      setSharing(true);
-      try {
-        // The file is named for the canvas (and the section shared), not its folder, with the day it was made.
-        const now = new Date();
-        const date = [now.getFullYear(), now.getMonth() + 1, now.getDate()].map((n) => String(n).padStart(2, "0")).join("-");
-        const title = document.title.replace(/\s*·\s*canvas\s*$/, "").trim() || "canvas";
-        const section = only ? sections.find((s) => s.id === only)?.title.trim() : undefined;
-        const name = `${[title, section].filter(Boolean).join(" · ")} ${date}`.replace(/[\\/:*?"<>|]+/g, "-");
-        const file = await downloadSharedFile(shareContents(only).leaveOut, `${name}.html`);
-        setShareOpen(false);
-        shareButtonRef.current?.focus({ preventScroll: true });
-        notify(file.missing.length ? `${labels.shared(file.name)}. ${labels.sharedMissing(file.missing)}` : labels.shared(file.name), undefined, file.missing.length > 0);
-      } catch (error) {
-        const reason = (error instanceof Error ? error.message : String(error)).split("\n")[0].slice(0, 160);
-        notify(labels.shareFailed(reason), undefined, true);
-      } finally {
-        setSharing(false);
-      }
-    },
-    [notify, sections, shareContents],
-  );
+  // Share (Share.tsx): what goes in the file, and the download.
+  const {
+    sharing,
+    open: shareOpen,
+    setOpen: setShareOpen,
+    buttonRef: shareButtonRef,
+    scopes: shareScopes,
+    contents: shareContents,
+    share,
+    close: closeSharePanel,
+  } = useShare({ items, notes, sections, positions, trash, notify });
   useEffect(() => () => window.clearTimeout(toastTimer.current), []);
 
   // Annotations. Annotate mode turns clicks in previews into numbered pins. The
@@ -4004,80 +3735,34 @@ function CanvasBoard({
     );
   }, [items, placeFree, shown]);
 
-  /**
-   * Writes `trashed` into the registry for an item the person moved into or out of
-   * the trash. Until the registry has it, the canvas shows it as made; what the
-   * registry cannot take stays in this browser instead.
-   */
-  const trashPending = useRef(new Map<string, boolean>());
-  const [trashChecks, setTrashChecks] = useState(0);
-  const saveTrashed = useCallback(
-    (item: CanvasItem, want: boolean) => {
-      if (shared) return;
-      if (!want && trashKept.current.delete(item.id)) queueSave();
-      const registered = itemsRef.current.find((entry) => entry.id === item.id);
-      if (!registered) return;
-      // A write the other way may still be on its way, as after a quick Undo: this one must follow it.
-      const pending = trashPending.current.get(item.id);
-      if (pending === want || (pending === undefined && !!registered.trashed === want)) return;
-      trashPending.current.set(item.id, want);
-      const refused = () => {
-        // A put back the registry refused stays put back until the page closes.
-        if (!want || trashPending.current.get(item.id) !== want) return;
-        trashPending.current.delete(item.id);
-        trashKept.current.add(item.id);
-        queueSave();
-      };
-      const edit: DirectEdit = { kind: "item", id: item.id, set: { trashed: want } };
-      fetch(EDIT_PATH, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ edits: [edit] }) })
-        .then((response) => (response.ok ? response.json() : Promise.reject(new Error(`edit ${response.status}`))))
-        .then((result: { missing?: unknown }) => {
-          if (Array.isArray(result.missing) && result.missing.includes(item.id)) return refused();
-          window.setTimeout(() => {
-            if (trashPending.current.get(item.id) !== want) return;
-            trashPending.current.delete(item.id);
-            setTrashChecks((n) => n + 1);
-          }, TRASH_WRITE_GRACE);
-        })
-        .catch(refused);
-    },
-    [queueSave],
-  );
-
-  /** Back on the canvas where it was, or beside its row if that spot was taken meanwhile. */
-  const restore = useCallback(
-    (item: CanvasItem) => {
-      setTrash(trashRef.current.filter((id) => id !== item.id));
-      setFrontId(item.id);
-      requestAnimationFrame(() =>
-        requestAnimationFrame(() => {
-          placeFree([item], { besideOrigin: false });
-          reveal([item]);
-        }),
-      );
-    },
-    [placeFree, reveal, setTrash],
-  );
-  const putBack = useCallback(
-    (item: CanvasItem) => {
-      restore(item);
-      saveTrashed(item, false);
-    },
-    [restore, saveTrashed],
-  );
-  const moveToTrash = useCallback(
+  /** A note open on an item closes as the item goes to the trash. */
+  const closeNoteOn = useCallback(
     (item: CanvasItem) => {
       const open = openRef.current && annotationsRef.current.find((a) => a.id === openRef.current?.id);
       if (open && open.itemId === item.id) closeAnnotation();
-      setTrash([item.id, ...trashRef.current.filter((id) => id !== item.id)]);
-      saveTrashed(item, true);
-      setFrontId((front) => (front === item.id ? null : front));
-      // The button that had focus is gone with its item.
-      viewportRef.current?.focus({ preventScroll: true });
-      notify(labels.movedToTrash(item.name), { label: labels.undo, run: () => putBack(item) });
     },
-    [closeAnnotation, notify, putBack, saveTrashed, setTrash],
+    [closeAnnotation],
   );
+  const {
+    trashedItems,
+    open: trashOpen,
+    setOpen: setTrashOpen,
+    buttonRef: trashButtonRef,
+    close: closeTrash,
+    putBack,
+    moveToTrash,
+  } = useTrash(trashList, {
+    items,
+    itemsRef,
+    saved: saved.trash,
+    queueSave,
+    placeFree,
+    reveal,
+    setFrontId,
+    notify,
+    beforeTrash: closeNoteOn,
+    viewportRef,
+  });
 
   // A pin is placed at a point in its item, but it is about an element. When the
   // item is resized the layout moves, and the element with it, while the point
@@ -4514,65 +4199,6 @@ function CanvasBoard({
     },
     [notify],
   );
-
-  // A trash an older shell kept only in this browser goes into the registry, once.
-  const movedOldTrash = useRef(false);
-  useEffect(() => {
-    if (shared || saved.trash.inRegistry || movedOldTrash.current) return;
-    movedOldTrash.current = true;
-    for (const id of saved.trash.ids) {
-      const item = itemsRef.current.find((entry) => entry.id === id);
-      if (item) saveTrashed(item, true);
-    }
-    queueSave();
-  }, [queueSave, saveTrashed, saved.trash]);
-  // The trash follows the registry: a write landing, or `trashed` changed by the agent or another tab.
-  useEffect(() => {
-    if (shared) return;
-    const inTrash = (item: CanvasItem) => {
-      const pending = trashPending.current.get(item.id);
-      if (pending !== undefined && pending !== !!item.trashed) return pending;
-      trashPending.current.delete(item.id);
-      return !!item.trashed || trashKept.current.has(item.id);
-    };
-    const into = items.filter((item) => inTrash(item) && !trashRef.current.includes(item.id)).map((item) => item.id);
-    if (into.length) setTrash([...into, ...trashRef.current]);
-    for (const item of items) if (!inTrash(item) && trashRef.current.includes(item.id)) restore(item);
-  }, [items, restore, setTrash, trashChecks]);
-
-  const closeSharePanel = useCallback(() => {
-    setShareOpen(false);
-    shareButtonRef.current?.focus({ preventScroll: true });
-  }, []);
-  // Like the trash, the share panel closes on a press outside it.
-  useEffect(() => {
-    if (!shareOpen) return;
-    const onDown = (event: PointerEvent) => {
-      if (event.target instanceof Element && event.target.closest(".canvas-share-popover, .canvas-share-button")) return;
-      setShareOpen(false);
-    };
-    window.addEventListener("pointerdown", onDown, true);
-    return () => window.removeEventListener("pointerdown", onDown, true);
-  }, [shareOpen]);
-
-  const closeTrash = useCallback(() => {
-    setTrashOpen(false);
-    trashButtonRef.current?.focus({ preventScroll: true });
-  }, []);
-
-  // The trash closes on a press outside it, and when it has nothing left.
-  useEffect(() => {
-    if (!trashOpen) return;
-    const onDown = (event: PointerEvent) => {
-      if (event.target instanceof Element && event.target.closest(".canvas-trash-popover, .canvas-trash-button")) return;
-      setTrashOpen(false);
-    };
-    window.addEventListener("pointerdown", onDown, true);
-    return () => window.removeEventListener("pointerdown", onDown, true);
-  }, [trashOpen]);
-  useEffect(() => {
-    if (!trashedItems.length) setTrashOpen(false);
-  }, [trashedItems.length]);
 
   // The item a link led to shows a ring for a moment. When that item is already in view the
   // camera does not move, and without this nothing on the canvas would say where the link went.
@@ -6265,34 +5891,22 @@ function CanvasBoard({
         {!shared && (
           <>
             {trashedItems.length > 0 && (
-              <button
-                ref={trashButtonRef}
-                type="button"
-                className="canvas-button canvas-trash-button"
-                aria-label={labels.trash(trashedItems.length)}
-                aria-expanded={trashOpen}
-                aria-controls={trashOpen ? "canvas-trash" : undefined}
-                data-tip={labels.trashHeading}
+              <TrashButton
+                buttonRef={trashButtonRef}
+                count={trashedItems.length}
+                open={trashOpen}
                 onClick={() => {
                   // One of the trash, the share panel, and a notice at a time: they open in the same corner.
                   setToast(null);
                   setShareOpen(false);
                   setTrashOpen((open) => !open);
                 }}
-              >
-                <TrashIcon />
-                {trashedItems.length}
-              </button>
+              />
             )}
-            {/* While the file builds, the icon pulses and the button takes no second click. */}
-            <button
-              ref={shareButtonRef}
-              type="button"
-              className="canvas-button canvas-icon-button canvas-share-button"
-              aria-busy={sharing}
-              aria-expanded={shareOpen}
-              aria-label={sharing ? labels.sharing : labels.share}
-              data-tip={sharing ? labels.sharing : labels.share}
+            <ShareButton
+              buttonRef={shareButtonRef}
+              busy={sharing}
+              open={shareOpen}
               onClick={() => {
                 // One of the share panel, the trash, and a notice at a time: they open in the same corner.
                 if (!shareOpen) {
@@ -6302,9 +5916,7 @@ function CanvasBoard({
                 }
                 setShareOpen((open) => !open);
               }}
-            >
-              <ShareIcon />
-            </button>
+            />
             <span className="canvas-separator" aria-hidden="true" />
           </>
         )}
