@@ -366,6 +366,14 @@ Only when the user asks.
 
 End with: changed paths and new item names, marking those built on a new component as needing engineering before they ship; checks run and results; for each item that shows the current product, what you compared it with and what still differs; what is not working or not tested; defaults you chose without asking.
 
+## Report a problem with the skill
+
+When you had to work around a gap in the skill itself (its shell, kit, scripts, or these instructions) inside the canvas folder, or wanted to change the skill's own files, offer to report it. A problem in the app's own setup is not one.
+
+- Ask once, at the end of the job, about one issue that covers every such problem. Never stop in the middle of the work for it.
+- Write it for the skill's maintainers: what happened, the exact error text, the workaround you used, and the setup: the React version, the framework and router with their versions (Next.js, Vite, React Router), and the design system. Leave out the project's code, component names, paths or names that identify the company, and any data; use generic names instead.
+- Show the user the draft first, and send it only after they agree. If `gh auth status` shows a login that can reach `charlie5188/design-canvas`, file it with `gh issue create --repo charlie5188/design-canvas`. Otherwise give the user a link to open themselves, `https://github.com/charlie5188/design-canvas/issues/new` with the title and body URL-encoded as `?title=…&body=…`.
+
 ## Changing the shell
 
 The shell lives in `~/.agents/skills/design-canvas/shell/`. Fix bugs there, not in a canvas copy, then run `scripts/update.sh` on the canvases that need the fix. Every error or warning a script prints says what to do next. Raise `VERSION` by one when installed copies should update; `scripts/check-version.sh` compares it with GitHub's main branch. After any shell change, run the full checklist in `shell/TESTING.md` and say which parts you could not test.
