@@ -217,10 +217,17 @@ body,
 .canvas-item[data-front] {
   z-index: 1;
 }
+/* Only the name row takes room above the preview, so every preview starts the same
+   distance below its item's position, and versions side by side line up whatever
+   their captions say. A caption grows upward instead: it stays just above the
+   preview, and the name rises above it (the overflow of a fixed box aligned to its
+   end). Canvas.tsx measures that rise (`liftOf`) where it needs the item's full box. */
 .canvas-item-head {
   display: flex;
   flex-direction: column;
+  justify-content: flex-end;
   gap: 2px;
+  block-size: 24px;
 }
 /* The grip and the name both drag the item, with mouse or touch. */
 .canvas-item-title {

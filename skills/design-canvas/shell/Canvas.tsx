@@ -141,6 +141,20 @@ const SECTION_TITLE_ROOM = 32;
 /** How much of each note a section note's reference quotes. */
 const MAX_NOTE_QUOTE = 120;
 
+/**
+ * How far an item's name and caption rise above its position, in canvas units. A caption
+ * grows upward so that previews side by side line up (canvas.css, `.canvas-item-head`),
+ * and that part lies outside the item element's own box.
+ */
+const liftOf = (element: HTMLElement) => Math.max(0, -(element.querySelector<HTMLElement>(".canvas-item-title")?.offsetTop ?? 0));
+
+/** An item's box on screen, with the name and caption above it. */
+const itemScreenRect = (element: HTMLElement) => {
+  const rect = element.getBoundingClientRect();
+  const top = Math.min(rect.top, element.querySelector(".canvas-item-title")?.getBoundingClientRect().top ?? rect.top);
+  return new DOMRect(rect.left, top, rect.width, rect.bottom - top);
+};
+
 /** Rows top to bottom, each left to right: a box joins a row when it starts above the middle of the row's first box. */
 function readingOrder<T extends { x: number; y: number; h: number }>(boxes: T[]) {
   const rows: T[][] = [];
@@ -1826,13 +1840,17 @@ function CanvasBoard({
     else elements.current.delete(id);
   }, []);
 
-  /** Canvas-unit box of an item: title, handle, and preview. */
+  /**
+   * Canvas-unit box of an item: caption, title, handle, and preview. A caption puts the
+   * box's top `lift` above the item's position, which is `y + lift`.
+   */
   const rectOf = useCallback((item: CanvasItem) => {
     const element = elements.current.get(item.id);
     if (!element) return null;
     const p = positionsRef.current[item.id] ?? { x: item.x, y: item.y };
     // Layout sizes ignore the camera transform, so they are canvas units.
-    return { x: p.x, y: p.y, w: element.offsetWidth, h: element.offsetHeight };
+    const lift = liftOf(element);
+    return { x: p.x, y: p.y - lift, w: element.offsetWidth, h: element.offsetHeight + lift, lift };
   }, []);
 
   // Items whose centre is inside a section, at the positions they have now,
@@ -1844,7 +1862,7 @@ function CanvasBoard({
       const cx = r.x + r.w / 2;
       const cy = r.y + r.h / 2;
       return cx >= bounds.x && cx <= bounds.x + bounds.w && cy >= bounds.y && cy <= bounds.y + bounds.h
-        ? [{ id: item.id, name: item.name, x: r.x, y: r.y }]
+        ? [{ id: item.id, name: item.name, x: r.x, y: r.y + r.lift }]
         : [];
     });
   insideRef.current = itemsInside;
@@ -2092,7 +2110,7 @@ function CanvasBoard({
     const touches = (r: DOMRect) => r.left < box.right && r.right > box.left && r.top < box.bottom && r.bottom > box.top;
     const holds = (r: DOMRect) => r.left >= box.left && r.right <= box.right && r.top >= box.top && r.bottom <= box.bottom;
     const keys: string[] = [];
-    for (const [id, element] of elements.current) if (touches(element.getBoundingClientRect())) keys.push(`item:${id}`);
+    for (const [id, element] of elements.current) if (touches(itemScreenRect(element))) keys.push(`item:${id}`);
     for (const element of worldRef.current?.querySelectorAll<HTMLElement>("[data-board-id], [data-board-ghost], [data-canvas-image]") ?? []) {
       if (element.dataset.canvasImage) {
         if (touches(element.getBoundingClientRect())) keys.push(`image:${element.dataset.canvasImage}`);
@@ -2676,27 +2694,30 @@ function CanvasBoard({
         if (!r) continue;
         const origin = besideOrigin && item.from ? shown.find((other) => other.id === item.from) : undefined;
         const o = origin && rectOf(origin);
+        // Spots are boxes, caption included. Beside its original, a version's preview
+        // starts level with the original's, whatever either caption says.
+        const level = o ? o.y + o.lift - r.lift : r.y;
         const spots = o
           ? [
-              { x: o.x + o.w + ADD_GAP, y: o.y },
+              { x: o.x + o.w + ADD_GAP, y: level },
               { x: o.x, y: o.y + o.h + ADD_GAP },
             ]
           : [{ x: r.x, y: r.y }];
-        let next = spots.find((spot) => !taken.some((other) => overlaps({ ...r, ...spot }, other)));
-        if (!next) {
-          const start = o ?? spots[0]!;
+        let box = spots.find((spot) => !taken.some((other) => overlaps({ ...r, ...spot }, other)));
+        if (!box) {
+          const start = o ? { x: o.x, y: level } : spots[0]!;
           const row = taken.filter((other) => other.y < start.y + r.h && start.y < other.y + other.h);
           const right = Math.max(...(row.length ? row : taken).map((other) => other.x + other.w));
-          next = { x: right + ADD_GAP, y: start.y };
+          box = { x: right + ADD_GAP, y: start.y };
           if (o) {
             const column = taken.filter((other) => other.x < o.x + r.w && o.x < other.x + other.w);
             const below = { x: o.x, y: Math.max(...column.map((other) => other.y + other.h)) + ADD_GAP };
-            if (below.y - o.y < next.x - o.x) next = below;
+            if (below.y - o.y < box.x - o.x) box = below;
           }
         }
-        next = sanitizePosition(next);
+        const next = sanitizePosition({ x: box.x, y: box.y + r.lift });
         placed[item.id] = next;
-        taken.push({ ...r, ...next });
+        taken.push({ ...r, x: next.x, y: next.y - r.lift });
       }
       positionsRef.current = { ...positionsRef.current, ...placed };
       setPositions(positionsRef.current);
@@ -3150,7 +3171,7 @@ function CanvasBoard({
             : entry.startsWith("image:")
               ? worldRef.current?.querySelector<HTMLElement>(`[data-canvas-image="${id}"]`)
               : ref && worldRef.current?.querySelector<HTMLElement>(`[${ref.ghost ? "data-board-ghost" : "data-board-id"}="${CSS.escape(ref.id)}"]`);
-          return element ? [element.getBoundingClientRect()] : [];
+          return element ? [entry.startsWith("item:") ? itemScreenRect(element) : element.getBoundingClientRect()] : [];
         });
         if (!rects.length) return;
         setCamera(
