@@ -3213,10 +3213,27 @@ html[data-canvas-alt] .canvas-frame-root * {
   pointer-events: none;
 }
 
-/* Bold and lists in a note (note-text.tsx). A list sits tight against the lines around it,
-   as a line of the note would. */
+/* Bold, links, code, and lists in a note (note-text.tsx). A list sits tight against the lines
+   around it, as a line of the note would. The colours are fixed, like the note's own. */
 .canvas-note-body strong {
   font-weight: 700;
+}
+.canvas-note-body .canvas-note-link {
+  color: #1d4ed8;
+  text-decoration: underline;
+  text-decoration-color: rgb(29 78 216 / 45%);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.canvas-note-body .canvas-note-link:hover {
+  text-decoration-color: currentColor;
+}
+.canvas-note-body code {
+  padding: 0.05em 0.3em;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 7%);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.88em;
 }
 .canvas-note-body ul,
 .canvas-note-body ol {

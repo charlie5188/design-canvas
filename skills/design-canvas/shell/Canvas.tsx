@@ -2378,6 +2378,9 @@ function CanvasBoard({
       event.stopPropagation();
       // Stops text selection while dragging.
       event.preventDefault();
+      // A link in a note opens on a click; a drag that starts on it still moves the note.
+      // The viewport holds the pointer during the press, so the link never gets the click.
+      const link = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>(".canvas-note-link") : null;
       // In annotate mode a click on a section's title is a note on the whole
       // section, as an item's name is for the item; a drag still moves it. A new
       // section, not in the registry yet, is itself a change waiting to apply.
@@ -2454,6 +2457,11 @@ function CanvasBoard({
             return;
           }
           if (group) select(ref);
+          // Not counted toward a double-click: the new tab has the focus by the second press.
+          if (link) {
+            window.open(link.href, "_blank", "noopener,noreferrer");
+            return;
+          }
           const key = `${ref.kind}:${ref.id}`;
           const now = performance.now();
           if (lastTap.current?.key === key && now - lastTap.current.time < DOUBLE_TAP_MS) {
