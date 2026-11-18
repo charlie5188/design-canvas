@@ -32,8 +32,9 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { access, chmod, constants, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import type { Plugin } from "vite";
-import { AGENT_EVENT, AGENT_PATH, type AgentReply, EDIT_PATH, MAX_REPLY, NOTE_ID, PROPS_PATH, REPLY_EVENT, SHARE_PATH, VERSION_PATH } from "./channel.ts";
+import { AGENT_EVENT, AGENT_PATH, type AgentReply, EDIT_PATH, MAX_REPLY, NOTE_ID, PROPS_PATH, REPLY_EVENT, SHARE_PATH, THEME_PATH, VERSION_PATH } from "./channel.ts";
 import { componentProps, sourceProps } from "./props-types.ts";
+import { readStylesheet, tailwindTheme } from "./tailwind-theme.ts";
 import { addEntry, applyEdits, type DirectAdd, type DirectEdit, type DirectRemove, placeableItems, removeEntry, validAdd, validEdit, validRemove } from "./registry-edit.ts";
 
 export type AgentState = "off" | "listening" | "working";
@@ -257,6 +258,8 @@ export function agentChannel(): Plugin {
       root = config.root;
     },
     transform(code, id) {
+      // The app's stylesheets, as written: their Tailwind theme, for Inspect (tailwind-theme.ts).
+      if (/\.css(?:$|\?)/.test(id)) readStylesheet(id.split("?")[0]!, code);
       return renderInPlace(code, id, root);
     },
     // Inspect previews a prop change live through the hook React's dev build reports to (as React
@@ -512,6 +515,11 @@ export function agentChannel(): Plugin {
         } catch (error) {
           send(response, 500, error instanceof Error ? error.message : String(error));
         }
+      });
+      server.middlewares.use(THEME_PATH, (request, response, next) => {
+        if (request.method !== "GET") return next();
+        if (!localHost(request)) return send(response, 403, "Not allowed");
+        sendJson(response, { theme: tailwindTheme(server.config.root) });
       });
       server.middlewares.use(VERSION_PATH, (request, response, next) => {
         if (request.method !== "GET" || (request.url ?? "/") !== "/") return next();

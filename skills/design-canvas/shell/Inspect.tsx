@@ -4,6 +4,7 @@ import { PROPS_PATH } from "./channel.ts";
 import {
   bySize,
   choices,
+  loadTheme,
   designProps,
   type DesignSystem,
   pathOf,
@@ -93,6 +94,14 @@ export function InspectPanel({
   // After a change (or its reset), read again once React has drawn it: a prop such as `fill` on a
   // Button outside a group changes nothing on the page, so no watcher would notice it.
   useEffect(() => setVersion((n) => n + 1), [changed]);
+  // A Tailwind app's theme comes from the dev server; read again once it is here, so the lists hold it all.
+  useEffect(() => {
+    let live = true;
+    void loadTheme().then(() => live && setVersion((n) => n + 1));
+    return () => {
+      live = false;
+    };
+  }, []);
   useEffect(() => {
     if (!selection) return;
     let timer = 0;
@@ -515,7 +524,8 @@ function StyleRow({
       : value.nearest.length
         ? labels.inspectNearest(system.name, value.nearest.map((n) => `${n.token} (${n.value})`))
         : labels.inspectNotToken(system.name);
-  const options = useMemo(() => (editable ? choices(element, system, row.category) : []), [editable, element, system, row.category]);
+  // Again with each read of the row: the theme may have arrived since (loadTheme).
+  const options = useMemo(() => (editable ? choices(element, system, row.category) : []), [editable, element, system, row]);
   const lengths = row.category === "space" || row.category === "radius";
   const paints = row.category === "text" || row.category === "fill" || row.category === "border";
   const none = lengths ? "0" : labels.inspectNone;

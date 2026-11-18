@@ -137,6 +137,9 @@ function matching(text: string, open: number) {
   }
   return text.length;
 }
+// A declaration that starts a line ends the one before it, where a file leaves out semicolons
+// (Chakra's generated types). Its doc comment, a marker here, may come first.
+const NEXT_DECLARATION = /^\s*(?:@@\d+@@\s*)*(?:export\s+)?(?:declare\s+)?(?:type|interface|const|let|var|function|class|enum|namespace|import)\b/;
 function statementEnd(text: string, from: number) {
   let depth = 0;
   for (let i = from; i < text.length; i++) {
@@ -145,6 +148,7 @@ function statementEnd(text: string, from: number) {
     else if ("{([<".includes(c!)) depth++;
     else if ("})]".includes(c!) || (c === ">" && text[i - 1] !== "=")) depth--;
     else if (c === ";" && depth === 0) return i;
+    else if (c === "\n" && depth === 0 && NEXT_DECLARATION.test(text.slice(i + 1, i + 120))) return i;
   }
   return text.length;
 }
@@ -169,6 +173,8 @@ function splitTop(text: string, separator: string) {
 
 // The package's declaration files, for a type no import names (Chakra's generated recipe variants).
 let packageFiles: string[] = [];
+// Whether the component read last is styled by a recipe (Chakra): it then takes a color palette.
+let recipeStyled = false;
 const pascal = (key: string) => key.replace(/(^|-)([a-z])/g, (_, __, c: string) => c.toUpperCase());
 
 type Members = Map<string, { type: string; file: string; doc: string }>;
@@ -190,6 +196,7 @@ function members(found: Found, depth = 0): Members {
     const args = splitTop(generic[2]!, ",");
     const recipe = /RecipeProps$/.test(generic[1]!) && /^["']([\w-]+)["']$/.exec(args[0] ?? "");
     if (recipe) {
+      recipeStyled = true;
       const name = `${pascal(recipe[1]!)}Variant`;
       const declared = new RegExp(`interface\\s+${name}\\b`);
       const file = packageFiles.find((path) => declared.test(read(path)));
@@ -280,9 +287,31 @@ export function componentProps(from: string, pkg: string, component: string): Pr
     const options = [`${name}Options`, `${name}OwnProps`, `${name}Props`]
       .map((type) => findType(file, type))
       .find((found) => found?.kind === "interface");
-    if (options) return propsOf(members(options));
+    if (!options) continue;
+    recipeStyled = false;
+    const props = propsOf(members(options));
+    const palette = recipeStyled && colorPalette();
+    if (palette && !props.some((prop) => prop.name === "colorPalette")) props.push(palette);
+    return props;
   }
   return null;
+}
+
+/**
+ * Chakra (and Panda CSS) color a recipe's component with `colorPalette`, a style prop the reader
+ * does not follow; the package lists the palettes as a `ColorPalette` type. Names that are no
+ * palette of shades (`transparent`, `bg`, `fg`) are left out.
+ */
+const NOT_PALETTES = /^(transparent|current|inherit|black|white|whiteAlpha|blackAlpha|bg|fg|border)$/;
+function colorPalette(): PropType | null {
+  const declared = /export\s+type\s+ColorPalette\s*=/;
+  const file = packageFiles.find((path) => declared.test(read(path)));
+  const found = file && findType(file, "ColorPalette");
+  if (!found || found.kind !== "alias") return null;
+  const parts: Parts = { options: new Set(), boolean: false, number: false, open: false };
+  typeParts(found.text, found.file, parts);
+  const options = [...parts.options].filter((name) => !NOT_PALETTES.test(name));
+  return options.length ? { name: "colorPalette", options, ...(options.includes("gray") ? { default: "gray" } : {}) } : null;
 }
 
 function propsOf(all: Members) {

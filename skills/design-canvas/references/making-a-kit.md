@@ -68,10 +68,11 @@ The canvas then finds the tokens on its own:
 - Every custom property in the page's stylesheets is a color or a length by its value, and its kind by common names (`space`, `spacing`, `gap`; `radius`, `rounded`; `font-size`; `foreground`, `fg`, `contrastText`; `bg`, `surface`; `border`, `ring`). A color named for neither text nor border is a fill too, as `primary` and `muted` are in shadcn/ui.
 - When most custom properties start with the package's name (`--mui-`, `--chakra-`), only those are tokens; the rest are components' working values. Tailwind's `--tw-*` and names with a component in them (`--mui-palette-Tooltip-bg`) are never tokens.
 - A single spacing token is a base unit (Tailwind's `--spacing`, MUI's `--mui-spacing`): its steps are the scale (`spacing 4`, as `p-4` or `spacing(4)` write it). A `--radius` beside Tailwind's `radius-*` steps is shadcn/ui's base, and gives `radius-sm` to `radius-xl`.
+- In a Tailwind app, the dev server reads the whole theme: Tailwind's defaults and the app's `@theme` blocks. The lists then hold every color and size, also those no class uses yet; a preview of one of those uses its value.
 
 What the common systems need:
-- **MUI:** `name`, `components`, `package: "@mui/material"`. Its theme must be made with `createTheme({ cssVariables: true })`, or its colors and spacing are plain values with no tokens to offer.
-- **Chakra UI:** `name`, `components`, `package: "@chakra-ui/react"`. Props come from its recipes (`size`, `variant`); `colorPalette` shows as set, read-only.
+- **MUI:** `name`, `components`, `package: "@mui/material"`. When its theme is made with `createTheme({ cssVariables: true })`, the tokens are its custom properties. Without it, add `tokens: { palette: theme.palette, shape: theme.shape, spacing: theme.spacing(1) }` from the app's theme.
+- **Chakra UI:** `name`, `components`, `package: "@chakra-ui/react"`. Props come from its recipes (`size`, `variant`), and each component with a recipe offers `colorPalette`.
 - **shadcn/ui:** `name` and `components` only, from the app's `components/ui`.
 - **Radix Themes:** `name`, `components`, `package`, and `propTypes` (below).
 - **Aegis:** the full example in the kit's `design-system.ts`.
@@ -83,6 +84,7 @@ Check the result in the canvas: select a component and something the app built, 
 - `tokenLabel`: a token's name as the system's people write it, from its custom property. Default: without the prefix (`space-3`). Aegis writes dots: `space.medium`.
 - `tokenKinds`: regular expressions, matched against a name without `--`, for kinds whose names the defaults miss or catch too widely. Aegis names one component's tokens with the same words (`button.background.color`), so it pins its colors to `^aegis-color-foreground`, `^aegis-color-background`, `^aegis-color-border`.
 - `typographyAttribute`: the attribute its typography styles key on, if it has one (`data-aegis-typography`). Without one, type is read as font-size tokens.
+- `tokens`: the tokens as a theme object, for a system whose styles carry its values but not their names (MUI without `cssVariables`, a styled-components theme). Each string is a token by its path (`palette.primary.main`); a number is a length in px where its path says so (`shape.borderRadius`). Given, these are the tokens, and custom properties are not read.
 
 ## 8. Fonts
 

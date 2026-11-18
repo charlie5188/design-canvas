@@ -18,6 +18,7 @@
 //   color scheme set by an ancestor changes them), then compared with its computed
 //   style. Tokens come from the installed package, never from a fixed list.
 
+import { THEME_PATH } from "./channel.ts";
 import type { PropType } from "./props-types.ts";
 
 /**
@@ -47,6 +48,14 @@ export type DesignSystem = {
   tokenKinds?: Partial<Record<TokenKind, RegExp>>;
   /** The attribute its typography styles key on, such as "data-aegis-typography". Without one, type is read as font-size tokens. */
   typographyAttribute?: string;
+  /**
+   * The system's tokens as a theme object, for a system whose styles carry its values but not
+   * their names (MUI without `cssVariables`, styled-components themes): `{ palette: theme.palette,
+   * shape: theme.shape, spacing: theme.spacing(1) }`. Each string is a token by its path
+   * (`palette.primary.main`); a number is a length in px where its path says so (`shape.borderRadius`).
+   * Given, these are the tokens, and custom properties are not read.
+   */
+  tokens?: Record<string, unknown>;
   /**
    * Each component's props and their values, where its type declarations cannot say: a system
    * that keeps them at runtime (Radix Themes' prop definitions), say. Undefined for a component
@@ -311,11 +320,31 @@ const measured = { px: new Map<string, number>(), color: new Map<string, string>
 type TokenSet = { names: string[]; typography: string[]; rules: CSSStyleRule[] };
 let tokenCache: { key: string; set: TokenSet } | null = null;
 
+/**
+ * The Tailwind theme the app builds with (tailwind-theme.ts), by custom property: the page holds
+ * only the values its classes use, and the lists offer the rest too. Empty without Tailwind.
+ */
+const declaredTheme = new Map<string, string>();
+let themeRequest: Promise<void> | null = null;
+/** Asks the dev server for the app's Tailwind theme, once. Resolves when it is known. */
+export function loadTheme(): Promise<void> {
+  themeRequest ??= fetch(THEME_PATH)
+    .then((response) => (response.ok ? response.json() : { theme: {} }))
+    .then((body: { theme?: Record<string, string> }) => {
+      for (const [name, value] of Object.entries(body.theme ?? {})) declaredTheme.set(name, value);
+    })
+    .catch(() => {});
+  return themeRequest;
+}
+/** A token's value: as the element resolves it, else as the theme declares it (a value no class uses yet). */
+const valueOf = (style: CSSStyleDeclaration, name: string) => style.getPropertyValue(name).trim() || declaredTheme.get(name) || "";
+
 /** Every public token name, and every typography style, the page's stylesheets define. */
 function tokens(system: DesignSystem): TokenSet {
+  if (system.tokens) return themeTokens(system);
   // A stylesheet added or removed (a hot update) can change the set; the count is enough to notice.
   const prefix = prefixOf(system);
-  const key = `${prefix}:${document.styleSheets.length}`;
+  const key = `${prefix}:${document.styleSheets.length}:${declaredTheme.size}`;
   if (tokenCache?.key === key) return tokenCache.set;
   const names = new Set<string>();
   const typography = new Set<string>();
@@ -346,10 +375,47 @@ function tokens(system: DesignSystem): TokenSet {
       // A stylesheet from another origin cannot be read; it holds no tokens of this page.
     }
   }
+  // The theme's values no class uses yet. One that only names a token the page has (shadcn/ui's
+  // `--color-primary: var(--primary)`) is that token, not a second one.
+  for (const [name, value] of declaredTheme) {
+    const alias = /^var\((--[\w-]+)\)$/.exec(value)?.[1];
+    if (name.startsWith(prefix) && !isPrivate(name) && !(alias && names.has(alias))) names.add(name);
+  }
+  for (const name of names) {
+    const alias = /^var\((--[\w-]+)\)$/.exec(declaredTheme.get(name) ?? "")?.[1];
+    if (alias && names.has(alias) && !rules.some((rule) => rule.style.cssText.includes(`var(${name})`))) names.delete(name);
+  }
   const set = { names: [...names].sort(), typography: [...typography].sort(), rules };
   tokenCache = { key, set };
   measured.px.clear();
   measured.color.clear();
+  return set;
+}
+
+/** A theme object's token, by its path: `theme:palette.primary.main`. */
+const THEME = "theme:";
+/** Each theme token's value, as the system's `tokens` give it. */
+const themeValues = new Map<string, string>();
+let themeCache: { tokens: Record<string, unknown>; set: TokenSet } | null = null;
+// A number is a length only where its path says so: `shape.borderRadius` is, `action.hoverOpacity` is not.
+const LENGTH_PATH = /radius|spacing|space|gap|size|width|height/i;
+function themeTokens(system: DesignSystem): TokenSet {
+  const cached = themeCache;
+  if (cached && cached.tokens === system.tokens) return cached.set;
+  themeValues.clear();
+  const walk = (value: unknown, path: string[], depth: number) => {
+    if (depth > 6) return;
+    const key = THEME + path.join(".");
+    if (typeof value === "string") themeValues.set(key, value);
+    else if (typeof value === "number" && LENGTH_PATH.test(path.join("."))) themeValues.set(key, `${value}px`);
+    else if (value && typeof value === "object" && !Array.isArray(value))
+      for (const [name, inner] of Object.entries(value)) walk(inner, [...path, name], depth + 1);
+  };
+  walk(system.tokens, [], 0);
+  // The typography styles still come from the attribute, when the system has one.
+  const typography = system.typographyAttribute ? tokens({ ...system, tokens: undefined }).typography : [];
+  const set: TokenSet = { names: [...themeValues.keys()].sort(), typography, rules: [] };
+  themeCache = { tokens: system.tokens!, set };
   return set;
 }
 
@@ -360,6 +426,7 @@ function tokens(system: DesignSystem): TokenSet {
 export const tokenLabel = (name: string, system: DesignSystem): string => {
   const step = /^calc\(var\((--[\w-]+)\) \* ([\d.]+)\)$/.exec(name);
   if (step) return `${tokenLabel(step[1]!, system)} ${step[2]}`;
+  if (name.startsWith(THEME)) return DERIVED.get(name) ?? name.slice(THEME.length);
   return DERIVED.get(name) ?? system.tokenLabel?.(name) ?? name.slice(prefixOf(system).length);
 };
 /** Values made from a token that have no token of their own (see classify), by their names. */
@@ -409,11 +476,15 @@ export function styleRows(element: Element, preview: Element, system: DesignSyst
   (preview.parentElement ?? preview).append(probes);
   try {
     // Several tokens can have one value. The one the code names comes first, then the
-    // one made for this kind of property, then the plainest name.
-    const pick = (same: { name: string }[], used: string[], prefer: (name: string) => boolean, shown: string): Value => {
+    // one made for this kind of property, then one of the same family as the element's fill
+    // (`primary.contrastText` on `primary.main`: a theme without custom properties names
+    // nothing), then the plainest name.
+    const familyOf = (label: string) => label.split(/[-_.]/).slice(-2, -1)[0];
+    const pick = (same: { name: string }[], used: string[], prefer: (name: string) => boolean, shown: string, family?: string): Value => {
       const score = (name: string) =>
         (used.includes(name) ? 0 : 100) +
         (prefer(name) ? 0 : 10) +
+        (family && familyOf(tokenLabel(name, system)) !== family ? 3 : 0) +
         // A resting element rarely uses a state's token, even when the values agree.
         (STATES.test(name) ? 5 : 0) +
         (name.includes("default") ? 0 : 1) +
@@ -439,11 +510,11 @@ export function styleRows(element: Element, preview: Element, system: DesignSyst
       const nearest = scale.filter((t) => Math.abs(Math.abs(t.px - value) - distance) < 0.5);
       return { kind: "off", value: shown, nearest: nearest.map((t) => ({ token: tokenLabel(t.name, system), value: `${round(t.px)}px` })), property };
     };
-    const paint = (raw: string, prefer: (name: string) => boolean, used: string[], property: string): Value => {
+    const paint = (raw: string, prefer: (name: string) => boolean, used: string[], property: string, family?: string): Value => {
       const value = colorOf(raw);
       if (!value || /^rgba\(0, 0, 0, 0\)$|^transparent$/.test(value)) return { kind: "none", property };
       const same = kinds.colors.filter((t) => t.color === value);
-      if (same.length) return { ...pick(same, used, prefer, hex(value)), property };
+      if (same.length) return { ...pick(same, used, prefer, hex(value), family), property };
       return { kind: "off", value: hex(value), nearest: [], property };
     };
     // One value for four equal sides, one per axis for two pairs, else each side (each that is set, read-only).
@@ -463,15 +534,16 @@ export function styleRows(element: Element, preview: Element, system: DesignSyst
     const shows = (values: Value[]) => all || values.some((v) => v.kind !== "none");
 
     const rows: Row[] = [];
+    const fill = paint(style.backgroundColor, kindOf("fill"), declared(["background-color", "background"]), "background-color");
+    const family = fill.kind === "token" ? familyOf(fill.token) : undefined;
     const hasText =
       element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || textLooksLike(element, style);
     if (hasText) {
       // Type: a typography style where the system keys them on an attribute, else its font-size tokens.
       if (typography.length) rows.push({ label: "Type", category: "typography", values: [typeStyle(element, style, typography, probes, system)] });
       else if (fontSize.length) rows.push({ label: "Type", category: "fontSize", values: [length(style.fontSize, fontSize, "font-size", declared(["font-size", "font"], true))] });
-      rows.push({ label: "Text", category: "text", values: [paint(style.color, kindOf("text"), declared(["color"], true), "color")] });
+      rows.push({ label: "Text", category: "text", values: [paint(style.color, kindOf("text"), declared(["color"], true), "color", family)] });
     }
-    const fill = paint(style.backgroundColor, kindOf("fill"), declared(["background-color", "background"]), "background-color");
     if (shows([fill])) rows.push({ label: "Fill", category: "fill", values: [fill] });
     if (["Top", "Right", "Bottom", "Left"].some((side) => parseFloat(style.getPropertyValue(`border-${side.toLowerCase()}-width`)) > 0)) {
       const used = declared(["border-color", "border", "border-top-color", "border-top"]);
@@ -668,7 +740,7 @@ function classify(element: Element, system: DesignSystem): Kinds {
   const lengths: Length[] = [];
   const colors: Paint[] = [];
   for (const name of names) {
-    const raw = style.getPropertyValue(name).trim();
+    const raw = name.startsWith(THEME) ? (themeValues.get(name) ?? "") : valueOf(style, name);
     if (!raw) continue;
     const color = colorOf(raw);
     if (color) colors.push({ name, raw, color });
@@ -678,7 +750,8 @@ function classify(element: Element, system: DesignSystem): Kinds {
     }
   }
   const patterns = { ...KINDS, ...system.tokenKinds };
-  const says = (t: { name: string }, kind: TokenKind) => patterns[kind].test(t.name.slice(2));
+  const says = (t: { name: string }, kind: TokenKind) =>
+    patterns[kind].test(t.name.startsWith(THEME) ? tokenLabel(t.name, system) : t.name.slice(2));
   // A length whose name starts with the kind (`space.small`) is the system's own scale; others that
   // only mention it (`button.column.gap`) belong to one component, so they count only when no
   // name starts with it.
@@ -710,16 +783,19 @@ function classify(element: Element, system: DesignSystem): Kinds {
   if (space.length === 1 && /(^|[-_.])(spacing|space|unit)$/i.test(tokenLabel(space[0]!.name, system))) {
     const unit = space[0]!;
     space = STEPS.filter((n) => n * unit.px <= 128).map((n) => {
-      const name = `calc(var(${unit.name}) * ${n})`;
+      // A theme's unit has no custom property to refer to: its value stands in.
+      const name = unit.name.startsWith(THEME) ? `calc(${unit.raw} * ${n})` : `calc(var(${unit.name}) * ${n})`;
+      if (unit.name.startsWith(THEME)) DERIVED.set(name, `${tokenLabel(unit.name, system)} ${n}`);
       return { name, raw: name, px: n * unit.px };
     });
   }
   const paints = (kind: TokenKind) => {
     const list = colors.filter((t) => says(t, kind));
-    // A system that names its fills by role (`primary`, `muted`, `card`) says "fill" in none of
-    // them: every color its text and border names leave is a fill too.
-    if (kind === "fill" && !system.tokenKinds?.fill) {
-      for (const t of colors) if (!list.includes(t) && !says(t, "text") && !says(t, "border")) list.push(t);
+    // A color named for none of the three (a role, `primary`, `card`; a palette shade, `red-500`)
+    // can be a fill and a text color both, as Tailwind's `bg-primary` and `text-primary` are. It
+    // follows the colors named for the kind.
+    if ((kind === "fill" || kind === "text") && !system.tokenKinds?.[kind]) {
+      for (const t of colors) if (!list.includes(t) && !says(t, "text") && !says(t, "fill") && !says(t, "border")) list.push(t);
     }
     return list.length ? list : colors;
   };
@@ -876,7 +952,15 @@ export function showStyle(element: Element, property: string, value: string, sys
     return before;
   }
   const before = element.style.getPropertyValue(property);
-  if (value) element.style.setProperty(property, value.startsWith("--") ? `var(${value})` : value);
+  // A theme value no class uses has no custom property on the page: its value stands in.
+  const css = value.startsWith("--")
+    ? getComputedStyle(element).getPropertyValue(value).trim()
+      ? `var(${value})`
+      : (declaredTheme.get(value) ?? "")
+    : value.startsWith(THEME)
+      ? (themeValues.get(value) ?? "")
+      : value;
+  if (css) element.style.setProperty(property, css);
   else element.style.removeProperty(property);
   return before;
 }

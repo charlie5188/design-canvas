@@ -8,6 +8,10 @@ import type { DesignSystem } from "./canvas/inspect-read";
 //   import * as Mui from "@mui/material";
 //   export const designSystem = { name: "MUI", components: Mui, package: "@mui/material" };
 //
+// A theme without CSS variables (MUI's default) gives its tokens as an object:
+//
+//   tokens: { palette: theme.palette, shape: theme.shape, spacing: theme.spacing(1) },
+//
 // Components copied into the app (shadcn/ui) have no package: their props are read from the
 // `cva(...)` in their source.
 //
