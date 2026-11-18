@@ -5756,8 +5756,9 @@ function CanvasBoard({
     // Previews and their portals never navigate the canvas away. Their own
     // click handlers still run; only the browser's navigation is cancelled.
     const onLinkClick = (event: MouseEvent) => {
-      // A click that placed a annotation was already cancelled by the pick handler.
-      if (annotatingRef.current && event.defaultPrevented) return;
+      // A click that placed an annotation, or selected an element to inspect, was already
+      // cancelled by the pick handler: it follows no link.
+      if ((annotatingRef.current || inspectToolRef.current) && event.defaultPrevented) return;
       const anchor = previewLink(event);
       if (!anchor) return;
       event.preventDefault();

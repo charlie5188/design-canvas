@@ -192,7 +192,8 @@ export function Block({ kind = "box", label, row, size, lines = 0, emphasis, pri
   if (kind === "toggle") {
     const segments = options?.length ? options : ["", ""];
     return (
-      <div style={{ ...base, alignSelf: inRow ? undefined : "flex-start", display: "inline-flex", gap: 2, padding: 2, borderRadius: 5, background: line }}>
+      // In a row it keeps its own height, centred, instead of stretching to a taller neighbour.
+      <div style={{ ...base, alignSelf: inRow ? "center" : "flex-start", display: "inline-flex", gap: 2, padding: 2, borderRadius: 5, background: line }}>
         {segments.map((segment, index) => (
           // Never narrower than its word: a toggle's words are short, and a cut-off "Mont…" read as broken.
           <span key={index} style={{ ...words, flex: "1 0 auto", padding: "2px 8px", borderRadius: 4, textAlign: "center", background: index === (selected ?? 0) ? surface : "transparent", color: index === (selected ?? 0) ? text : subtle }}>
