@@ -2194,6 +2194,7 @@ html[data-canvas-alt] .canvas-frame-root * {
 
 /* An item that holds a flow says so beside its name, with how many screens it has. */
 .canvas-item-screens {
+  position: relative;
   display: inline-flex;
   flex: none;
   align-items: center;
@@ -2208,6 +2209,12 @@ html[data-canvas-alt] .canvas-frame-root * {
   font-variant-numeric: tabular-nums;
   cursor: pointer;
   transition: color var(--canvas-fast) var(--canvas-ease), border-color var(--canvas-fast) var(--canvas-ease);
+}
+/* A larger target than the chip: it is small, and the only way into the flow view. */
+.canvas-item-screens::before {
+  content: "";
+  position: absolute;
+  inset: -6px -4px;
 }
 .canvas-item-screens:hover {
   border-color: var(--canvas-subtle-color);
@@ -2282,12 +2289,20 @@ html[data-canvas-alt] .canvas-frame-root * {
   align-self: stretch;
   gap: 4px;
   block-size: 24px;
+  /* It keeps one size on screen as the view zooms in, at the screen's top left corner, rather
+     than growing over the screen (FlowView.tsx sets the scale). The width makes up for the
+     scale, and the move down keeps the 8px gap above the screen (the screen's `gap`) on screen. */
+  inline-size: calc(100% / var(--flow-head, 1));
+  transform: translateY(var(--flow-head-drop, 0px)) scale(var(--flow-head, 1));
+  transform-origin: 0 100%;
 }
 /* A screen's states, beside its name: a small menu with the state shown. */
+/* The name wins the room: on a narrow screen the menu gives way, down to its icon. */
 .canvas-flow-states {
   position: relative;
   display: inline-flex;
-  flex: none;
+  flex: 0 1 auto;
+  min-inline-size: 28px;
   align-items: center;
   color: var(--canvas-subtle-color);
 }
@@ -2298,7 +2313,8 @@ html[data-canvas-alt] .canvas-frame-root * {
 }
 .canvas-flow-states select {
   appearance: none;
-  max-inline-size: 160px;
+  min-inline-size: 0;
+  max-inline-size: min(160px, 100%);
   padding: 2px 8px 2px 26px;
   border: 1px solid var(--canvas-border-color);
   border-radius: 999px;
@@ -2317,7 +2333,8 @@ html[data-canvas-alt] .canvas-frame-root * {
   outline-offset: 1px;
 }
 .canvas-flow-path {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
+  max-inline-size: 100%;
 }
 .canvas-flow-screen:hover .canvas-item-actions {
   position: static;
@@ -2330,13 +2347,17 @@ html[data-canvas-alt] .canvas-frame-root * {
   align-items: flex-start;
   gap: 8px;
 }
+/* A press on a screen brings it close, as the cursor says. */
 .canvas-flow-open {
   position: absolute;
   inset: 0;
   padding: 0;
   border: 0;
   background: none;
-  cursor: pointer;
+  cursor: zoom-in;
+}
+.canvas-flow-open[data-focused] {
+  cursor: zoom-out;
 }
 .canvas-flow-path {
   min-inline-size: 0;
@@ -2424,6 +2445,10 @@ html[data-canvas-alt] .canvas-frame-root * {
   stroke: var(--canvas-bg-color);
   stroke-width: calc(6px * var(--flow-label, 1));
   stroke-linejoin: round;
+}
+/* A step the state shown has no control for. */
+.canvas-flow-arrows [data-absent] {
+  opacity: 0.3;
 }
 .canvas-flow-arrows path {
   fill: none;
@@ -3197,4 +3222,16 @@ html[data-canvas-alt] .canvas-frame-root * {
 .canvas-note-body ol {
   margin: 0;
   padding-inline-start: 1.4em;
+}
+/* Set here, not left to the browser: an app's reset (Tailwind's preflight, among others) takes
+   the markers off every list, and a note's items then read as one indented paragraph. */
+.canvas-note-body ul {
+  list-style: disc outside;
+}
+.canvas-note-body ol {
+  list-style: decimal outside;
+}
+.canvas-note-body li {
+  display: list-item;
+  margin: 0;
 }

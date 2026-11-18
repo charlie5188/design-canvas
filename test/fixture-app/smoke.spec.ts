@@ -65,9 +65,17 @@ const test = base.extend<{ settledRegistry: void }>({
 // it cannot land during the next test.
 async function restoreRegistry(page: Page, original: string) {
   if (readFileSync(REGISTRY, 'utf8') === original) return
+  const served = await (await page.request.get('/registry.tsx')).text()
   const updated = page.waitForEvent('console', { predicate: (m) => m.text().includes('hot updated'), timeout: 10_000 }).catch(() => {})
   writeFileSync(REGISTRY, original)
   await updated
+  // Also until the dev server serves it: the file is back, so the settledRegistry fixture has
+  // nothing to do, and on a slow machine the next test's page could still load the version
+  // before (an item in the trash, say), as GitHub's smoke job once did.
+  await expect
+    .poll(async () => (await (await page.request.get('/registry.tsx')).text()) !== served, { timeout: 10_000 })
+    .toBe(true)
+    .catch(() => {})
 }
 
 // Whether the dev server serves the registry with an item in the trash. A write lands in the
@@ -1748,6 +1756,9 @@ test('a note draws **bold** and lists, and is edited as the text it is', async (
     await expect(note).toBeVisible()
     await expect(note.locator('ul > li')).toHaveText(['A keeps the summary', 'B hides it'])
     await expect(note.locator('ol > li')).toHaveText(['Pick one', 'Ship it'])
+    // The app resets lists (src/index.css), and the note's still show their markers.
+    await expect(note.locator('ul')).toHaveCSS('list-style-type', 'disc')
+    await expect(note.locator('ol')).toHaveCSS('list-style-type', 'decimal')
     await expect(note.locator('strong')).toHaveText(['A'])
     // The marks are drawn, not shown; stars with spaces inside are no mark.
     await expect(note).not.toContainText('**A**')
@@ -3583,6 +3594,8 @@ export const Done = () => (
     await expect(page.locator('.canvas-item[data-canvas-item="single"] .canvas-item-screens')).toHaveCount(0)
     const show = page.getByRole('button', { name: 'Show the 3 screens of Example · replace me' })
     await expect(show).toHaveText('3')
+    // Its hint says what a press does.
+    await expect(show).toHaveAttribute('data-tip', 'Show the flow: 3 screens')
 
     await show.click()
     const view = page.getByRole('dialog', { name: 'Screens of Example · replace me' })
@@ -3601,9 +3614,20 @@ export const Done = () => (
     const fit = await percent()
     const words = view.locator('.canvas-flow-arrows text').first()
     const wordsHeight = (await words.boundingBox())!.height
+    const nameHeight = (await view.locator('.canvas-flow-path').first().boundingBox())!.height
+    // Zoomed in, the words and the screens' names keep their size on screen: they do not grow
+    // taller than the screens' own headings. Zoomed out, they shrink with the view.
     await view.getByRole('button', { name: 'Zoom in' }).click()
     await expect.poll(percent).toBeGreaterThan(fit)
-    await expect.poll(async () => (await words.boundingBox())!.height).toBeGreaterThan(wordsHeight * 1.15)
+    await page.keyboard.press('+')
+    await page.keyboard.press('+')
+    // Within a little: text at a small layout size, scaled up, has its box rounded differently.
+    expect(Math.abs((await words.boundingBox())!.height - wordsHeight) / wordsHeight).toBeLessThan(0.15)
+    expect((await view.locator('.canvas-flow-path').first().boundingBox())!.height).toBeLessThan(nameHeight * 1.1)
+    await page.keyboard.press('1')
+    await page.keyboard.press('-')
+    await page.keyboard.press('-')
+    await expect.poll(async () => (await words.boundingBox())!.height).toBeLessThan(wordsHeight * 0.85)
     await page.keyboard.press('0')
     await expect(level).toHaveText('100%')
     await page.keyboard.press('1')
@@ -3627,6 +3651,16 @@ export const Done = () => (
     await page.mouse.up()
     await expect(view).toBeVisible()
     await expect.poll(async () => (await view.locator('.canvas-flow-screen').first().boundingBox())!.x).toBeGreaterThan(before + 150)
+    // Empty space: the stage's bottom left corner, clear of the screens and the bars.
+    const emptySpace = async () => {
+      const stage = (await view.locator('.canvas-flow-stage').boundingBox())!
+      await page.mouse.click(stage.x + 40, stage.y + stage.height - 40)
+    }
+    // A press on empty space is inside the view: it keeps the view, and where it is.
+    const panned = (await view.locator('.canvas-flow-screen').first().boundingBox())!.x
+    await emptySpace()
+    await expect(view).toBeVisible()
+    expect((await view.locator('.canvas-flow-screen').first().boundingBox())!.x).toBe(panned)
     await page.keyboard.press('Escape')
     await expect(view).toHaveCount(0)
 
@@ -3639,8 +3673,23 @@ export const Done = () => (
     // A router call is named by the button pressed to make it.
     await expect(view.locator('.canvas-flow-arrows text')).toContainText(['click "Pay"'])
     await expect(view.locator('.canvas-flow-screen[data-current] h2')).toHaveText('Done')
-    // A press on a screen opens the item there, back on the canvas.
-    await view.getByRole('button', { name: 'Open /checkout' }).click()
+    // A press on a screen brings it close, and the view stays; a second one shows the whole flow again.
+    await page.keyboard.press('1')
+    const whole = await percent()
+    await view.getByRole('button', { name: 'Zoom to /checkout' }).click()
+    await expect.poll(percent).toBe(100)
+    const stage = (await view.locator('.canvas-flow-stage').boundingBox())!
+    const offCentre = async () => {
+      const frame = (await view.locator('.canvas-flow-frame').nth(1).boundingBox())!
+      return Math.abs(frame.x + frame.width / 2 - (stage.x + stage.width / 2))
+    }
+    await expect.poll(offCentre).toBeLessThan(4)
+    await expect(item.locator('h2')).toHaveText('Done')
+    await view.getByRole('button', { name: 'Show the whole flow' }).click()
+    await expect.poll(percent).toBe(whole)
+    // Its name row's Try opens the item there, back on the canvas.
+    await view.locator('.canvas-flow-screen').nth(1).hover()
+    await view.getByRole('button', { name: 'Try /checkout on the canvas' }).click()
     await expect(view).toHaveCount(0)
     await expect(item.locator('h2')).toHaveText('Checkout')
 
@@ -3664,6 +3713,12 @@ export const Done = () => (
     await expect(flowNote.getByRole('textbox')).toHaveValue('Are 3 steps - too many? 1 0')
     await flowNote.getByRole('textbox').fill('')
     await page.keyboard.press('Escape')
+    await expect(view).toBeVisible()
+    // A press on empty space closes the note, and only the note.
+    await view.getByRole('button', { name: 'Ask agent about the whole flow of Example · replace me' }).click()
+    await expect(flowNote).toBeVisible()
+    await emptySpace()
+    await expect(flowNote).toHaveCount(0)
     await expect(view).toBeVisible()
     // The Ask agent tool, as on the canvas: A, then a click on an element asks about it on its screen.
     const askTool = view.getByRole('toolbar', { name: 'Tools' }).getByRole('button', { name: 'Ask agent' })
@@ -3691,7 +3746,8 @@ export const Done = () => (
     await expect(phone.locator('iframe')).toHaveCount(3)
     await expect(phone.frameLocator('iframe').nth(2).locator('h2')).toHaveText('Done')
     await expect(phone.locator('.canvas-flow-arrows > g > path')).toHaveCount(3)
-    await phone.getByRole('button', { name: 'Open /done' }).click()
+    await phone.locator('.canvas-flow-screen').nth(2).hover()
+    await phone.getByRole('button', { name: 'Try /done on the canvas' }).click()
     await expect(page.frameLocator('.canvas-item[data-canvas-item="phone"] iframe').locator('h2')).toHaveText('Done')
     expect(errors).toEqual([])
   } finally {
@@ -3808,6 +3864,50 @@ export const Failed = () => <Screen title="Failed"><a href="/checkout">Try again
   }
 })
 
+test('a step the registry names has its arrow from the start, and the layout does not wait for a first try', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  const example = readFileSync(EXAMPLE, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    writeFileSync(
+      EXAMPLE,
+      `import { NAVIGATE_EVENT } from "../canvas/bridge";
+const push = (href: string) => window.dispatchEvent(new CustomEvent(NAVIGATE_EVENT, { detail: href }));
+const Screen = ({ title, children }: { title: string; children?: React.ReactNode }) => <div style={{ padding: 16 }}><h2>{title}</h2>{children}</div>;
+export const Example = () => <Screen title="List"><a href="/upload">Upload</a> <a href="/review/1">First</a></Screen>;
+export const Upload = () => <Screen title="Upload"><button type="button" onClick={() => push("/review/1")}>Start review</button></Screen>;
+export const Review = () => <Screen title="Review"><a href="/done">Approve</a></Screen>;
+export const Done = () => <Screen title="Done" />;
+`,
+    )
+    writeFileSync(
+      REGISTRY,
+      original
+        .replace('import { Example } from "./items/Example";', 'import { Done, Example, Review, Upload } from "./items/Example";')
+        // The router call in Upload is named, with one to a path the item does not show, which is left out.
+        .replace(
+          'component: Example,',
+          'component: Example,\n    path: "/list",\n    screens: { "/upload": Upload, "/review/:id": Review, "/done": Done },\n    steps: { "/upload": { "Start review": "/review/1", Help: "/help" } },',
+        ),
+    )
+    await expect.poll(async () => (await (await page.request.get('/registry.tsx')).text()).includes('Start review'), { timeout: 15_000 }).toBe(true)
+    await expect.poll(async () => (await (await page.request.get('/items/Example.tsx')).text()).includes('Review'), { timeout: 15_000 }).toBe(true)
+    await page.goto('/')
+    await page.getByRole('button', { name: 'Show the 4 screens of Example · replace me' }).click()
+    const view = page.getByRole('dialog', { name: 'Screens of Example · replace me' })
+    // Nobody pressed Start review, and still: its arrow is there, and Review is on the main path,
+    // not a branch of List (which links to it too).
+    // Between two screens its words take two lines.
+    await expect(view.locator('.canvas-flow-arrows > g').filter({ hasText: '"Start' }).filter({ hasText: 'review"' })).toHaveCount(1)
+    await expect(view.locator('.canvas-flow-screen[data-row="1"]')).toHaveCount(0)
+    await expect(view.locator('.canvas-flow-arrows > g').filter({ hasText: 'Help' })).toHaveCount(0)
+    expect(errors).toEqual([])
+  } finally {
+    writeFileSync(EXAMPLE, example)
+    await restoreRegistry(page, original)
+  }
+})
+
 test('states belong to their screen: the flow view switches between them, and the canvas shows the first', async ({ page }) => {
   const original = readFileSync(REGISTRY, 'utf8')
   const example = readFileSync(EXAMPLE, 'utf8')
@@ -3817,7 +3917,7 @@ test('states belong to their screen: the flow view switches between them, and th
       EXAMPLE,
       `const Screen = ({ title, children }: { title: string; children?: React.ReactNode }) => <div style={{ padding: 16 }}><h2>{title}</h2>{children}</div>;
 export const Example = () => <Screen title="Plans"><a href="/checkout">Continue</a></Screen>;
-export const Checkout = () => <Screen title="Checkout"><button type="button">Pay</button></Screen>;
+export const Checkout = () => <Screen title="Checkout"><button type="button">Pay</button> <a href="/plans">Back</a></Screen>;
 export const CheckoutEmpty = () => <Screen title="Checkout · nothing to pay" />;
 export const CheckoutError = () => <Screen title="Checkout · card error"><button type="button">Retry</button></Screen>;
 export const List = () => <Screen title="List" />;
@@ -3862,9 +3962,14 @@ export const ListEmpty = () => <Screen title="List · empty" />;
     const arrows = await view.locator('.canvas-flow-arrows > g').count()
     await states.selectOption('Card error')
     await expect(checkout.locator('h2')).toHaveText('Checkout · card error')
-    // Another state moves nothing and takes no arrow away.
+    // Another state moves nothing and takes no arrow away, but an arrow it has no control for is dimmed.
     await page.waitForTimeout(700)
     await expect(view.locator('.canvas-flow-arrows > g')).toHaveCount(arrows)
+    const back = view.locator('.canvas-flow-arrows > g').filter({ hasText: 'click "Back"' })
+    await expect(back).toHaveAttribute('data-absent', 'true')
+    await states.selectOption('')
+    await expect(back).not.toHaveAttribute('data-absent')
+    await states.selectOption('Card error')
     // A note asked on a state names it.
     await checkout.hover()
     await checkout.getByRole('button', { name: 'Ask agent about /checkout' }).click()

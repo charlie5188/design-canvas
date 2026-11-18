@@ -25,7 +25,7 @@ export const images: CanvasImage[] = [];
 /**
  * Add, rename, or remove canvas items here. The canvas reads these, the notes, and the sections, and nothing else.
  * An item can name the `path` it shows and hold more `screens` by path, so the links in the real code work,
- * and hold its screens' other `states` (empty, an error) (canvas/types.ts).
+ * and hold its screens' other `states` (empty, an error), and name the `steps` that code makes, such as a router call (canvas/types.ts).
  */
 export const registry: CanvasItem[] = [
   {

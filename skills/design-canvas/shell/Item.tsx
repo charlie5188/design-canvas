@@ -509,7 +509,7 @@ export function CanvasItemView({
               type="button"
               className="canvas-item-screens"
               aria-label={labels.showFlow(item.name, screenCount, states)}
-              data-tip={[screenCount > 1 ? labels.screens(screenCount) : "", states ? labels.states(states) : ""].filter(Boolean).join(" · ")}
+              data-tip={labels.flowHint(screenCount, states)}
               onPointerDown={(event) => event.stopPropagation()}
               onClick={() => onFlow(item)}
             >

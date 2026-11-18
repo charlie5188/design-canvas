@@ -52,6 +52,15 @@ export type CanvasItem = {
    */
   states?: Record<string, Record<string, ComponentType>>;
   /**
+   * The steps between screens that code makes, not a link: a router call in a click or submit
+   * handler. By the screen's path, then by the words on the control, to the path it leads to.
+   * The flow view reads links from the screens by itself, but cannot see where a handler goes
+   * until someone presses it; named here, its arrow is there from the start, and the layout does
+   * not change after a first try. The item's own screen is listed by its `path`, or by "".
+   * `{ "/checkout": { Pay: "/done" }, "/upload": { "Start review": "/contracts/1" } }`
+   */
+  steps?: Record<string, Record<string, string>>;
+  /**
    * The id of the item this one is a new version of. The canvas places it
    * beside that item, and its arrival clears that item's sent "new version"
    * annotations.

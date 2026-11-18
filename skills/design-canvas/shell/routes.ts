@@ -165,5 +165,22 @@ export function locationIn(item: CanvasItem, location: string): Location {
   return { path, search: searchPart(location), params, pattern };
 }
 
+/**
+ * The steps the registry names (`steps`), as screen indexes and the control's words. A step from
+ * or to a path the item does not show is left out: the flow view draws only its own screens.
+ */
+export function namedSteps(item: CanvasItem): { from: number; to: number; label: string }[] {
+  const out: { from: number; to: number; label: string }[] = [];
+  for (const [path, controls] of Object.entries(item.steps ?? {})) {
+    // The item's own screen is listed by its `path`, or by "" when it names none.
+    const from = path === "" || path === (item.path ?? "") ? 0 : screenIndex(item, path);
+    for (const [label, location] of Object.entries(controls)) {
+      const to = screenIndex(item, location);
+      if (from >= 0 && to >= 0 && to !== from) out.push({ from, to, label });
+    }
+  }
+  return out;
+}
+
 /** How many states an item has beside its screens' first ones. */
 export const stateCount = (item: CanvasItem) => screensOf(item).reduce((n, screen) => n + screen.states.length, 0);
