@@ -1168,6 +1168,15 @@ html[data-canvas-alt] .canvas-frame-root * {
 .canvas-trash-dialog:focus {
   outline: none;
 }
+/* The dialog clips what leaves it: hints open below, and controls at the right line theirs up with their end. */
+.canvas-trash [data-tip]::after {
+  inset-block: calc(100% + 8px) auto;
+}
+.canvas-trash .canvas-trash-head [data-tip]::after,
+.canvas-trash .canvas-trash-detail-name ~ [data-tip]::after,
+.canvas-trash .canvas-trash-detail-name ~ * [data-tip]::after {
+  inset-inline: auto 0;
+}
 .canvas-trash-head {
   display: flex;
   align-items: center;
