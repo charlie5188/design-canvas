@@ -23,11 +23,17 @@ const MAX_VALUE = 60;
 const LOOK_MS = [60, 500];
 
 type Step =
-  | { kind: "press" | "click"; words: string }
+  // `pending`: heard, and waiting to see whether it changed anything (`after` below).
+  | { kind: "press" | "click"; words: string; pending?: boolean }
   | { kind: "type"; field: Element; name: string; value: string; hidden: boolean }
   | { kind: "choose"; field: Element; name: string; value: string }
   | { kind: "check"; field: Element; name: string; checked: boolean }
-  | { kind: "key"; key: string; name?: string };
+  | { kind: "key"; key: string; name?: string; pending?: boolean };
+
+/** A press or a key: it counts only if the item changed after it. */
+type Waiting = Extract<Step, { kind: "press" | "click" | "key" }>;
+
+const isWaiting = (step: Step) => (step.kind === "press" || step.kind === "click" || step.kind === "key") && !!step.pending;
 
 const clip = (text: string) => {
   const value = text.replace(/\s+/g, " ").trim();
@@ -66,10 +72,15 @@ export class Trail {
     }
   }
 
-  /** The same field again replaces its last step: typing a word is one step, not one per letter. */
+  /**
+   * The same field again replaces its last step: typing a word is one step, not one per letter.
+   * A press still waiting in between does not count: it may turn out to have changed nothing.
+   */
   private pushField(step: Extract<Step, { field: Element }>) {
-    const last = this.steps[this.steps.length - 1];
-    if (last && "field" in last && last.field === step.field && last.kind === step.kind) this.steps[this.steps.length - 1] = step;
+    let index = this.steps.length - 1;
+    while (index >= 0 && isWaiting(this.steps[index]!)) index -= 1;
+    const last = this.steps[index];
+    if (last && "field" in last && last.field === step.field && last.kind === step.kind) this.steps[index] = step;
     else this.push(step);
   }
 
@@ -79,20 +90,21 @@ export class Trail {
    * tell a click that did something from one that did not. Returns what stops hearing.
    */
   listen(target: EventTarget, root: () => Element | null | undefined, stateOf: () => string | undefined) {
-    const after = (before: string | undefined, step: Step) => {
-      let done = false;
-      for (const wait of LOOK_MS) {
+    // A press or key takes its place in the list at once, so typing right after it comes after
+    // it, and stays there only if the content changed by the last look.
+    const after = (before: string | undefined, step: Waiting) => {
+      step.pending = true;
+      this.push(step);
+      LOOK_MS.forEach((wait, index) => {
         const timer = window.setTimeout(() => {
           this.timers.delete(timer);
-          if (done) return;
+          if (!step.pending) return;
           const now = stateOf();
-          if (now !== undefined && now !== before) {
-            done = true;
-            this.push(step);
-          }
+          if (now !== undefined && now !== before) step.pending = false;
+          else if (index === LOOK_MS.length - 1) this.steps = this.steps.filter((other) => other !== step);
         }, wait);
         this.timers.add(timer);
-      }
+      });
     };
     let pressed: string | undefined;
     const onDown = () => {
@@ -111,7 +123,7 @@ export class Trail {
       if (field && !(tagIs(field, "input") && ["button", "submit", "reset", "image"].includes((field as HTMLInputElement).type))) return;
       const words = controlWords(element);
       const picked = words ? undefined : pickElement(element, content);
-      const step: Step | undefined = words ? { kind: "press", words: clip(words) } : picked && clip(nameOf(picked)) ? { kind: "click", words: clip(nameOf(picked)) } : undefined;
+      const step: Waiting | undefined = words ? { kind: "press", words: clip(words) } : picked && clip(nameOf(picked)) ? { kind: "click", words: clip(nameOf(picked)) } : undefined;
       if (step) after(pressed, step);
     };
     const onInput = (event: Event) => {
@@ -155,7 +167,7 @@ export class Trail {
 
   /** The steps in words, oldest first, and how many earlier ones were left out. */
   lines(): { steps: string[]; earlier: number } {
-    const steps = this.steps.map((step) => {
+    const steps = this.steps.filter((step) => !isWaiting(step)).map((step) => {
       switch (step.kind) {
         case "press":
           return labels.stepPress(step.words);
