@@ -45,30 +45,109 @@ const MEDIA: Record<string, string> = {
 };
 const OTHER: Record<string, string> = { json: "application/json", pdf: "application/pdf" };
 const TYPES = { ...MEDIA, ...OTHER };
+const EXTENSIONS = Object.keys(TYPES).join("|");
 // A root path to a file, in quotes or url(): "/logo.svg", url(/fonts/a.woff2).
 // A path built at runtime, such as `/avatars/${id}.png`, has no whole literal to find.
-const ROOT_FILE = new RegExp(`(["'\`(])(/(?!/)[\\w\\-.~@%+/]+\\.(${Object.keys(TYPES).join("|")}))(?=["'\`)])`, "gi");
+const ROOT_FILE = new RegExp(`(["'\`(])(/(?!/)[\\w\\-.~@%+/]+\\.(${EXTENSIONS}))(?=["'\`)])`, "gi");
+// A root path in CSS text that code holds, such as "background:url(/logo.svg)" or url(\"/logo.svg\").
+const CSS_URL = new RegExp(`(url\\(\\s*\\\\?["']?)(/(?!/)[\\w\\-.~@%+/]+\\.(${EXTENSIONS}))(?=\\\\?["']?\\s*\\))`, "gi");
 
-/** Puts the public-folder files the page refers to inside it as data URLs. Returns the media it could not find. */
-function inlinePublicFiles(html: string, publicDir: string | undefined) {
-  const missing = new Set<string>();
-  const result = html.replace(ROOT_FILE, (match, open: string, path: string, extension: string) => {
-    const type = extension.toLowerCase();
-    let file: string | undefined;
-    try {
-      file = publicDir && resolve(publicDir, `.${decodeURIComponent(path)}`);
-    } catch {
-      // A malformed escape is not a file path.
-    }
-    if (!file || !publicDir || !file.startsWith(publicDir + sep) || !existsSync(file)) {
-      // JSON and PDF paths in library code are often not files at all; only media is worth a warning.
-      if (type in MEDIA) missing.add(path);
-      return match;
-    }
-    return `${open}data:${TYPES[type]};base64,${readFileSync(file).toString("base64")}`;
-  });
-  return { html: result, missing: [...missing] };
+/** A public-folder file as a data URL, by its root path; undefined when no such file exists. */
+function publicFile(path: string, extension: string, publicDir: string | undefined) {
+  let file: string | undefined;
+  try {
+    file = publicDir && resolve(publicDir, `.${decodeURIComponent(path)}`);
+  } catch {
+    // A malformed escape is not a file path.
+  }
+  if (!file || !publicDir || !file.startsWith(publicDir + sep) || !existsSync(file)) return undefined;
+  return `data:${TYPES[extension.toLowerCase()]};base64,${readFileSync(file).toString("base64")}`;
 }
+
+/**
+ * The public-folder files that markup, stylesheets, and code name by root path. Markup
+ * and stylesheets only load a path, so it is swapped for the file in place. Code may also
+ * check or change a path before it loads it, such as an app's base-path helper that
+ * rejects anything not starting with "/"; given a data URL there, it threw and left the
+ * shared file blank. So code keeps its paths, except inside CSS text, and the page swaps
+ * each one for its file as it loads it (see ROOT_FILES).
+ */
+function publicFiles(publicDir: string | undefined) {
+  const missing = new Set<string>();
+  /** Root paths in code, with each file: for the page to swap. */
+  const files: Record<string, string> = {};
+  const swap = (pattern: RegExp) => (text: string) =>
+    text.replace(pattern, (match, open: string, path: string, extension: string) => {
+      const file = publicFile(path, extension, publicDir);
+      // JSON and PDF paths in library code are often not files at all; only media is worth a warning.
+      if (!file && extension.toLowerCase() in MEDIA) missing.add(path);
+      return file ? `${open}${file}` : match;
+    });
+  const inMarkup = swap(ROOT_FILE);
+  const inCss = swap(CSS_URL);
+  const inCode = (code: string) => {
+    const result = inCss(code);
+    for (const [, , path, extension] of result.matchAll(ROOT_FILE)) {
+      const file = publicFile(path, extension, publicDir);
+      if (file) files[path] = file;
+      else if (extension.toLowerCase() in MEDIA) missing.add(path);
+    }
+    return result;
+  };
+  return { inMarkup, inCode, files, missing };
+}
+
+/**
+ * Loads the code's root paths from inside the file. It swaps each path for its file
+ * where the page loads it: an element's src, href, srcset, poster, or inline style
+ * url(), and fetch(). The code itself still holds and passes the path, as on the
+ * canvas page. A file opened from disk has no server to answer a root path, so this
+ * is the only place the swap can happen.
+ */
+const ROOT_FILES = (files: Record<string, string>) => `<script>(function (files) {
+  var has = function (path) { return Object.prototype.hasOwnProperty.call(files, path); };
+  var one = function (value) { return has(value) ? files[value] : value; };
+  var list = function (value) {
+    return value.split(",").map(function (part) {
+      var found = /^(\\s*)(\\S+)([\\s\\S]*)$/.exec(part);
+      return found && has(found[2]) ? found[1] + files[found[2]] + found[3] : part;
+    }).join(",");
+  };
+  var urls = function (value) {
+    return value.replace(/url\\(\\s*(["']?)([^"')]+)\\1\\s*\\)/g, function (match, quote, path) {
+      return has(path) ? "url(" + quote + files[path] + quote + ")" : match;
+    });
+  };
+  var ways = { src: one, href: one, poster: one, srcset: list, style: urls };
+  var fix = function (element) {
+    for (var name in ways) {
+      var value = element.getAttribute(name);
+      var next = value && ways[name](value);
+      if (next && next !== value) element.setAttribute(name, next);
+    }
+  };
+  // At once where code sets the attribute, as React does, so the browser never asks for the bare path.
+  var set = Element.prototype.setAttribute;
+  Element.prototype.setAttribute = function (name, value) {
+    var way = ways[String(name).toLowerCase()];
+    return set.call(this, name, way && value != null ? way(String(value)) : value);
+  };
+  // The rest as it changes: the page's markup, and inline styles that code sets property
+  // by property. Chrome has no setter to wrap for those, so a page that reads layout at
+  // once can ask for the bare path first and log one failed load; the picture still shows.
+  new MutationObserver(function (records) {
+    records.forEach(function (record) {
+      if (record.type === "attributes") return fix(record.target);
+      record.addedNodes.forEach(function (node) {
+        if (node.nodeType !== 1) return;
+        fix(node);
+        node.querySelectorAll("[src],[href],[poster],[srcset],[style]").forEach(fix);
+      });
+    });
+  }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: Object.keys(ways) });
+  var load = window.fetch;
+  if (load) window.fetch = function (input, init) { return load.call(this, typeof input === "string" ? one(input) : input, init); };
+})(${JSON.stringify(files).replace(/</g, "\\u003c")})</script>`;
 
 /**
  * The canvas's reference images, each with its picture as a data URL, as the script that
@@ -104,7 +183,9 @@ function oneFile(publicDir: string | undefined): Plugin {
     generateBundle(_options, bundle) {
       const page = bundle["index.html"];
       if (page?.type !== "asset") return;
-      let html = String(page.source);
+      const found = publicFiles(publicDir);
+      // The page's own markup, before any code or stylesheet goes inside it.
+      let html = found.inMarkup(String(page.source));
       // What went inside, by name: Vite 8's bundle can keep listing a deleted
       // file, which made the report name files that are in the page.
       const inside = new Set<string>();
@@ -113,32 +194,35 @@ function oneFile(publicDir: string | undefined): Plugin {
         if (file.type === "chunk") {
           // An inline module script still runs after the page is parsed. "</script"
           // inside the code would end the tag early.
-          const code = file.code.replace(/<\/script/gi, "<\\/script");
+          const code = found.inCode(file.code).replace(/<\/script/gi, "<\\/script");
           const tag = new RegExp(`<script[^>]*src="[^"]*${escapeRegExp(name)}"[^>]*></script>`);
           html = html.replace(tag, () => `<script type="module">${code}</script>`);
         } else if (name.endsWith(".css")) {
           const tag = new RegExp(`<link[^>]*href="[^"]*${escapeRegExp(name)}"[^>]*>`);
-          html = html.replace(tag, () => `<style>${String(file.source)}</style>`);
+          html = html.replace(tag, () => `<style>${found.inMarkup(String(file.source))}</style>`);
         }
         if (html !== before) {
           delete bundle[name];
           inside.add(name);
         }
       }
-      const inlined = inlinePublicFiles(html, publicDir);
-      page.source = inlined.html;
+      // First in the head, so it watches before the page's own script adds anything.
+      if (Object.keys(found.files).length)
+        html = html.replace(/<head[^>]*>/i, (head) => `${head}${ROOT_FILES(found.files)}`);
+      page.source = html;
 
+      const missing = [...found.missing];
       const left = Object.keys(bundle).filter((name) => name !== "index.html" && !inside.has(name));
       this.emitFile({
         type: "asset",
         fileName: SHARE_REPORT,
-        source: JSON.stringify({ missing: [...inlined.missing, ...left] }),
+        source: JSON.stringify({ missing: [...missing, ...left] }),
       });
       if (left.length)
         this.warn(`these built files cannot go inside the shared file, so it will miss them: ${left.join(", ")}`);
-      if (inlined.missing.length)
+      if (missing.length)
         this.warn(
-          `these files are not in the app's public folder, so they will not load in the shared file: ${inlined.missing.join(", ")}. Check each path, or import the file in its item.`,
+          `these files are not in the app's public folder, so they will not load in the shared file: ${missing.join(", ")}. Check each path, or import the file in its item.`,
         );
     },
   };
