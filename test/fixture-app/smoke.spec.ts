@@ -3137,6 +3137,7 @@ test('a pin stays on its element when its item is resized, in a frame too', asyn
   const original = readFileSync(REGISTRY, 'utf8')
   try {
     const errors = collectErrors(page)
+    page.on('console', (m) => m.text().startsWith('DIAG') && console.log(m.text())) // DIAG: remove
     const phoned = original.replace(
       /\];\s*$/,
       '  { id: "phone", name: "Phone", component: Example, x: 0, y: 240, width: 375, height: 180, viewport: true },\n];\n',
@@ -3163,9 +3164,21 @@ test('a pin stays on its element when its item is resized, in a frame too', asyn
       return { share: (pin - box.x) / box.width, width: box.width }
     }
     await page.getByRole('button', { name: 'Ask agent', exact: true }).click()
+    // DIAG: remove. What the frame sees of the click, and what the canvas receives.
+    await page.evaluate(() => {
+      window.addEventListener('message', (e) => console.log('DIAG parent message', JSON.stringify(e.data).slice(0, 300), e.origin))
+      window.addEventListener('blur', () => console.log('DIAG parent blur'))
+    })
+    const phoneFrame = page.frames().find((f) => f.url().includes('frame.html'))!
+    await phoneFrame.evaluate(() => {
+      for (const type of ['pointerdown', 'pointerup', 'click']) {
+        window.addEventListener(type, (e) => console.log('DIAG frame', type, (e as MouseEvent).detail, (e.target as Element).tagName, document.documentElement.hasAttribute('data-canvas-annotating'), e.defaultPrevented), true)
+      }
+    })
     for (const id of ids) {
       // Near the end of the first line: a point that moves when the text gets wider.
       const box = (await texts[id].boundingBox())!
+      console.log('DIAG click', id, box.x + box.width * 0.8, box.y + 6, await page.locator('.canvas-viewport').getAttribute('data-annotating'))
       await page.mouse.click(box.x + box.width * 0.8, box.y + 6)
       const note = page.getByRole('dialog', { name: /^Ask agent about/ })
       await note.getByRole('textbox').fill('Shorter')
