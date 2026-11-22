@@ -15,6 +15,12 @@
 // A "new version" annotation asks for a new item beside the original instead
 // of a change to it. The original never changes then, so it is sent with the
 // number of items that name it as `from`, and leaves once that number grows.
+//
+// A note on several items (`also`, from the Ask button over a selection) lives
+// on the first of them, where its pin is, and outlines the others. It is one
+// request about all of them: the same change to each, or one new item made from
+// them (Combine). So it waits like a section's note when it asks for new items,
+// and otherwise until any of its items renders differently.
 
 import { MAX_REPLY } from "./channel.ts";
 import { frameLayers, renderedHtml } from "./dom";
@@ -77,12 +83,17 @@ export type Annotation = {
    * `text` becomes what they say now, a note to send like any other.
    */
   thread?: ThreadMessage[];
+  /**
+   * The other items a note on several items is about, in reading order after
+   * `itemId` (the first, which holds the pin). Absent for a note on one thing.
+   */
+  also?: string[];
 };
 
 const VERSION = 1;
 const MAX_ANNOTATIONS = 100;
 // An area's reference lists what it holds, so it runs longer than one element's.
-const MAX_REF = 600;
+export const MAX_REF = 600;
 const MAX_TEXT = 4000;
 const COORD_LIMIT = 100_000;
 
@@ -121,12 +132,17 @@ const valid = (value: unknown, ids: ReadonlySet<string>): Annotation | undefined
     .slice(-MAX_THREAD)
     .map((m) => ({ who: m.who, text: m.text }));
   const thread = turns.length ? { thread: turns } : {};
-  return { id: c.id, itemId: c.itemId, x: c.x, y: c.y, ...area, ref: c.ref, text: c.text, ...version, ...sent, ...sentAt, ...queued, ...reply, ...thread };
+  // An item that is gone since leaves the note; with none left it is a note on its first item alone.
+  const others = Array.isArray(c.also) ? c.also.filter((id): id is string => typeof id === "string" && id !== c.itemId && ids.has(id)) : [];
+  const also = others.length ? { also: [...new Set(others)] } : {};
+  return { id: c.id, itemId: c.itemId, x: c.x, y: c.y, ...area, ref: c.ref, text: c.text, ...version, ...sent, ...sentAt, ...queued, ...reply, ...thread, ...also };
 };
 
 /** Where an annotation points and what it names, without its note or state: for copies that change the rest. */
-export const placeOf = ({ id, itemId, x, y, w, h, ref }: Annotation) =>
-  w && h ? { id, itemId, x, y, w, h, ref } : { id, itemId, x, y, ref };
+export const placeOf = ({ id, itemId, x, y, w, h, ref, also }: Annotation) => ({
+  ...(w && h ? { id, itemId, x, y, w, h, ref } : { id, itemId, x, y, ref }),
+  ...(also?.length ? { also } : {}),
+});
 
 /** The turns already had on a note, kept when its current words change. */
 export const threadOf = ({ thread }: Annotation) => (thread?.length ? { thread } : {});
@@ -193,13 +209,17 @@ export function fingerprintItem(preview: Element | null): string | undefined {
     html = renderedHtml(preview);
   }
   if (!html) return undefined;
-  // FNV-1a, 32-bit: enough to tell "changed" from "same".
+  return shortHash(html);
+}
+
+/** FNV-1a, 32-bit, with the length: enough to tell "changed" from "same". */
+export function shortHash(text: string) {
   let hash = 0x811c9dc5;
-  for (let i = 0; i < html.length; i++) {
-    hash ^= html.charCodeAt(i);
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
     hash = Math.imul(hash, 0x01000193);
   }
-  return (hash >>> 0).toString(36) + html.length.toString(36);
+  return (hash >>> 0).toString(36) + text.length.toString(36);
 }
 
 /**
@@ -225,13 +245,16 @@ export function formatAnnotations(
     const said = earlier.length ? `   ${labels.threadEarlier}\n${earlier.join("\n")}\n   ${labels.threadNow}: ${body}` : `   ${body}`;
     return `${index + 1}. ${ref}\n${said}\n   (note ${annotation.id})`;
   });
+  // A note on several items names them all, as its entry does: keep each of them.
   const versioned = new Map<string, number[]>();
   annotations.forEach((annotation, index) => {
-    if (annotation.version) versioned.set(annotation.itemId, [...(versioned.get(annotation.itemId) ?? []), index + 1]);
+    if (!annotation.version) return;
+    const name = annotation.also?.length ? annotation.ref : nameOf(annotation.itemId);
+    versioned.set(name, [...(versioned.get(name) ?? []), index + 1]);
   });
   const lines = [labels.annotationsHeading(annotations.length), ...entries];
   if (versioned.size) {
-    const items = [...versioned].map(([itemId, numbers]) => `${nameOf(itemId)} (${numbers.join(", ")})`);
+    const items = [...versioned].map(([name, numbers]) => `${name} (${numbers.join(", ")})`);
     lines.push("", labels.newVersionLine(items.join("; ")));
   }
   return lines.join("\n");

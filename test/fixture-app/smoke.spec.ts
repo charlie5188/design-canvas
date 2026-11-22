@@ -1784,6 +1784,134 @@ test('Shift + click adds to the selection and takes out of it, and Delete remove
   }
 })
 
+test('⌘/Ctrl + click selects several items too, and Ask agent above them is one note on all of them', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    writeFileSync(REGISTRY, withVersions(original))
+    await servesId(page, 'c')
+    await page.goto('/')
+    const b = page.locator('.canvas-item[data-canvas-item="b"]')
+    const c = page.locator('.canvas-item[data-canvas-item="c"]')
+    await expect(c).toBeVisible()
+    await page.waitForTimeout(600)
+    const ask = page.locator('.canvas-selection-ask')
+    // One item selected has its own Ask, so nothing shows over it.
+    await c.locator('.canvas-name').click()
+    await expect(ask).toHaveCount(0)
+    // ⌘ (or Ctrl) + click adds to the selection, as Shift does.
+    await b.locator('.canvas-name').click({ modifiers: ['ControlOrMeta'] })
+    await expect(page.locator('.canvas-item[data-selected]')).toHaveCount(2)
+    await expect(ask).toHaveAccessibleName('Ask agent about the 2 selected items')
+    // It sits just above the selection's top-right corner.
+    const bar = (await ask.boundingBox())!
+    const right = (await c.locator('.canvas-preview').boundingBox())!
+    expect(Math.abs(bar.x + bar.width - (right.x + right.width))).toBeLessThan(8)
+    expect(bar.y + bar.height).toBeLessThanOrEqual((await c.boundingBox())!.y)
+    await ask.click()
+    const note = page.getByRole('dialog', { name: 'Ask agent about 2 items in reading order: Version B (id b), Version C (id c)' })
+    await expect(note).toBeVisible()
+    // The selection lets go. The pin is on the first in reading order, and the other is outlined.
+    await expect(page.locator('.canvas-item[data-selected]')).toHaveCount(0)
+    await expect(ask).toHaveCount(0)
+    await expect(b.locator('.canvas-pin')).toHaveCount(1)
+    await expect(c.locator('.canvas-pin')).toHaveCount(0)
+    await expect(c.locator('.canvas-area[data-linked]')).toHaveAttribute('data-open')
+    // What is asked of a set comes first; the rest are the one-item requests, for each.
+    const quick = note.getByRole('group', { name: 'Quick requests' })
+    await expect(quick.getByRole('button')).toHaveText(['Combine', 'Flow', 'Phone', 'States', 'Languages'])
+    await quick.getByRole('button', { name: 'Combine' }).click()
+    await note.getByRole('textbox').press('Enter')
+    await expect(note).toHaveCount(0)
+    await expect(c.locator('.canvas-area[data-linked]')).not.toHaveAttribute('data-open')
+    // A with the same items selected opens the note that waits; it does not add another.
+    await b.locator('.canvas-name').click()
+    await c.locator('.canvas-name').click({ modifiers: ['Shift'] })
+    await page.keyboard.press('a')
+    await expect(note.getByRole('textbox')).toHaveValue('Combine these into one new version, with the best of each.')
+    await expect(page.getByRole('button', { name: 'Ask agent', exact: true })).not.toHaveAttribute('aria-pressed', 'true')
+    await page.keyboard.press('Escape')
+    await expect(page.locator('.canvas-pin')).toHaveCount(1)
+    // The message names every item with its id, and keeps them all.
+    await page.getByRole('button', { name: 'Copy 1 for agent' }).click()
+    const text = await page.evaluate(() => navigator.clipboard.readText())
+    expect(text).toContain(
+      '1. 2 items in reading order: Version B (id b), Version C (id c)\n   Combine these into one new version, with the best of each.\n   (note ',
+    )
+    expect(text).toContain('Keep the original and add a new version: 2 items in reading order: Version B (id b), Version C (id c) (1)')
+    await expect(c.locator('.canvas-area[data-linked]')).toHaveAttribute('data-sent')
+    // Sent, it leaves once the canvas has the new item Combine makes, whichever item it is from.
+    writeFileSync(
+      REGISTRY,
+      withVersions(original, '  { id: "d", name: "Version D", component: Example, from: "c", x: 800, y: 400, width: 360, height: 180 },\n'),
+    )
+    await expect(page.locator('.canvas-item[data-canvas-item="d"]')).toBeVisible()
+    await expect(page.locator('.canvas-pin')).toHaveCount(0)
+    await expect(c.locator('.canvas-area[data-linked]')).toHaveCount(0)
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
+test('with Ask agent, a box drawn from empty canvas asks about the items it touches', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    writeFileSync(REGISTRY, withVersions(original))
+    await servesId(page, 'c')
+    await page.goto('/')
+    const example = page.locator('.canvas-item[data-canvas-item="example"]')
+    const b = page.locator('.canvas-item[data-canvas-item="b"]')
+    const c = page.locator('.canvas-item[data-canvas-item="c"]')
+    await expect(c).toBeVisible()
+    await page.waitForTimeout(600)
+    await page.getByRole('button', { name: 'Ask agent', exact: true }).click()
+    const world = page.locator('.canvas-world')
+    const view = await world.getAttribute('style')
+    const top = (await b.boundingBox())!.y - 30
+    const box = async (from: { x: number; y: number }, to: { x: number; y: number }) => {
+      await page.mouse.move(from.x, from.y)
+      await page.mouse.down()
+      await page.mouse.move(to.x, to.y, { steps: 6 })
+    }
+    // From empty canvas above B to the middle of C: both light up as the box is drawn, not the item left of it.
+    const bb = (await b.locator('.canvas-preview').boundingBox())!
+    const cb = (await c.locator('.canvas-preview').boundingBox())!
+    await box({ x: bb.x + 10, y: top }, { x: cb.x + 40, y: cb.y + 40 })
+    await expect(b).toHaveAttribute('data-selected', 'true')
+    await expect(c).toHaveAttribute('data-selected', 'true')
+    await expect(example).not.toHaveAttribute('data-selected')
+    await page.mouse.up()
+    // On release one note opens on both, and the canvas did not pan.
+    const note = page.getByRole('dialog', { name: 'Ask agent about 2 items in reading order: Version B (id b), Version C (id c)' })
+    await expect(note).toBeVisible()
+    await expect(note.getByRole('group', { name: 'Quick requests' }).getByRole('button').first()).toHaveText('Combine')
+    await expect(page.locator('.canvas-item[data-selected]')).toHaveCount(0)
+    expect(await world.getAttribute('style')).toBe(view)
+    await page.keyboard.press('Escape')
+    await expect(page.locator('.canvas-pin')).toHaveCount(0)
+    // A box that touches one item is a note on that whole item.
+    await box({ x: cb.x + 10, y: top }, { x: cb.x + 60, y: cb.y + 40 })
+    await page.mouse.up()
+    const one = page.getByRole('dialog', { name: 'Ask agent about Version C' })
+    await expect(one).toBeVisible()
+    await expect(one.getByRole('group', { name: 'Quick requests' }).getByRole('button')).toHaveText(['Flow', 'Phone', 'States', 'Languages'])
+    await page.keyboard.press('Escape')
+    // One that touches nothing does nothing.
+    const below = Math.max(bb.y + bb.height, cb.y + cb.height) + 40
+    await box({ x: bb.x, y: below }, { x: cb.x, y: below + 60 })
+    await page.mouse.up()
+    await expect(page.locator('.canvas-annotation-card')).toHaveCount(0)
+    await expect(page.locator('.canvas-pin')).toHaveCount(0)
+    expect(await world.getAttribute('style')).toBe(view)
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
 test('a note draws **bold** and lists, and is edited as the text it is', async ({ page }) => {
   const original = readFileSync(REGISTRY, 'utf8')
   try {
@@ -3720,11 +3848,12 @@ test('cursors say what a press or drag will do', async ({ page }) => {
   await page.getByRole('button', { name: 'Note', exact: true }).click()
   expect(await cursor('.canvas-viewport')).toMatch(/^url\(.*\) 5 3, crosshair$/)
   await page.keyboard.press('Escape')
-  // Asking: an arrow that carries a speech bubble over what can be asked about, and empty canvas pans.
+  // Asking: an arrow that carries a speech bubble over what can be asked about. A drag on empty
+  // canvas draws a box that asks about the items it touches, so the pointer there is the plain arrow.
   await page.getByRole('button', { name: 'Ask agent', exact: true }).click()
   expect(await cursor('.canvas-preview h2')).toMatch(/^url\(.*\) 5 3, crosshair$/)
   expect(await cursor('.canvas-name')).toMatch(/^url\(.*\) 5 3, crosshair$/)
-  expect(await cursor('.canvas-viewport')).toBe('grab')
+  expect(await cursor('.canvas-viewport')).toBe('default')
   await page.locator('.canvas-viewport').evaluate((element) => element.setAttribute('data-gesture', 'pan'))
   expect(await cursor('.canvas-preview h2')).toBe('grabbing')
   // Z held wins over the crosshair and the copy cursor; Alt turns it to zoom out.
