@@ -1189,6 +1189,13 @@ function CanvasBoard({
   // section's registry id as "note:<id>" or "section:<id>" (the same before and after its
   // first move makes it a ghost), or "mark:<id>" for one that is not in the registry yet.
   const [multi, setMultiState] = useState<readonly string[]>([]);
+  /**
+   * The items a box drawn with Ask agent touches ("item:<id>"), shown as the note on them will
+   * be while it is drawn. `landed`: just released, so the note's own outlines take their place
+   * at once instead of fading in again (canvas.css), for a moment.
+   */
+  const [askBox, setAskBox] = useState<{ keys: readonly string[]; landed?: boolean }>({ keys: [] });
+  const askBoxTimer = useRef(0);
   const multiRef = useRef(multi);
   const setMulti = useCallback((keys: readonly string[]) => {
     multiRef.current = keys;
@@ -2126,9 +2133,9 @@ function CanvasBoard({
     chooseKeys(keys.includes(key) ? keys.filter((k) => k !== key) : [...keys, key]);
   };
   /** The selected items in reading order, with their boxes; notes, sections, and images left out. */
-  const selectedItems = () =>
+  const selectedItems = (keys: readonly string[] = multiRef.current) =>
     readingOrder(
-      multiRef.current.flatMap((key) => {
+      keys.flatMap((key) => {
         const item = key.startsWith("item:") ? shown.find((entry) => entry.id === key.slice(5)) : undefined;
         const r = item && rectOf(item);
         return item && r ? [{ item, x: r.x, y: r.y, w: r.w, h: r.h }] : [];
@@ -2140,8 +2147,8 @@ function CanvasBoard({
    * are outlined (AnnotationLink). The selection then lets go: the outlines show what the note
    * covers, and a later A is the tool again. The same set asked about again opens its waiting note.
    */
-  const askSelection = () => {
-    const chosen = selectedItems();
+  const askSelection = (keys: readonly string[] = multiRef.current) => {
+    const chosen = selectedItems(keys);
     if (chosen.length < 2) return false;
     const [first, ...rest] = chosen.map((entry) => entry.item);
     const also = rest.map((item) => item.id);
@@ -3542,7 +3549,9 @@ function CanvasBoard({
       // Only a change is set: the canvas draws again for each one.
       if (keys.join("|") === last) return;
       last = keys.join("|");
-      selection.current.chooseKeys(keys);
+      // Asking is not selecting: the items show the outline the note on them will have, not the selection ring.
+      if (asking) setAskBox({ keys });
+      else selection.current.chooseKeys(keys);
     };
     const end = (e: PointerEvent) => {
       if (e.pointerId !== event.pointerId) return;
@@ -3554,9 +3563,11 @@ function CanvasBoard({
       if (moved) suppressNextClick();
       else if (e.type === "pointerup" && !addsToSelection(event)) tapSurfaceRef.current(e.clientX, e.clientY);
       if (!asking || !moved) return;
-      const items = multiRef.current.filter((key) => key.startsWith("item:"));
-      if (e.type === "pointerup" && items.length > 1 && askSelectionRef.current()) return;
-      setMulti([]);
+      const items = last ? last.split("|") : [];
+      setAskBox({ keys: e.type === "pointerup" ? items : [], landed: true });
+      window.clearTimeout(askBoxTimer.current);
+      askBoxTimer.current = window.setTimeout(() => setAskBox({ keys: [] }), 400);
+      if (e.type === "pointerup" && items.length > 1 && askSelectionRef.current(items)) return;
       const one = e.type === "pointerup" && items.length === 1 ? shown.find((item) => `item:${item.id}` === items[0]) : undefined;
       if (one) askItem(one);
     };
@@ -4653,6 +4664,7 @@ function CanvasBoard({
                   : [],
               )}
               links={visibleAnnotations.filter((annotation) => annotation.also?.includes(item.id))}
+              asking={askBox.keys.includes(`item:${item.id}`) ? (askBox.landed ? "landed" : "drawing") : undefined}
               // While the flow view shows this item, its open note is drawn there, not twice.
               openAnnotation={flowId === item.id ? null : (openAnnotation?.id ?? null)}
               annotationHandlers={annotationHandlers}

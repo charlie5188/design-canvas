@@ -215,6 +215,7 @@ export function CanvasItemView({
   onResize,
   pins,
   links = [],
+  asking,
   openAnnotation,
   annotationHandlers,
   onTrash,
@@ -251,6 +252,11 @@ export function CanvasItemView({
   pins: { annotation: Annotation; number?: number }[];
   /** Notes on several items whose pin is on another of them: each draws its outline here. */
   links?: Annotation[];
+  /**
+   * Touched by a box drawn with Ask agent: while it is drawn, the item shows the outline the
+   * note it opens will have; just after, that note's outline shows at once, with no fade.
+   */
+  asking?: "drawing" | "landed";
   openAnnotation: string | null;
   annotationHandlers: AnnotationHandlers;
   onTrash?: (item: CanvasItem) => void;
@@ -595,10 +601,11 @@ export function CanvasItemView({
             // Invisible: only the cursor changes over them, like an OS window's border.
             <span key={edge} className="canvas-item-edge" data-edge={edge} aria-hidden="true" onPointerDown={(event) => onResize(event, item, edge)} />
           ))}
-        {pins.length + links.length > 0 && (
+        {(pins.length + links.length > 0 || asking === "drawing") && (
           <div className="canvas-pins">
+            {asking === "drawing" && <AnnotationLink open sent={false} still />}
             {links.map((annotation) => (
-              <AnnotationLink key={annotation.id} open={openAnnotation === annotation.id} sent={!!(annotation.sent || annotation.queued)} />
+              <AnnotationLink key={annotation.id} open={openAnnotation === annotation.id} sent={!!(annotation.sent || annotation.queued)} still={!!asking} />
             ))}
             {pins.map(({ annotation, number }) => (
               <AnnotationPin
@@ -607,6 +614,7 @@ export function CanvasItemView({
                 number={number}
                 open={openAnnotation === annotation.id}
                 handlers={annotationHandlers}
+                still={!!asking}
               />
             ))}
           </div>

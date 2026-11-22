@@ -1876,14 +1876,19 @@ test('with Ask agent, a box drawn from empty canvas asks about the items it touc
       await page.mouse.down()
       await page.mouse.move(to.x, to.y, { steps: 6 })
     }
-    // From empty canvas above B to the middle of C: both light up as the box is drawn, not the item left of it.
+    // From empty canvas above B to the middle of C: both show the outline the note on them will
+    // have as the box is drawn, not the item left of it. Asking is not selecting: no selection ring.
     const bb = (await b.locator('.canvas-preview').boundingBox())!
     const cb = (await c.locator('.canvas-preview').boundingBox())!
     await box({ x: bb.x + 10, y: top }, { x: cb.x + 40, y: cb.y + 40 })
-    await expect(b).toHaveAttribute('data-selected', 'true')
-    await expect(c).toHaveAttribute('data-selected', 'true')
-    await expect(example).not.toHaveAttribute('data-selected')
+    await expect(b.locator('.canvas-area[data-open]')).toHaveCount(1)
+    await expect(c.locator('.canvas-area[data-open]')).toHaveCount(1)
+    await expect(example.locator('.canvas-area')).toHaveCount(0)
+    await expect(page.locator('.canvas-item[data-selected]')).toHaveCount(0)
     await page.mouse.up()
+    // On release the same outlines stay, now the note's.
+    await expect(b.locator('.canvas-area[data-open]')).toHaveCount(1)
+    await expect(c.locator('.canvas-area[data-open]')).toHaveCount(1)
     // On release one note opens on both, and the canvas did not pan.
     const note = page.getByRole('dialog', { name: 'Ask agent about 2 items in reading order: Version B (id b), Version C (id c)' })
     await expect(note).toBeVisible()

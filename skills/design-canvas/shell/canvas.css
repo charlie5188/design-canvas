@@ -1004,6 +1004,12 @@ html[data-canvas-alt] .canvas-frame-root * {
 .canvas-area[data-linked] {
   inset: 0;
 }
+/* Under a box drawn with Ask agent the outline follows the box at once, and the note's own
+   outlines then take its place with no fade, so nothing flickers on release. Set when the
+   outline appears and kept: taking the animation off and on again would replay it. */
+.canvas-area[data-still] {
+  animation: none;
+}
 /* Ask agent about several selected items: a small bar drawn like an item's actions, just above
    the selection's top-right corner, one size at any zoom. Hidden while anything is dragged. */
 .canvas-selection-anchor {
