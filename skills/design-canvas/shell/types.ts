@@ -61,11 +61,17 @@ export type CanvasItem = {
    */
   steps?: Record<string, Record<string, string>>;
   /**
-   * The id of the item this one is a new version of. The canvas places it
-   * beside that item, and its arrival clears that item's sent "new version"
-   * annotations.
+   * The id of the item this one is a new version of. The canvas places it in
+   * the row under that item, after the versions already made from it (lineage.ts),
+   * and its arrival clears that item's sent "new version" annotations.
    */
   from?: string;
+  /**
+   * Why the exploration went this way: the person's reason for picking this version,
+   * or for building on it, in their words. The agent writes it. On the path the canvas
+   * draws from the original to a picked version, it is the words on the line into this item.
+   */
+  why?: string;
   /**
    * In the canvas trash: hidden on the canvas, its code kept. The canvas writes
    * it when the person moves the item to the trash and removes it when they put
@@ -73,10 +79,10 @@ export type CanvasItem = {
    */
   trashed?: boolean;
   /**
-   * The version the person chose. The canvas writes it when they pick an item
-   * (and moves the versions it was compared with into the `set-aside` section),
-   * and removes it on Undo or when they pick another one. It shows as a mark on
-   * the item, in the shared file too, so a reader sees which version won.
+   * The version the person chose. The canvas writes it when they pick an item, and
+   * removes it on Undo, Unpick, or when they pick another of the versions it was compared
+   * with. Nothing moves. It shows as a mark on the item and as the path from the original
+   * to it (LineagePaths.tsx), in the shared file too, so a reader sees what won and how.
    */
   picked?: boolean;
 };
@@ -127,8 +133,9 @@ export type CanvasImage = {
   height: number;
 };
 
-// The section a pick makes for the versions that were not picked. The agent's own
-// set-aside sections, drawn around one dropped item where it stands, have ids that
-// start with this one (SKILL.md, "Decision notes"); items in either kind are out of the running.
+// The section the trash's "Set aside" fills (and that a pick made, before picks stopped
+// moving anything). The agent's own set-aside sections, drawn around one dropped item where
+// it stands, have ids that start with this one (SKILL.md, "Decision notes"); items in either
+// kind are out of the running.
 export const SET_ASIDE_ID = "set-aside";
 export const isSetAside = (section: { id: string }) => section.id === SET_ASIDE_ID || section.id.startsWith(`${SET_ASIDE_ID}-`);

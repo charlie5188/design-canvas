@@ -91,17 +91,14 @@ export const labels = {
   move: (name: string) => `Move ${name}`,
   moveHelp: "Use the arrow keys to move. Hold Shift to move faster.",
   missingItem: (id: string) => `No canvas item “${id}”`,
-  pick: (name: string) => `Pick ${name} and set the others aside`,
+  pick: (name: string) => `Pick ${name} as the answer`,
   pickHint: "Pick this one",
   /** On the item that was picked. Shown in the shared file too. */
   picked: "Picked",
-  pickedToast: (name: string, others: number) =>
-    others ? `Picked ${name}. Set ${others} other${others === 1 ? "" : "s"} aside.` : `Picked ${name}`,
   unpick: (name: string) => `Unpick ${name}`,
   unpickHint: "Unpick",
-  unpicked: (name: string) => `Unpicked ${name}`,
   pickFailed: "Couldn't save the pick. Is the canvas's dev server running?",
-  /** The title of the section a pick makes for the versions that were not picked. */
+  /** The title of the section the trash's "Set aside" fills. */
   setAside: "Set aside",
   /** On the Pick button, beside its check: the one action with a word, because it is the decision. */
   pickShort: "Pick",

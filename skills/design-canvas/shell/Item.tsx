@@ -454,8 +454,8 @@ export function CanvasItemView({
         <span className="canvas-ghost-tag canvas-item-tag" data-state="picked">
           <PickIcon />
           {labels.picked}
-          {/* The way back from a pick once its toast is gone. On the tag, where the pick is
-              shown, and only while the item is hovered, so the lasting tag stays quiet. */}
+          {/* The way back from a pick. On the tag, where the pick is shown, and only
+              while the item is hovered, so the lasting tag stays quiet. */}
           {onUnpick && (
             <button
               type="button"
