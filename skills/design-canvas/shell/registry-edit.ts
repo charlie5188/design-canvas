@@ -259,6 +259,52 @@ export function applyEdits(source: string, edits: DirectEdit[]): ApplyResult {
   return { source: next, applied, missing };
 }
 
+/** Where an item's `from` value sits, when it is a plain string literal. */
+function fromField(source: string, id: string): { key: number; start: number; end: number; open: number; value: string } | undefined {
+  const entry = entryOf(source, "item", id);
+  if (!entry) return undefined;
+  const match = /(^|[^\w$.])from\s*:\s*/.exec(mask(source.slice(entry.open + 1, entry.close)));
+  if (!match) return undefined;
+  const start = entry.open + 1 + match.index + match[0].length;
+  if (source[start] !== '"' && source[start] !== "'") return undefined;
+  const end = stringEnd(source, start);
+  if (end < 0) return undefined;
+  return { key: entry.open + 1 + match.index + match[1]!.length, start, end, open: entry.open, value: source.slice(start + 1, end - 1) };
+}
+
+/**
+ * The source without the items `ids`, for a shared file that leaves them out (agent-channel.ts),
+ * with each remaining item's `from` re-pointed past them to its nearest ancestor still in the
+ * file, or taken off when none is. So a picked version's path in the file joins the versions on
+ * either side of one left out, as the canvas joins them over the trash (lineage.ts).
+ */
+export function removeItems(source: string, ids: readonly string[]): string {
+  const gone = new Set(ids);
+  const parents = new Map(ids.map((id) => [id, fromField(source, id)?.value]));
+  const ancestor = (start: string) => {
+    const seen = new Set<string>();
+    let id: string | undefined = start;
+    while (id && gone.has(id) && !seen.has(id)) {
+      seen.add(id);
+      id = parents.get(id);
+    }
+    return id && !gone.has(id) ? id : undefined;
+  };
+  let next = source;
+  for (const id of ids) next = removeEntry(next, "item", id) ?? next;
+  const start = next.indexOf(`export const ${ARRAY.item}`);
+  if (start < 0) return next;
+  const end = next.indexOf("export const ", start + 1);
+  const left = [...next.slice(start, end < 0 ? next.length : end).matchAll(/\bid\s*:\s*(["'])([a-z0-9][a-z0-9-]{0,79})\1/gi)].map((m) => m[2]!);
+  for (const id of left) {
+    const field = fromField(next, id);
+    if (!field || !gone.has(field.value)) continue;
+    const to = ancestor(field.value);
+    next = to ? next.slice(0, field.start) + JSON.stringify(to) + next.slice(field.end) : withoutField(next, field.open, field.key, field.end);
+  }
+  return next;
+}
+
 // New notes, sections, and images are appended to the end of their array.
 
 /**

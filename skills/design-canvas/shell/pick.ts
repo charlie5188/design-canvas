@@ -7,8 +7,10 @@
 // exploration got there. Moving the others away would break that record.
 //
 // A pick takes the mark off an earlier pick among the versions it was compared with: the
-// items linked to it by `from`, either way and at any distance, and the items in the same
-// outermost section (a round of directions is a section, and its cards have no `from`).
+// items linked to it by `from`, either way and at any distance (also through a version in
+// the trash), and the items in the same outermost section (a round of directions is a
+// section, and its cards have no `from`). Trashing a picked version takes its pick off
+// (Trash.tsx), so the trash never holds the answer.
 import { labels } from "./labels";
 import { ITEM_HEAD, type Position } from "./layout";
 import type { DirectAdd, DirectEdit } from "./registry-edit.ts";
@@ -57,13 +59,14 @@ export function comparedWith(item: CanvasItem, { items, trash, sections: all, re
   };
   const home = outermost(item);
   const family = new Set([item.id]);
-  // Linked by `from`, either way: walk until nothing new joins.
+  // Linked by `from`, either way: walk until nothing new joins. Through the trash too, so a
+  // version tidied away between two rounds still links them, as it does their path (lineage.ts).
   for (let grew = true; grew; ) {
     grew = false;
-    for (const entry of visible) {
+    for (const entry of items) {
       if (family.has(entry.id)) continue;
       const parent = entry.from && family.has(entry.from);
-      const child = visible.some((other) => family.has(other.id) && other.from === entry.id);
+      const child = items.some((other) => family.has(other.id) && other.from === entry.id);
       if (parent || child) {
         family.add(entry.id);
         grew = true;

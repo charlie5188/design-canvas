@@ -441,6 +441,89 @@ test('a pick draws the path through every round, with the reasons on its lines, 
   }
 })
 
+test('a path skips a version in the trash, also in a shared file; trashing a pick takes the pick off, and Undo puts both back', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  // Two rounds: B from the example, D from B, picked; C beside B.
+  const rounds = original.replace(
+    /\];\s*$/,
+    `  { id: "b", name: "Version B", component: Example, from: "example", why: "The hierarchy is clearer.", x: 0, y: 330, width: 360, height: 180 },
+  { id: "c", name: "Version C", component: Example, from: "example", x: 456, y: 330, width: 360, height: 180 },
+  { id: "d", name: "Version D", component: Example, from: "b", why: "Fits a busy week.", picked: true, x: 0, y: 660, width: 360, height: 180 },
+];
+`,
+  )
+  try {
+    const errors = collectErrors(page)
+    writeFileSync(REGISTRY, rounds)
+    await servesId(page, 'd')
+    await page.goto('/')
+    const item = (id: string) => page.locator(`.canvas-item[data-canvas-item="${id}"]`)
+    const lines = page.locator('.canvas-lineage path')
+    const words = page.locator('.canvas-lineage-why')
+    const trash = async (name: string) => {
+      await page.getByRole('button', { name: `More actions for ${name}` }).click()
+      await page.getByRole('button', { name: `Move ${name} to the trash` }).click()
+    }
+    await expect(item('d')).toBeVisible()
+    await expect(lines).toHaveCount(2)
+    // B in the trash: one line from the example straight to D, with D's reason; B's goes with it.
+    await trash('Version B')
+    await expect.poll(() => entryOf('b')).toContain('trashed: true')
+    await expect(lines).toHaveCount(1)
+    await expect(words).toHaveText(['Fits a busy week.'])
+    const top = (await page.locator('[data-canvas-preview="example"]').boundingBox())!
+    const reason = (await words.first().boundingBox())!
+    expect(reason.y).toBeGreaterThan(top.y + top.height)
+    // The Share button leaves B out of the file altogether; D's `from` there points past it, so the path still joins up.
+    await page.getByRole('button', { name: 'Share as an HTML file' }).click()
+    const download = page.waitForEvent('download')
+    await page.getByRole('dialog', { name: 'Share as a file' }).getByRole('button', { name: 'Download' }).click()
+    const file = await download
+    const html = readFileSync((await file.path())!, 'utf8')
+    expect(html).not.toContain('The hierarchy is clearer.')
+    const path = join(mkdtempSync(join(tmpdir(), 'design-canvas-share-')), file.suggestedFilename())
+    await file.saveAs(path)
+    const reader = await page.context().newPage()
+    await reader.goto(pathToFileURL(path).href)
+    await expect(reader.locator('.canvas-lineage path')).toHaveCount(1)
+    await expect.poll(async () => (await reader.locator('.canvas-lineage path').first().getAttribute('d')) ?? '').toMatch(/^M /)
+    await expect(reader.locator('.canvas-lineage-why')).toHaveText(['Fits a busy week.'])
+    await reader.close()
+    // C was compared with D through B in the trash: picking C takes D's mark off, and ⌘/Ctrl + Z puts it back.
+    await page.getByRole('button', { name: 'Pick Version C as the answer' }).click()
+    await expect.poll(() => entryOf('c')).toContain('picked: true')
+    await expect.poll(() => entryOf('d')).not.toContain('picked')
+    await page.locator('.canvas-viewport').focus()
+    await page.keyboard.press('ControlOrMeta+z')
+    await expect.poll(() => entryOf('d')).toContain('picked: true')
+    await expect.poll(() => entryOf('c')).not.toContain('picked')
+    // The picked D in the trash loses its pick in the same write; the notice's Undo brings back both.
+    await trash('Version D')
+    await expect.poll(() => entryOf('d')).toContain('trashed: true')
+    expect(entryOf('d')).not.toContain('picked')
+    await expect(lines).toHaveCount(0)
+    await page.locator('.canvas-toast').getByRole('button', { name: 'Undo' }).click()
+    await expect(item('d')).toHaveAttribute('data-picked', 'true')
+    await expect.poll(() => entryOf('d')).not.toContain('trashed')
+    expect(entryOf('d')).toContain('picked: true')
+    await expect(lines).toHaveCount(1)
+    // An undo never puts a pick back on a version in the trash: pick C, trash D, then ⌘/Ctrl + Z.
+    await page.getByRole('button', { name: 'Pick Version C as the answer' }).click()
+    await expect.poll(() => entryOf('d')).not.toContain('picked')
+    await trash('Version D')
+    await expect.poll(() => entryOf('d')).toContain('trashed: true')
+    await page.locator('.canvas-viewport').focus()
+    await page.keyboard.press('ControlOrMeta+z')
+    await expect.poll(() => entryOf('c')).not.toContain('picked')
+    await page.waitForTimeout(500)
+    expect(entryOf('d')).toContain('trashed: true')
+    expect(entryOf('d')).not.toContain('picked')
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
 test('in a section, a pick takes the mark off an earlier pick in it, and not one outside it', async ({ page }) => {
   const original = readFileSync(REGISTRY, 'utf8')
   // A round of directions: cards with no `from`, in one section; D sits outside it.

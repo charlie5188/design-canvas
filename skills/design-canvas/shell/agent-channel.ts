@@ -36,7 +36,7 @@ import { AGENT_EVENT, AGENT_PATH, type AgentReply, EDIT_PATH, IMAGE_PATH, MAX_IM
 import { componentProps, sourceProps } from "./props-types.ts";
 import { standIns } from "./stand-ins.ts";
 import { readStylesheet, tailwindTheme } from "./tailwind-theme.ts";
-import { addEntry, applyEdits, type DirectAdd, type DirectEdit, type DirectRemove, listImages, placeableItems, removeEntry, validAdd, validEdit, validRemove } from "./registry-edit.ts";
+import { addEntry, applyEdits, type DirectAdd, type DirectEdit, type DirectRemove, listImages, placeableItems, removeEntry, removeItems, validAdd, validEdit, validRemove } from "./registry-edit.ts";
 
 export type AgentState = "off" | "listening" | "working";
 /** What the page hears: `finished` only on the update that ends `handling` because the agent said done. */
@@ -155,8 +155,9 @@ function leaveOutOfRegistry(root: string, leave: LeaveOut): Plugin {
     enforce: "pre",
     transform(code, id) {
       if (id.split("?")[0]!.replace(/\\/g, "/") !== registry) return undefined;
-      let source = code;
-      const kinds = [["item", leave.items], ["note", leave.notes], ["section", leave.sections]] as const;
+      // Items with their versions' `from` re-pointed past them, so a pick's path still joins up.
+      let source = removeItems(code, leave.items);
+      const kinds = [["note", leave.notes], ["section", leave.sections]] as const;
       for (const [kind, ids] of kinds) for (const entry of ids) source = removeEntry(source, kind, entry) ?? source;
       return { code: source, map: null };
     },

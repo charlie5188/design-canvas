@@ -1347,7 +1347,7 @@ function CanvasBoard({
       notify(labels.deleteFailed);
     }
     const removedEntries = snapshots.filter((entry) => !left.has(entry.id!));
-    for (const item of trashed) moveToTrash(item, true);
+    const unpicked = new Set(trashed.filter((item) => moveToTrash(item, true)).map((item) => item.id));
     const count = trashed.length + removedEntries.length + drafts.length;
     if (!trashed.length && !removedEntries.length) return;
     const entry: SavedChange | undefined = removedEntries.length ? { edits: [], removes: [], adds: removedEntries, positions: {} } : undefined;
@@ -1355,7 +1355,7 @@ function CanvasBoard({
     notify(labels.deletedMany(count), {
       label: labels.undo,
       run: async () => {
-        for (const item of trashed) putBack(item);
+        for (const item of trashed) putBack(item, unpicked.has(item.id));
         if (!entry) return;
         // This Undo and ⌘/Ctrl + Z are the same undo (see deleteBoard).
         savedHistory.current = savedHistory.current.filter((change) => change !== entry);
@@ -1408,6 +1408,8 @@ function CanvasBoard({
   // undo of a pick shows its marks at once the same way, so it never waits on, or loses
   // to, a registry update still on its way from the pick.
   const [picks, setPicks] = useState<Record<string, boolean>>({});
+  const picksRef = useRef(picks);
+  picksRef.current = picks;
   useEffect(() => {
     setPicks((prev) => {
       const keep = Object.entries(prev).filter(([id, on]) => !!items.find((item) => item.id === id)?.picked !== on);
@@ -1415,8 +1417,18 @@ function CanvasBoard({
     });
   }, [items]);
   /** Puts back what one saved change replaced. The change is already out of the history. */
-  const undoChange = async (change: SavedChange) => {
+  const undoChange = async (undoing: SavedChange) => {
     quietUntil.current = Date.now() + 2000;
+    // An undo never puts a pick back on a version in the trash: trashing it took the pick
+    // off (Trash.tsx), and an older pick in the history must not make it the answer again.
+    const change = {
+      ...undoing,
+      edits: undoing.edits.flatMap((edit) => {
+        if (edit.kind !== "item" || edit.set.picked !== true || !trashRef.current.includes(edit.id)) return [edit];
+        const { picked: _, ...rest } = edit.set;
+        return Object.keys(rest).length ? [{ ...edit, set: rest }] : [];
+      }),
+    };
     const pickMarks = Object.fromEntries(
       change.edits.flatMap((edit) => (edit.kind === "item" && typeof edit.set.picked === "boolean" ? [[edit.id, edit.set.picked]] : [])),
     );
@@ -1463,7 +1475,7 @@ function CanvasBoard({
     }
     const result = await postRegistry({ edits: change.edits, removes: change.removes, adds: change.adds });
     if (!result) {
-      savedHistory.current = [...savedHistory.current, change];
+      savedHistory.current = [...savedHistory.current, undoing];
       notify(labels.undoFailed);
       return;
     }
@@ -2818,6 +2830,8 @@ function CanvasBoard({
     setFrontId,
     notify,
     beforeTrash: closeNoteOn,
+    pickedNow: (item) => picksRef.current[item.id] ?? !!item.picked,
+    showPick: (id, on) => setPicks((prev) => ({ ...prev, [id]: on })),
     viewportRef,
   });
 
@@ -2905,8 +2919,6 @@ function CanvasBoard({
   // ring, the tag, and the path are the answer. The agent reads `picked` afterwards.
   const boardNow = useRef({ notes, sections, removed });
   boardNow.current = { notes, sections, removed };
-  const picksRef = useRef(picks);
-  picksRef.current = picks;
   /** Items inside a set-aside section: out of the running, so they are not offered a pick. */
   const setAsideIds = useMemo(() => {
     const frames = sections.filter((s) => isSetAside(s) && !removed.has(`section:${s.id}`));
@@ -2953,7 +2965,10 @@ function CanvasBoard({
     [notify],
   );
   /** The paths from the original to each picked version, drawn behind the items. */
-  const lineageSteps = useMemo(() => pickedPaths(shown, (item) => picks[item.id] ?? !!item.picked), [picks, shown]);
+  const lineageSteps = useMemo(() => {
+    const visible = new Set(shown.map((item) => item.id));
+    return pickedPaths(items, (item) => visible.has(item.id), (item) => picks[item.id] ?? !!item.picked);
+  }, [items, picks, shown]);
   /**
    * The first view of a canvas with no saved view, such as a shared file opened for the
    * first time: the picked versions and the paths to them, so a reader starts at the
