@@ -2857,6 +2857,9 @@ export const Checkout = () => {
     const plain = page.locator('.canvas-item[data-canvas-item="example"] .canvas-preview')
     const frame = page.frameLocator('.canvas-item[data-canvas-item="phone"] iframe').locator('body')
     await expect(frame.getByRole('heading')).toHaveText('Plans')
+    // On a slow machine the frame's load event comes after its document is already heard.
+    // Heard twice, every press was a step twice (GitHub's runner): a second load hears nothing new.
+    await page.locator('.canvas-item[data-canvas-item="phone"] iframe').evaluate((f) => f.dispatchEvent(new Event('load')))
     await page.waitForTimeout(600)
     const note = page.locator('.canvas-pin[data-open] textarea')
     for (const [id, name, item] of [
