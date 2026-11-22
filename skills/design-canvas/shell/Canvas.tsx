@@ -50,7 +50,8 @@ import {
 } from "./bridge";
 import { FrameHost } from "./FrameHost";
 import { useFresh } from "./fresh";
-import { Help } from "./Help";
+import { CanvasMenu } from "./Help";
+import { ZoomMenu } from "./Zoom";
 import { type AnnotationHandlers, AnnotationPin, SendContext } from "./AnnotationView";
 import {
   type Annotation,
@@ -83,7 +84,7 @@ import {
   TYPING,
   wheelPixels,
 } from "./dom";
-import { AnnotateIcon, CopyIcon, EraserIcon, FitIcon, HandIcon, InspectIcon, MinusIcon, MoonIcon, NoteIcon, PlusIcon, ResetIcon, SectionIcon, SelectIcon, SendIcon, SunIcon } from "./icons";
+import { AnnotateIcon, CopyIcon, EraserIcon, HandIcon, InspectIcon, MoonIcon, NoteIcon, SectionIcon, SelectIcon, SendIcon, SunIcon } from "./icons";
 import { CanvasItemView, type ResizeEdge } from "./Item";
 import { InspectPanel } from "./Inspect";
 import { type InspectRecord, useInspect } from "./inspect-edit";
@@ -112,7 +113,7 @@ import {
   zoomAt,
 } from "./layout";
 import { ToastView, useNotices, useOpeningChecks, writeClipboard } from "./Notices";
-import { type Background, loadBackground, saveBackground, SettingsMenu } from "./Settings";
+import { type Background, loadBackground, saveBackground } from "./Settings";
 import { ShareButton, SharePanel, useShare } from "./Share";
 import { type ThemeStore, useThemeId } from "./theme";
 import { TrashButton, TrashDialog, useTrash, useTrashList } from "./Trash";
@@ -134,8 +135,8 @@ const REVEAL_MARGIN = 48;
 /** The notice row that opens under the top bars, at the top centre. */
 const TOAST_ROW = 48;
 const MIN_FIT_SIZE = 100;
-/** Room the top bars take, so a revealed or fitted item never sits under them. */
-const CHROME_TOP = 72;
+/** Room the top bars take (16 px from the edge, a 42 px bar, a little air), so a revealed or fitted item never sits under them. */
+const CHROME_TOP = 74;
 const FIT_PADDING = 72;
 /** Two presses this close, without moving, are a double-click. */
 const DOUBLE_TAP_MS = 400;
@@ -4619,9 +4620,10 @@ function CanvasBoard({
       <div ref={pickRef} className="canvas-pick" hidden aria-hidden="true" />
       <div ref={drawRef} className="canvas-draw" hidden aria-hidden="true" />
       <div ref={sizeTipRef} className="canvas-size-tip" hidden aria-hidden="true" />
-      {/* Controls where designers expect them: tools at the bottom centre, the view bottom right, the
-          file's own controls top right. What the canvas tells the person is at the top centre (see
-          canvas-messages below). The tools bar comes first: item reveals measure the first bar for the bottom margin. */}
+      {/* Controls in two places, where designers expect them (as in FigJam): the tools at the bottom
+          centre, and everything else in one bar at the top right. What the canvas tells the person is at
+          the top centre (see canvas-messages below). The tools bar comes first: item reveals measure the
+          first bar for the bottom margin. */}
       <div className="canvas-toolbar" data-place="tools" role="toolbar" aria-label={labels.toolsBar}>
           {/* One tool at a time. Interact is the default; Escape or V returns to it. */}
           <button
@@ -4689,52 +4691,20 @@ function CanvasBoard({
           </button>
           </>)}
       </div>
-      <div className="canvas-toolbar" data-place="view" role="toolbar" aria-label={labels.viewBar}>
-        <button
-          type="button"
-          className="canvas-button canvas-icon-button"
-          aria-label={labels.zoomOut}
-          data-tip={labels.zoomOut}
-          onClick={() => zoomStep(-1)}
-        >
-          <MinusIcon />
-        </button>
-        <span ref={zoomLabelRef} className="canvas-zoom" aria-live="off">
-          100%
-        </span>
-        <button
-          type="button"
-          className="canvas-button canvas-icon-button"
-          aria-label={labels.zoomIn}
-          data-tip={labels.zoomIn}
-          onClick={() => zoomStep(1)}
-        >
-          <PlusIcon />
-        </button>
-        <span className="canvas-separator" aria-hidden="true" />
-        <button
-          type="button"
-          className="canvas-button canvas-icon-button"
-          aria-label={labels.fitAll}
-          data-tip={labels.fitAll}
-          onClick={fitAll}
-        >
-          <FitIcon />
-        </button>
-        <button
-          type="button"
-          className="canvas-button canvas-icon-button"
-          aria-label={labels.resetCamera}
-          data-tip={labels.resetCamera}
-          onClick={resetCamera}
-        >
-          <ResetIcon />
-        </button>
-      </div>
-      {/* The file's own controls, top right, in two groups: what is in the file (the trash, while it
-          holds something, and share), then the canvas itself (settings, help). The trash comes and goes
-          at the group's left end, so nothing under the pointer moves. */}
+      {/* Everything but the tools, in one bar at the top right: the view (zoom), the app's themes, the
+          trash while it holds something, the settings and controls, and Share last, at the corner, the
+          one control that is about other people. The trash comes and goes at its group's left end, so
+          Share and the gear never move. */}
       <div className="canvas-toolbar" data-place="top" role="toolbar" aria-label={labels.canvasBar}>
+        <ZoomMenu
+          level="100%"
+          levelRef={zoomLabelRef}
+          onZoomIn={() => zoomStep(1)}
+          onZoomOut={() => zoomStep(-1)}
+          onFit={fitAll}
+          onActual={resetCamera}
+        />
+        <span className="canvas-separator" aria-hidden="true" />
         {theme && theme.options.length > 1 && (
           <>
             <fieldset className="canvas-themes" aria-label={labels.theme}>
@@ -4758,21 +4728,23 @@ function CanvasBoard({
             <span className="canvas-separator" aria-hidden="true" />
           </>
         )}
+        {!shared && trashedItems.length > 0 && (
+          <TrashButton
+            buttonRef={trashButtonRef}
+            count={trashedItems.length}
+            open={trashOpen}
+            onClick={() => {
+              // One of the trash, the share panel, and a notice at a time: they open in the same corner.
+              setToast(null);
+              setShareOpen(false);
+              setTrashOpen((open) => !open);
+            }}
+          />
+        )}
+        <CanvasMenu background={background} onBackground={setBackground} />
         {!shared && (
           <>
-            {trashedItems.length > 0 && (
-              <TrashButton
-                buttonRef={trashButtonRef}
-                count={trashedItems.length}
-                open={trashOpen}
-                onClick={() => {
-                  // One of the trash, the share panel, and a notice at a time: they open in the same corner.
-                  setToast(null);
-                  setShareOpen(false);
-                  setTrashOpen((open) => !open);
-                }}
-              />
-            )}
+            <span className="canvas-separator" aria-hidden="true" />
             <ShareButton
               buttonRef={shareButtonRef}
               busy={sharing}
@@ -4787,11 +4759,8 @@ function CanvasBoard({
                 setShareOpen((open) => !open);
               }}
             />
-            <span className="canvas-separator" aria-hidden="true" />
           </>
         )}
-        <SettingsMenu value={background} onChange={setBackground} />
-        <Help />
       </div>
       {/* The one place the canvas tells the person something: the changes waiting for the agent, and
           under them a notice for a few seconds. A notice never hides the bar: it often points at it

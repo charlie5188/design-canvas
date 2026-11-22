@@ -22,10 +22,10 @@ body,
 .canvas-frame-missing,
 /* In a frame the draw box sits beside the frame root, so it carries the tokens itself. */
 .canvas-draw {
-  --canvas-bg-color: var(--canvas-bg, #eef0f2);
+  --canvas-bg-color: var(--canvas-bg, #f5f6f8);
   --canvas-surface-color: var(--canvas-surface, #ffffff);
   --canvas-border-color: var(--canvas-border, #d5d9de);
-  --canvas-text-color: var(--canvas-text, #1f2328);
+  --canvas-text-color: var(--canvas-text, #2d3136);
   --canvas-subtle-color: var(--canvas-text-subtle, #5f6b76);
   --canvas-focus-color: var(--canvas-focus, #2f6fed);
   /* For a filled control with white words on it: the focus color, darkened until
@@ -55,7 +55,7 @@ body,
   --canvas-bg-color: #ffffff;
   --canvas-surface-color: #ffffff;
   --canvas-border-color: #d5d9de;
-  --canvas-text-color: #1f2328;
+  --canvas-text-color: #2d3136;
   --canvas-subtle-color: #5f6b76;
   --canvas-hover-color: rgb(0 0 0 / 6%);
 }
@@ -72,10 +72,10 @@ body,
 /* What a frame shows is the project's, never the board's: previews go back to the
    project's own colors, so a component looks the same on any background. */
 .canvas-root[data-background] :is(.canvas-preview, .canvas-trash-real, .canvas-flow-box) {
-  --canvas-bg-color: var(--canvas-bg, #eef0f2);
+  --canvas-bg-color: var(--canvas-bg, #f5f6f8);
   --canvas-surface-color: var(--canvas-surface, #ffffff);
   --canvas-border-color: var(--canvas-border, #d5d9de);
-  --canvas-text-color: var(--canvas-text, #1f2328);
+  --canvas-text-color: var(--canvas-text, #2d3136);
   --canvas-subtle-color: var(--canvas-text-subtle, #5f6b76);
   --canvas-hover-color: var(--canvas-hover, rgb(0 0 0 / 6%));
 }
@@ -116,7 +116,7 @@ body,
   box-sizing: border-box;
   border: 1px solid rgb(127 127 127 / 45%);
   border-radius: 50%;
-  background: var(--canvas-bg, #eef0f2);
+  background: var(--canvas-bg, #f5f6f8);
 }
 .canvas-swatch[data-background="white"] {
   background: #ffffff;
@@ -241,7 +241,14 @@ body,
   color: var(--canvas-subtle-color);
   font-size: 13px;
 }
+/* The grip waits in the margin left of the name, and shows only while the item is
+   hovered or the grip has keyboard focus: the name already drags the item, so a grip on
+   every item at rest is noise, and the name starts at the preview's left edge. It stays
+   a real button (arrow keys move the item) and keeps its place, so it never moves the
+   name when it shows. On a touch screen, with no hover, it always shows. */
 .canvas-handle {
+  position: absolute;
+  inset-inline-end: calc(100% + 4px);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -254,6 +261,16 @@ body,
   color: var(--canvas-subtle-color);
   cursor: grab;
   touch-action: none;
+  opacity: 0;
+}
+.canvas-item:hover .canvas-handle,
+.canvas-handle:focus-visible {
+  opacity: 1;
+}
+@media (hover: none) {
+  .canvas-handle {
+    opacity: 1;
+  }
 }
 .canvas-handle:hover,
 .canvas-button:hover,
@@ -278,12 +295,16 @@ body,
   text-overflow: ellipsis;
   white-space: nowrap;
   padding: 2px 6px;
+  /* The words, not the hover fill around them, line up with the preview's left edge. */
+  margin-inline-start: -6px;
   border: 0;
   border-radius: var(--canvas-radius-s);
   background: transparent;
-  color: var(--canvas-text-color);
+  /* A step lighter than titles, at a medium weight: a section's title is the heading, and
+     names in the full text color at semibold made the whole board read as black. */
+  color: color-mix(in srgb, var(--canvas-text-color) 45%, var(--canvas-subtle-color));
   font: inherit;
-  font-weight: 600;
+  font-weight: 500;
   font-size: 15px;
   text-align: start;
   /* It moves the item on drag; the hand says so. */
@@ -416,8 +437,6 @@ body,
 }
 .canvas-note {
   margin: 0;
-  /* Lines up with the name text: grip, gap, and the name's own padding. */
-  padding-inline-start: 34px;
 }
 .canvas-copy-fallback {
   display: inline-flex;
@@ -468,9 +487,9 @@ body,
   background: rgb(47 111 237 / 8%);
   pointer-events: none;
 }
-/* Fixed controls in four groups, each where a design tool puts it: tools at the
-   bottom centre, the view bottom right, and the file's own controls (trash,
-   share, settings, help) top right. The bottom holds only controls. What the canvas tells the
+/* Fixed controls in two places, where FigJam puts them: the tools at the bottom centre,
+   and everything else (zoom, themes, trash, settings and controls, share) in one bar at
+   the top right. The bottom holds only controls. What the canvas tells the
    person is at the top centre (.canvas-messages): the changes waiting for the
    agent, and notices. */
 .canvas-toolbar,
@@ -488,15 +507,34 @@ body,
 /* Above the Inspect panel (z-index 5), so a bar's hints and menus (help, settings) that open
    over the panel are never hidden under it, nor under a list the panel opens. */
 .canvas-toolbar {
+  /* One size for every bar's controls: a 32 px button and, in an icon button, a 20 px
+     icon (a number of px, for the stroke below), so the bar stays low (42 px) and the
+     icons keep some air between them. An icon beside a word (Share, Copy) is 18 px, to
+     sit with 14 px text. Every icon keeps a 1.5 px line. */
+  --canvas-bar-control: 32px;
+  --canvas-bar-icon: 20;
   z-index: 6;
   inset-block-end: 16px;
+}
+.canvas-toolbar .canvas-button {
+  min-block-size: var(--canvas-bar-control);
+}
+.canvas-toolbar .canvas-icon-button {
+  inline-size: var(--canvas-bar-control);
+}
+.canvas-toolbar .canvas-icon-button > svg {
+  inline-size: calc(var(--canvas-bar-icon) * 1px);
+  block-size: calc(var(--canvas-bar-icon) * 1px);
+  stroke-width: calc(36 / var(--canvas-bar-icon));
+}
+.canvas-toolbar .canvas-button:not(.canvas-icon-button, .canvas-zoom-button) > svg {
+  inline-size: 18px;
+  block-size: 18px;
+  stroke-width: 2;
 }
 .canvas-toolbar[data-place="tools"] {
   inset-inline-start: 50%;
   translate: -50% 0;
-}
-.canvas-toolbar[data-place="view"] {
-  inset-inline-end: 16px;
 }
 .canvas-toolbar[data-place="top"] {
   inset-block: 16px auto;
@@ -531,8 +569,6 @@ body,
   inset-inline-end: 16px;
 }
 /* Hints open away from the screen edge, and line up with the end of bars at the right edge. */
-.canvas-toolbar[data-place="view"] [data-tip]:hover::after,
-.canvas-toolbar[data-place="view"] [data-tip]:focus-visible::after,
 .canvas-toolbar[data-place="top"] [data-tip]:hover::after,
 .canvas-toolbar[data-place="top"] [data-tip]:focus-visible::after {
   inset-inline: auto 0;
@@ -574,7 +610,8 @@ body,
   border: 0;
   border-radius: var(--canvas-radius-m);
   background: transparent;
-  color: var(--canvas-text-color);
+  /* Controls a step lighter than the words they sit among, so the bars stay quiet. */
+  color: color-mix(in srgb, var(--canvas-text-color) 70%, var(--canvas-subtle-color));
   font: inherit;
   white-space: nowrap;
   cursor: default;
@@ -604,13 +641,13 @@ body,
   padding: 0;
   border: 0;
 }
+/* The chosen tool, or an open menu's button: a fill a step darker than hover, with no ring. */
 .canvas-button[aria-pressed="true"] {
-  background: var(--canvas-hover-color);
-  box-shadow: inset 0 0 0 1px var(--canvas-border-color);
+  background: color-mix(in srgb, var(--canvas-text-color) 9%, var(--canvas-surface-color));
 }
 .canvas-separator {
   inline-size: 1px;
-  block-size: 18px;
+  block-size: 20px;
   margin: 0 4px;
   background: var(--canvas-border-color);
 }
@@ -670,9 +707,11 @@ body,
   gap: 6px;
   margin: 0;
 }
+/* The action keeps at least 40% of the row, and a long way to do it wraps, so a name
+   like "Select several" never runs under its keys. */
 .canvas-help-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(40%, 1fr) auto;
   gap: 12px;
   align-items: baseline;
 }
@@ -680,9 +719,9 @@ body,
   margin: 0;
   color: var(--canvas-subtle-color);
   text-align: end;
-  white-space: nowrap;
 }
-.canvas-help-popover kbd {
+.canvas-help-popover kbd,
+.canvas-zoom-keys kbd {
   display: inline-block;
   min-inline-size: 10px;
   margin-inline: 1px;
@@ -703,10 +742,40 @@ body,
   }
 }
 .canvas-zoom {
-  min-inline-size: 44px;
-  text-align: center;
+  min-inline-size: 40px;
+  text-align: end;
   font-variant-numeric: tabular-nums;
-  font-size: 13px;
+}
+/* The zoom level opens the zoom menu (Zoom.tsx): the level, then a small chevron. */
+.canvas-zoom-button {
+  gap: 2px;
+  padding: 0 8px 0 6px;
+}
+.canvas-zoom-button > svg {
+  color: var(--canvas-subtle-color);
+}
+.canvas-zoom-menu {
+  min-inline-size: 200px;
+}
+.canvas-zoom-option {
+  justify-content: space-between;
+  gap: 16px;
+}
+.canvas-zoom-keys {
+  display: inline-flex;
+  gap: 2px;
+}
+/* The settings and controls panel opens on the board's background (Help.tsx), on one row. */
+.canvas-menu-background {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding-block-end: 12px;
+  border-block-end: 1px solid var(--canvas-border-color);
+}
+.canvas-menu-background .canvas-help-title {
+  margin-inline-end: 8px;
 }
 .canvas-agent-dot {
   inline-size: 6px;
@@ -759,21 +828,17 @@ body,
   margin: 16px;
   font-size: 14px;
 }
-/* Narrow windows: the view stacks above the tools, and the waiting changes and
-   notices drop under the top bar. */
+/* Narrow windows: the waiting changes and notices drop under the top bar. */
 @media (max-width: 640px) {
-  .canvas-toolbar[data-place="view"] {
-    inset-block-end: 64px;
-  }
   .canvas-messages {
-    inset-block-start: 64px;
+    inset-block-start: 66px;
   }
 }
 /* Narrower still keeps every control; the text labels go first. */
 @media (max-width: 480px) {
-  .canvas-toolbar .canvas-button:not(.canvas-icon-button) {
+  .canvas-toolbar .canvas-button:not(.canvas-icon-button, .canvas-zoom-button) {
     justify-content: center;
-    inline-size: 30px;
+    inline-size: var(--canvas-bar-control);
     padding: 0;
     font-size: 0;
     gap: 0;
@@ -1395,7 +1460,8 @@ html[data-canvas-alt] .canvas-frame-root * {
 /* Share: what goes in the file, under the Share button, before it downloads. */
 .canvas-share-popover {
   position: fixed;
-  inset-block-start: 64px;
+  /* Under the top-right bar (16 px from the edge, 42 px tall). */
+  inset-block-start: 66px;
   inset-inline-end: 16px;
   display: flex;
   flex-direction: column;
@@ -1483,8 +1549,10 @@ html[data-canvas-alt] .canvas-frame-root * {
    A note is a sticker with a folded corner, in fixed colors in every theme, so
    it reads as a comment on the work and never as part of the product. */
 .canvas-section {
-  --section-fill: color-mix(in srgb, var(--canvas-text-color) 5%, var(--canvas-bg-color));
-  --section-line: color-mix(in srgb, var(--canvas-text-color) 24%, var(--canvas-bg-color));
+  /* Nearly the board's own color: a section groups its items with its line and its
+     title, not with a tray of gray that the white previews sit in. */
+  --section-fill: color-mix(in srgb, var(--canvas-text-color) 2%, var(--canvas-bg-color));
+  --section-line: color-mix(in srgb, var(--canvas-text-color) 16%, var(--canvas-bg-color));
   position: absolute;
   inset-block-start: 0;
   inset-inline-start: 0;
@@ -1517,13 +1585,15 @@ html[data-canvas-alt] .canvas-frame-root * {
   max-inline-size: max(calc(70% / var(--canvas-unzoom, 1)), 160px);
   transform: scale(var(--canvas-unzoom, 1));
   transform-origin: left bottom;
-  padding: 5px 14px 6px;
+  padding: 6px 16px 7px;
   border: 1.5px solid var(--section-line);
   border-block-end: 0;
   border-radius: 10px 10px 0 0;
   background: var(--section-fill);
   color: var(--canvas-text-color);
-  font: 600 14px/1.2 var(--canvas-font, system-ui, -apple-system, "Segoe UI", sans-serif);
+  /* A size above the items' names (15px), so a section reads as the heading of the
+     versions in it: two levels, the group and each version. */
+  font: 600 18px/1.2 var(--canvas-font, system-ui, -apple-system, "Segoe UI", sans-serif);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1539,11 +1609,23 @@ html[data-canvas-alt] .canvas-frame-root * {
   outline-offset: 2px;
 }
 .canvas-section[data-interactive]:not([data-selected]) .canvas-section-tab:hover {
-  background: color-mix(in srgb, var(--canvas-text-color) 10%, var(--canvas-bg-color));
+  background: color-mix(in srgb, var(--canvas-text-color) 6%, var(--canvas-bg-color));
 }
 
+/* A note is paper, the same on every app theme so it never reads as product UI. On a
+   dark board it is dark paper with light words: bright yellow glares there, beside the
+   dark chrome. The board's own lightness decides (`--note-dark` is 1 on a board darker
+   than mid-gray, else 0), so the dark background setting and an app's dark theme both
+   get it, with no script. A browser without relative colors keeps the light paper. */
 .canvas-note-card {
   --fold: 22px;
+  --note-ink: #2b2400;
+  --note-paper-top: #fff7bd;
+  --note-paper-bottom: #ffee96;
+  --note-flap-lit: #f8e98f;
+  --note-flap-shade: #d4b73a;
+  --note-link: #1d4ed8;
+  --note-code: rgb(0 0 0 / 7%);
   position: absolute;
   inset-block-start: 0;
   inset-inline-start: 0;
@@ -1552,7 +1634,7 @@ html[data-canvas-alt] .canvas-frame-root * {
   box-sizing: border-box;
   /* A drop shadow, not box-shadow: the cut corner would clip the latter. */
   filter: drop-shadow(0 1px 1px rgb(0 0 0 / 14%)) drop-shadow(0 6px 10px rgb(0 0 0 / 10%));
-  color: #2b2400;
+  color: var(--note-ink);
   font: 14px/1.45 var(--canvas-font, system-ui, -apple-system, "Segoe UI", sans-serif);
   cursor: default;
   user-select: text;
@@ -1563,7 +1645,7 @@ html[data-canvas-alt] .canvas-frame-root * {
   box-sizing: border-box;
   min-inline-size: 0;
   padding: 14px 16px 18px;
-  background: linear-gradient(180deg, #fff7bd, #ffee96);
+  background: linear-gradient(180deg, var(--note-paper-top), var(--note-paper-bottom));
   /* The bottom-right corner is cut away; ::after draws the flap that folds over it. */
   clip-path: polygon(0 0, 100% 0, 100% calc(100% - var(--fold)), calc(100% - var(--fold)) 100%, 0 100%);
   white-space: pre-wrap;
@@ -1576,7 +1658,20 @@ html[data-canvas-alt] .canvas-frame-root * {
   inset-block-end: 0;
   inline-size: var(--fold);
   block-size: var(--fold);
-  background: linear-gradient(135deg, #f8e98f 0, #d4b73a 50%, transparent 50%);
+  background: linear-gradient(135deg, var(--note-flap-lit) 0, var(--note-flap-shade) 50%, transparent 50%);
+}
+@supports (color: oklch(from red calc(l * 0.5) c h)) {
+  .canvas-note-card {
+    /* Each color goes from its light value to its dark one as --note-dark goes from 0 to 1. */
+    --note-dark: clamp(0, (0.5 - l) * 1000, 1);
+    --note-ink: oklch(from var(--canvas-bg-color) calc(0.26 + 0.66 * var(--note-dark)) calc(0.054 - 0.004 * var(--note-dark)) 98);
+    --note-paper-top: oklch(from var(--canvas-bg-color) calc(0.969 - 0.599 * var(--note-dark)) calc(0.074 - 0.024 * var(--note-dark)) 100);
+    --note-paper-bottom: oklch(from var(--canvas-bg-color) calc(0.944 - 0.604 * var(--note-dark)) calc(0.11 - 0.06 * var(--note-dark)) 98.6);
+    --note-flap-lit: oklch(from var(--canvas-bg-color) calc(0.927 - 0.477 * var(--note-dark)) calc(0.112 - 0.052 * var(--note-dark)) 100);
+    --note-flap-shade: oklch(from var(--canvas-bg-color) calc(0.783 - 0.513 * var(--note-dark)) calc(0.142 - 0.102 * var(--note-dark)) 95.6);
+    --note-link: oklch(from var(--canvas-bg-color) calc(0.488 + 0.292 * var(--note-dark)) calc(0.217 - 0.107 * var(--note-dark)) 264.4);
+    --note-code: oklch(from var(--canvas-bg-color) var(--note-dark) 0 0 / calc(0.07 + 0.05 * var(--note-dark)));
+  }
 }
 .canvas-note-card[data-interactive] {
   cursor: grab;
@@ -1823,17 +1918,6 @@ html[data-canvas-alt] .canvas-frame-root * {
   white-space: nowrap;
 }
 
-/* A section pulls by its tab, marked with the same grip an item's name has, and
-   by its frame, which lights up under the pointer. */
-.canvas-section-grip {
-  display: inline-block;
-  margin-inline-end: 7px;
-  vertical-align: -1px;
-  opacity: 0.55;
-}
-.canvas-section[data-interactive] .canvas-section-tab:hover .canvas-section-grip {
-  opacity: 1;
-}
 /* Notes and sections resize from their border like items (and OS windows):
    invisible zones that straddle each edge and corner, one size on screen at any
    zoom, where only the cursor changes (Board.tsx). A section's frame ignores
@@ -2083,13 +2167,20 @@ html[data-canvas-alt] .canvas-frame-root * {
    whenever no more urgent state does, and the ring shows always, so the pick
    reads zoomed out, while the tag says something else, and in the shared file.
    One color, the canvas's focus color: the chrome's only state color, so a kit's
-   theme carries it. */
+   theme carries it. The tab is a light tint with the color in its words and edge, not
+   a solid fill: a pick is a lasting fact, so it stays quieter than the states that ask
+   for a look now (a new version's green tag), and never louder than the work. Its
+   words mix the focus color with the board's text color, so they stay readable on a
+   light board and a dark one (6.5:1 and 5:1 on the defaults). */
 .canvas-item > .canvas-ghost-tag[data-state="picked"] {
   inset-inline-end: calc(var(--canvas-radius-size) + 4px);
   margin-block-start: 1px;
-  padding: 2px 10px 3px 6px;
+  padding: 1px 9px 2px 5px;
+  border: 1px solid var(--canvas-fill-color);
+  border-block-start: 0;
   border-radius: 0 0 8px 8px;
-  background: var(--canvas-fill-color);
+  background: color-mix(in srgb, var(--canvas-focus-color) 12%, var(--canvas-surface-color));
+  color: color-mix(in srgb, var(--canvas-focus-color) 60%, var(--canvas-text-color));
 }
 /* Unpick shows on the tab only while the item is hovered or the button has focus. */
 .canvas-unpick {
@@ -2737,18 +2828,19 @@ html[data-canvas-alt] .canvas-frame-root * {
 }
 
 /* Inspect (prototype, Inspect.tsx): a panel docked at the right while the tool is on,
-   between the file's controls at the top and the view controls at the bottom. */
+   under the top-right bar, and stopping short of the tools bar's height at the bottom. */
 .canvas-inspect {
   position: fixed;
   z-index: 5;
   display: flex;
   flex-direction: column;
-  /* As tall as its content, down to just above the view controls, which stay where they always
-     are; as wide as its left edge was dragged. */
-  inset-block-start: 64px;
+  /* As tall as its content, down to the tools bar's height, so on a narrow window it never
+     covers the tools; as wide as its left edge was dragged. A bar is 42 px, 16 px from the
+     edge, with 8 px of air. */
+  inset-block-start: 66px;
   inset-inline-end: 16px;
   inline-size: var(--canvas-inspect-width, 300px);
-  max-block-size: calc(100% - 64px - 68px);
+  max-block-size: calc(100% - 66px - 66px);
   box-sizing: border-box;
   overflow: hidden;
   border: 1px solid var(--canvas-border-color);
@@ -3260,14 +3352,14 @@ html[data-canvas-alt] .canvas-frame-root * {
 }
 
 /* Bold, links, code, and lists in a note (note-text.tsx). A list sits tight against the lines
-   around it, as a line of the note would. The colours are fixed, like the note's own. */
+   around it, as a line of the note would. The colours are the note's own, light or dark paper. */
 .canvas-note-body strong {
   font-weight: 700;
 }
 .canvas-note-body .canvas-note-link {
-  color: #1d4ed8;
+  color: var(--note-link);
   text-decoration: underline;
-  text-decoration-color: rgb(29 78 216 / 45%);
+  text-decoration-color: color-mix(in srgb, var(--note-link) 45%, transparent);
   text-underline-offset: 2px;
   cursor: pointer;
 }
@@ -3277,7 +3369,7 @@ html[data-canvas-alt] .canvas-frame-root * {
 .canvas-note-body code {
   padding: 0.05em 0.3em;
   border-radius: 4px;
-  background: rgb(0 0 0 / 7%);
+  background: var(--note-code);
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: 0.88em;
 }

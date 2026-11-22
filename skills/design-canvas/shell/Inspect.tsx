@@ -734,7 +734,7 @@ function Picker({
     // so the text stays in line; only a field too near the edge for a usable list gives that up.
     const width = Math.max(Math.min(Math.max(field.width, 260), window.innerWidth - 8 - left), 200);
     // Clear of the bars at the top and bottom, which sit above the panel and its lists.
-    const minTop = 64;
+    const minTop = 66;
     const maxBottom = window.innerHeight - 76;
     const natural = frame.height;
     const full = Math.min(natural, 360, maxBottom - minTop);
