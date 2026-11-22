@@ -59,11 +59,13 @@ import {
   formatAnnotations,
   limitText,
   loadAnnotations,
+  MAX_REF,
   newAnnotationId,
   placeOf,
   saveAnnotations,
   sectionKey,
   sectionOf,
+  shortHash,
   threadOf,
   withFollowUp,
 } from "./annotations";
@@ -159,6 +161,12 @@ const itemScreenRect = (element: HTMLElement) => {
   const top = Math.min(rect.top, element.querySelector(".canvas-item-title")?.getBoundingClientRect().top ?? rect.top);
   return new DOMRect(rect.left, top, rect.width, rect.bottom - top);
 };
+
+/**
+ * A click that adds to the selection, or takes out of it: Shift, as in design tools, or
+ * ⌘/Ctrl, as in a file list, so neither habit fails. Alt stays for copying a reference.
+ */
+const addsToSelection = (event: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) => event.shiftKey || event.metaKey || event.ctrlKey;
 
 /** Rows top to bottom, each left to right: a box joins a row when it starts above the middle of the row's first box. */
 function readingOrder<T extends { x: number; y: number; h: number }>(boxes: T[]) {
@@ -506,7 +514,7 @@ function CanvasBoard({
     if (!agentHandling) return new Set<string>();
     // After a reload mid-work the message is not known: every sent note counts.
     const mine = annotations.filter((a) => a.sent && (inFlight.size ? inFlight.has(a.id) : true));
-    return new Set(mine.map((a) => a.itemId));
+    return new Set(mine.flatMap((a) => [a.itemId, ...(a.also ?? [])]));
   }, [agentHandling, annotations, inFlight]);
 
   const [fresh, setFresh] = useFresh(storageKey, ids, viewportRef, elements);
@@ -526,13 +534,35 @@ function CanvasBoard({
     [items],
   );
   /**
+   * What a note on several items renders now, as one print: it changed once any of them
+   * did. Tagged with the theme like an item's own print; undefined while one is not rendered.
+   */
+  const printOfMany = useCallback(
+    (a: Annotation) => {
+      const prints = [a.itemId, ...(a.also ?? [])].map(printOf);
+      if (prints.some((print) => !print)) return undefined;
+      return `${theme?.get() ?? ""}|${shortHash(prints.join("\u0000"))}`;
+    },
+    [printOf, theme],
+  );
+  /**
    * What a sent annotation waits on: its item's content, or its item's count of
    * versions. A section's waits on the number of items: its usual answer is a new
    * item made from the ones inside, and the person's own moves never touch that.
+   * A note on several items waits like a section's when it asks for new versions
+   * (Combine makes one, the same request for each makes several, and the new items
+   * can name any of them as `from`), and otherwise on all of its items' content.
    */
   const sentPrint = useCallback(
-    (a: Annotation) => (sectionOf(a) !== null ? `s|${items.length}` : a.version ? versionsOf(a.itemId) : printOf(a.itemId)),
-    [items.length, printOf, versionsOf],
+    (a: Annotation) =>
+      sectionOf(a) !== null || (a.also?.length && a.version)
+        ? `s|${items.length}`
+        : a.also?.length
+          ? printOfMany(a)
+          : a.version
+            ? versionsOf(a.itemId)
+            : printOf(a.itemId),
+    [items.length, printOf, printOfMany, versionsOf],
   );
   /** Each annotation on the item and its "new version" choice, for Escape. */
   const versionsBefore = useCallback(
@@ -583,7 +613,18 @@ function CanvasBoard({
     [closeAnnotation, setOpen, versionsBefore],
   );
   const startAnnotation = useCallback(
-    (itemId: string, x: number, y: number, ref: string, area?: { w: number; h: number }, text = "", id = newAnnotationId(), asked?: boolean) => {
+    (
+      itemId: string,
+      x: number,
+      y: number,
+      ref: string,
+      area?: { w: number; h: number },
+      text = "",
+      id = newAnnotationId(),
+      asked?: boolean,
+      /** The other items of a note on several items (`Annotation.also`). */
+      also?: string[],
+    ) => {
       closeAnnotation();
       // The item's choice so far, or a new version by default: exploring keeps what was there.
       // `asked`: the note says itself which it is, as Start here, which changes the item in place.
@@ -599,6 +640,7 @@ function CanvasBoard({
         ref,
         text: limitText(text),
         ...(onSection ? {} : { version }),
+        ...(also?.length ? { also } : {}),
       };
       const versions = versionsBefore(itemId);
       setAnnotations((prev) => [...prev, annotation]);
@@ -1587,7 +1629,7 @@ function CanvasBoard({
   useEffect(() => {
     if (!multi.length) return;
     const onDown = (event: PointerEvent) => {
-      const kept = ".canvas-item-title, .canvas-image, .canvas-note-card, .canvas-section-tab, .canvas-board-edge, .canvas-resize";
+      const kept = ".canvas-item-title, .canvas-image, .canvas-note-card, .canvas-section-tab, .canvas-board-edge, .canvas-resize, .canvas-selection-actions";
       if (event.target instanceof Element && event.target.closest(kept)) return;
       if (event.target === viewportRef.current || event.target === worldRef.current) return;
       if (event.button === 1 || spaceArmed.current || zoomArmed.current) return;
@@ -1794,6 +1836,10 @@ function CanvasBoard({
         continue;
       }
       if (!ids.has(a.itemId)) continue;
+      if (a.also?.length && a.version) {
+        if (a.sent !== sentPrint(a)) gone.push(a);
+        continue;
+      }
       if (a.version) {
         // Only a new item made from this one counts; the original stays as it was.
         const versions = versionsOf(a.itemId);
@@ -1801,7 +1847,7 @@ function CanvasBoard({
         else if (Number(versions.slice(2)) > Number(a.sent.slice(2))) gone.push(a);
         continue;
       }
-      const current = now(a.itemId);
+      const current = a.also?.length ? printOfMany(a) : now(a.itemId);
       if (!current || current === a.sent) continue;
       const sameTheme = a.sent.split("|")[0] === current.split("|")[0];
       if (a.sent === "?" || !sameTheme) reread.set(a.id, current);
@@ -1815,7 +1861,8 @@ function CanvasBoard({
     );
     if (!gone.length) return;
     // An item the agent changed in place says so until it has been seen.
-    const changed = gone.filter((a) => !a.version && sectionOf(a) === null).map((a) => a.itemId);
+    // A note on several items does not say which of them changed, so none is marked.
+    const changed = gone.filter((a) => !a.version && sectionOf(a) === null && !a.also?.length).map((a) => a.itemId);
     if (changed.length) {
       setFresh((prev) => ({ ...prev, ...Object.fromEntries(changed.filter((id) => !prev[id]).map((id) => [id, "updated" as const])) }));
     }
@@ -1829,7 +1876,7 @@ function CanvasBoard({
           ...gone.filter((a) => !current.some((c) => c.id === a.id)).map((a) => ({ ...a, sent: sentPrint(a) ?? "?" })),
         ]),
     });
-  }, [ids, notify, printOf, sections, sentPrint, setOpen, versionsOf]);
+  }, [ids, notify, printOf, printOfMany, sections, sentPrint, setOpen, versionsOf]);
   const checkSentRef = useRef(checkSent);
   checkSentRef.current = checkSent;
 
@@ -2078,6 +2125,42 @@ function CanvasBoard({
     const keys = selectionKeys();
     chooseKeys(keys.includes(key) ? keys.filter((k) => k !== key) : [...keys, key]);
   };
+  /** The selected items in reading order, with their boxes; notes, sections, and images left out. */
+  const selectedItems = () =>
+    readingOrder(
+      multiRef.current.flatMap((key) => {
+        const item = key.startsWith("item:") ? shown.find((entry) => entry.id === key.slice(5)) : undefined;
+        const r = item && rectOf(item);
+        return item && r ? [{ item, x: r.x, y: r.y, w: r.w, h: r.h }] : [];
+      }),
+    );
+  /**
+   * Ask agent about the selected items: one note on all of them, for the same change to each
+   * or one new item made from them. Its pin is on the first in reading order and the others
+   * are outlined (AnnotationLink). The selection then lets go: the outlines show what the note
+   * covers, and a later A is the tool again. The same set asked about again opens its waiting note.
+   */
+  const askSelection = () => {
+    const chosen = selectedItems();
+    if (chosen.length < 2) return false;
+    const [first, ...rest] = chosen.map((entry) => entry.item);
+    const also = rest.map((item) => item.id);
+    const same = (a: Annotation) =>
+      a.itemId === first!.id && a.also?.length === also.length && a.also.every((id) => also.includes(id)) && !a.sent && !a.queued;
+    setMulti([]);
+    const waiting = annotationsRef.current.find(same);
+    if (waiting) {
+      openExisting(waiting.id);
+      return true;
+    }
+    const preview = elements.current.get(first!.id)?.querySelector<HTMLElement>("[data-canvas-preview]");
+    if (!preview) return false;
+    const ref = labels.itemsRef(chosen.map(({ item }) => labels.sectionItem(item.name, item.id)));
+    startAnnotation(first!.id, 0, 0, ref.length > MAX_REF ? `${ref.slice(0, MAX_REF - 1)}…` : ref, { w: preview.offsetWidth, h: preview.offsetHeight }, "", undefined, undefined, also);
+    return true;
+  };
+  const askSelectionRef = useRef(askSelection);
+  askSelectionRef.current = askSelection;
   /**
    * What moves with `primary` (the selected thing the person is dragging): the rest of the
    * selection, and what a selected section holds, each once. The dragged thing itself is
@@ -2246,7 +2329,7 @@ function CanvasBoard({
     event.stopPropagation();
     event.preventDefault();
     const key = `image:${image.id}`;
-    if (event.shiftKey) {
+    if (addsToSelection(event)) {
       toggleKey(key);
       return;
     }
@@ -2423,7 +2506,7 @@ function CanvasBoard({
           : undefined;
       // Shift + click adds it to the selection, or takes it out; it does not start a move.
       const ownKey = stableKey(ref);
-      if (event.shiftKey && !annotated) {
+      if (addsToSelection(event) && !annotated) {
         toggleKey(ownKey);
         return;
       }
@@ -3426,14 +3509,19 @@ function CanvasBoard({
   // A drag on empty canvas with the default tool selects what the box touches, as it is
   // drawn; with Shift it adds to what was selected. A press that never travels is the click
   // on empty canvas it always was. Not in a shared file (nothing there can move), and not
-  // with Ask agent or Inspect chosen, where empty canvas still pans.
+  // with Inspect chosen, where empty canvas still pans.
+  // With Ask agent chosen the same box asks about the items it touches, so the gesture means
+  // "these" in both tools: they light up as it is drawn, and on release one note opens on all
+  // of them (askSelection), or a whole-item note when it touched one. Notes, sections, and
+  // images are left out; there is nothing to add to, so Shift changes nothing here.
   const marqueeRef = useRef<(event: PointerEvent) => boolean>(() => false);
   marqueeRef.current = (event) => {
     const viewport = viewportRef.current;
     const box = drawRef.current;
-    if (!viewport || !box || shared || annotatingRef.current || inspectToolRef.current || boardToolRef.current) return false;
+    if (!viewport || !box || shared || inspectToolRef.current || boardToolRef.current) return false;
+    const asking = annotatingRef.current;
     const start = { x: event.clientX, y: event.clientY };
-    const base = event.shiftKey ? selection.current.selectionKeys() : [];
+    const base = !asking && addsToSelection(event) ? selection.current.selectionKeys() : [];
     let moved = false;
     let last = "";
     try {
@@ -3449,7 +3537,8 @@ function CanvasBoard({
       const r = { left: Math.min(start.x, e.clientX), top: Math.min(start.y, e.clientY), right: Math.max(start.x, e.clientX), bottom: Math.max(start.y, e.clientY) };
       Object.assign(box.style, { left: `${r.left}px`, top: `${r.top}px`, width: `${r.right - r.left}px`, height: `${r.bottom - r.top}px` });
       box.hidden = false;
-      const keys = [...new Set([...base, ...selection.current.keysIn(r)])];
+      const touched = selection.current.keysIn(r);
+      const keys = [...new Set([...base, ...(asking ? touched.filter((key) => key.startsWith("item:")) : touched)])];
       // Only a change is set: the canvas draws again for each one.
       if (keys.join("|") === last) return;
       last = keys.join("|");
@@ -3463,7 +3552,13 @@ function CanvasBoard({
       viewport.removeAttribute("data-gesture");
       box.hidden = true;
       if (moved) suppressNextClick();
-      else if (e.type === "pointerup" && !event.shiftKey) tapSurfaceRef.current(e.clientX, e.clientY);
+      else if (e.type === "pointerup" && !addsToSelection(event)) tapSurfaceRef.current(e.clientX, e.clientY);
+      if (!asking || !moved) return;
+      const items = multiRef.current.filter((key) => key.startsWith("item:"));
+      if (e.type === "pointerup" && items.length > 1 && askSelectionRef.current()) return;
+      setMulti([]);
+      const one = e.type === "pointerup" && items.length === 1 ? shown.find((item) => `item:${item.id}` === items[0]) : undefined;
+      if (one) askItem(one);
     };
     viewport.addEventListener("pointermove", move);
     viewport.addEventListener("pointerup", end);
@@ -3482,8 +3577,9 @@ function CanvasBoard({
   }, [multi]);
   // While a drag on empty canvas would select, the pointer there is the plain arrow, not the hand (canvas.css).
   useEffect(() => {
-    viewportRef.current?.toggleAttribute("data-select", !shared && !annotating && !boardTool && !handTool && !inspectTool);
-  }, [annotating, boardTool, handTool, inspectTool]);
+    // With Ask agent chosen too: the same box asks about the items it touches.
+    viewportRef.current?.toggleAttribute("data-select", !shared && !boardTool && !handTool && !inspectTool);
+  }, [boardTool, handTool, inspectTool]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -4041,6 +4137,8 @@ function CanvasBoard({
       }
       if (!shared && plain && canvasFocus && (event.key === "a" || event.key === "A") && !event.repeat) {
         event.preventDefault();
+        // With two or more items selected, A asks about them, as the button above them does.
+        if (!annotatingRef.current && askSelectionRef.current()) return;
         chooseTool("annotate");
         if (annotatingRef.current && pointer.x >= 0) showPick(document.elementFromPoint(pointer.x, pointer.y));
         return;
@@ -4360,7 +4458,7 @@ function CanvasBoard({
       // the agent, where a click on the name is a note on the item, or in a shared file.
       const selects = !shared && !annotatingRef.current;
       const ownKey = `item:${item.id}`;
-      const shift = event.shiftKey;
+      const shift = addsToSelection(event);
       let group: ReturnType<typeof selection.current.groupOf> | null = null;
       // Alignment snapping (see snap.ts). The other previews are measured once,
       // when the drag starts: nothing else moves during it. `mine` is this item's
@@ -4554,6 +4652,7 @@ function CanvasBoard({
                   ? [{ annotation, number: annotation.sent || annotation.queued ? undefined : pending.indexOf(annotation) + 1 }]
                   : [],
               )}
+              links={visibleAnnotations.filter((annotation) => annotation.also?.includes(item.id))}
               // While the flow view shows this item, its open note is drawn there, not twice.
               openAnnotation={flowId === item.id ? null : (openAnnotation?.id ?? null)}
               annotationHandlers={annotationHandlers}
@@ -4628,6 +4727,34 @@ function CanvasBoard({
               </div>
             );
           })}
+          {/* Ask agent about the selected items, above the selection's top-right corner, where a
+              single item keeps its own actions. Only for two or more items: one has its own Ask. */}
+          {!shared &&
+            !annotating &&
+            (() => {
+              const chosen = multi.flatMap((key) => {
+                const item = key.startsWith("item:") ? shown.find((entry) => entry.id === key.slice(5)) : undefined;
+                return item ? [item] : [];
+              });
+              const bounds = chosen.length > 1 ? boundsOf(chosen) : null;
+              if (!bounds) return null;
+              return (
+                <div className="canvas-selection-anchor" style={{ transform: `translate(${bounds.maxX}px, ${bounds.minY}px)` }}>
+                  <span className="canvas-selection-actions">
+                    <button
+                      type="button"
+                      className="canvas-item-action canvas-selection-ask"
+                      aria-label={labels.askSelectionName(chosen.length)}
+                      aria-keyshortcuts="A"
+                      onClick={() => askSelectionRef.current()}
+                    >
+                      <AnnotateIcon />
+                      {labels.askSelection}
+                    </button>
+                  </span>
+                </div>
+              );
+            })()}
           <div ref={guideVRef} className="canvas-guide" data-guide="vertical" hidden aria-hidden="true" />
           <div ref={guideHRef} className="canvas-guide" data-guide="horizontal" hidden aria-hidden="true" />
         </div>

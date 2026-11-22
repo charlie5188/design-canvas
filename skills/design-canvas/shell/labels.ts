@@ -35,8 +35,9 @@ export const labels = {
       title: "Items",
       rows: [
         { what: "Move", how: "Drag the name" },
-        { what: "Select several", how: "Drag on empty canvas, or `Shift` + click", local: true },
+        { what: "Select several", how: "Drag on empty canvas, or `Shift` or `⌘/Ctrl` + click", local: true },
         { what: "Move or delete the selection", how: "Drag one of them, or `Delete`", local: true },
+        { what: "Ask agent about the selected items", how: "`A`, or Ask agent above them", local: true },
         { what: "Add a reference image", how: "Paste it, or drop the file", local: true },
         { what: "Keep a move straight", how: "`Shift` + drag" },
         { what: "Resize", how: "Drag the border" },
@@ -54,6 +55,7 @@ export const labels = {
         { what: "About an element", how: "Click it" },
         { what: "About an area", how: "Drag across it" },
         { what: "About a whole item", how: "Click its name" },
+        { what: "About several items", how: "Drag across them from empty canvas" },
         { what: "Rewrite a text in place", how: "Double-click it" },
         { what: "Send", how: "`⌘/Ctrl` `Enter`" },
         { what: "Keep a note for later", how: "`Enter`" },
@@ -116,6 +118,23 @@ export const labels = {
     { label: "Languages", text: "Show this in the other languages the app has." },
   ],
   quickAsksLabel: "Quick requests",
+  /**
+   * The same for a note on several items (the Ask button over a selection). Combine comes
+   * first: making one version from the best of a few is what a selection is for that a note
+   * on one item cannot do. The rest are the one-item requests, for each of them.
+   */
+  quickAsksMany: [
+    { label: "Combine", text: "Combine these into one new version, with the best of each." },
+    { label: "Flow", text: "Add the other screens of each one's flow." },
+    { label: "Phone", text: "Show each of these at phone width." },
+    { label: "States", text: "Add empty, loading, and error states to each of these." },
+    { label: "Languages", text: "Show each of these in the other languages the app has." },
+  ],
+  /** The Ask button over a selection of items: the tool's own words, since it stands alone there. */
+  askSelection: "Ask agent",
+  askSelectionName: (n: number) => `Ask agent about the ${n} selected items`,
+  /** What a note on several items is about, in the message: each item as `sectionItem` writes it, in reading order. */
+  itemsRef: (items: string[]) => `${items.length} items in reading order: ${items.join(", ")}`,
   // The flow view (FlowView.tsx).
   screens: (n: number) => `${n} screen${n === 1 ? "" : "s"}`,
   showFlow: (name: string, n: number, states = 0) =>

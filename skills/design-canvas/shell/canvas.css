@@ -184,10 +184,10 @@ body,
   overflow: hidden;
   overscroll-behavior: none;
   touch-action: none;
-  /* Dragging empty space pans the canvas: in a shared file, by touch, and with Ask agent or Inspect chosen. */
+  /* Dragging empty space pans the canvas: in a shared file, by touch, and with Inspect chosen. */
   cursor: grab;
 }
-/* With the default tool on the canvas page, a drag on empty space draws a selection box. */
+/* With the default tool or Ask agent on the canvas page, a drag on empty space draws a box. */
 .canvas-viewport[data-select] {
   cursor: default;
 }
@@ -999,6 +999,46 @@ html[data-canvas-alt] .canvas-frame-root * {
 }
 .canvas-area[data-open] {
   background: color-mix(in srgb, var(--canvas-focus-color) 12%, transparent);
+}
+/* The other items of a note on several items: the whole item, as its first item's outline. */
+.canvas-area[data-linked] {
+  inset: 0;
+}
+/* Ask agent about several selected items: a small bar drawn like an item's actions, just above
+   the selection's top-right corner, one size at any zoom. Hidden while anything is dragged. */
+.canvas-selection-anchor {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  z-index: 6;
+  inline-size: 0;
+  block-size: 0;
+}
+.canvas-selection-actions {
+  position: absolute;
+  inset-block-end: 0;
+  inset-inline-end: 0;
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--canvas-border-color);
+  border-radius: var(--canvas-radius-m);
+  background: var(--canvas-surface-color);
+  box-shadow: var(--canvas-shadow-raised);
+  transform: scale(var(--canvas-unzoom, 1)) translateY(-8px);
+  transform-origin: 100% 100%;
+  white-space: nowrap;
+  font-family: var(--canvas-font, system-ui, -apple-system, "Segoe UI", sans-serif);
+  animation: canvas-fade-in var(--canvas-fast) var(--canvas-ease);
+}
+.canvas-selection-actions .canvas-selection-ask {
+  inline-size: auto;
+  gap: 4px;
+  padding-inline: 6px 8px;
+  color: var(--canvas-text-color);
+  font-size: 13px;
+}
+.canvas-viewport[data-gesture] .canvas-selection-anchor {
+  visibility: hidden;
 }
 .canvas-preview-wrap {
   position: relative;

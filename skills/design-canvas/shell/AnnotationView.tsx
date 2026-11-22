@@ -102,6 +102,8 @@ export function AnnotationCard({ annotation, handlers, done }: { annotation: Ann
   const onSection = sectionOf(annotation) !== null;
   // A whole item's note covers the item and is named by the item alone; an area's name says more.
   const wholeItem = !onSection && !!annotation.w && !annotation.ref.includes(" › ");
+  // A note on several items offers what is asked of a set: Combine, then the one-item requests for each.
+  const quickAsks = annotation.also?.length ? labels.quickAsksMany : labels.quickAsks;
   return (
     <div
       ref={cardRef}
@@ -159,7 +161,7 @@ export function AnnotationCard({ annotation, handlers, done }: { annotation: Ann
           the words in the field, to send as they are or to change first. They go once there are words. */}
       {wholeItem && !answered && !turns.length && !annotation.sent && !annotation.queued && !value.trim() && (
         <span className="canvas-quick" role="group" aria-label={labels.quickAsksLabel}>
-          {labels.quickAsks.map((quick) => (
+          {quickAsks.map((quick) => (
             <button
               key={quick.label}
               type="button"
@@ -327,4 +329,13 @@ export function AnnotationPin({
     </div>
     </>
   );
+}
+
+/**
+ * On each other item a note on several items is about: the outline a whole item's
+ * note draws, over all of it, so the person sees every item the note covers. The
+ * pin and the note itself stay on the first item.
+ */
+export function AnnotationLink({ open, sent }: { open: boolean; sent: boolean }) {
+  return <div className="canvas-area" data-linked="" data-sent={sent || undefined} data-open={open || undefined} aria-hidden="true" />;
 }

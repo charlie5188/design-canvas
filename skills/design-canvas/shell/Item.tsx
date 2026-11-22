@@ -1,6 +1,6 @@
 // One item on the canvas: its title row and controls, caption, preview, resize handles, and pins.
 import { type PointerEvent as ReactPointerEvent, useCallback, useContext, useEffect, useRef, useState } from "react";
-import { type AnnotationHandlers, AnnotationPin } from "./AnnotationView";
+import { type AnnotationHandlers, AnnotationLink, AnnotationPin } from "./AnnotationView";
 import { type Annotation, fingerprintItem } from "./annotations";
 import { type BoardEdge, DiscardButton, SAVE_OVERDUE_MS, useOverdue, WorkingBeam, WorkingTag } from "./Board";
 import { frameUrl, hasAddress } from "./bridge";
@@ -214,6 +214,7 @@ export function CanvasItemView({
   onHandleKey,
   onResize,
   pins,
+  links = [],
   openAnnotation,
   annotationHandlers,
   onTrash,
@@ -248,6 +249,8 @@ export function CanvasItemView({
   onResize?: (event: ReactPointerEvent<HTMLElement>, item: CanvasItem, edge: ResizeEdge) => void;
   /** This item's annotations with their list numbers. */
   pins: { annotation: Annotation; number?: number }[];
+  /** Notes on several items whose pin is on another of them: each draws its outline here. */
+  links?: Annotation[];
   openAnnotation: string | null;
   annotationHandlers: AnnotationHandlers;
   onTrash?: (item: CanvasItem) => void;
@@ -592,8 +595,11 @@ export function CanvasItemView({
             // Invisible: only the cursor changes over them, like an OS window's border.
             <span key={edge} className="canvas-item-edge" data-edge={edge} aria-hidden="true" onPointerDown={(event) => onResize(event, item, edge)} />
           ))}
-        {pins.length > 0 && (
+        {pins.length + links.length > 0 && (
           <div className="canvas-pins">
+            {links.map((annotation) => (
+              <AnnotationLink key={annotation.id} open={openAnnotation === annotation.id} sent={!!(annotation.sent || annotation.queued)} />
+            ))}
             {pins.map(({ annotation, number }) => (
               <AnnotationPin
                 key={annotation.id}
