@@ -3,7 +3,7 @@ import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { test as base, expect, type Page } from '@playwright/test'
+import { test as base, expect, type Locator, type Page } from '@playwright/test'
 
 const LISTEN = fileURLToPath(new URL('../../skills/design-canvas/scripts/listen.sh', import.meta.url))
 const SHARE = fileURLToPath(new URL('../../skills/design-canvas/scripts/share.sh', import.meta.url))
@@ -22,6 +22,13 @@ const REGISTRY = 'design-canvas/smoke/registry.tsx'
 const EXAMPLE = 'design-canvas/smoke/items/Example.tsx'
 // The registry as installed. Every test starts from it.
 const INSTALLED = readFileSync(REGISTRY, 'utf8')
+
+/** Zoom in, Zoom out, Fit all, and Reset view are in the zoom menu at the top right: open it when it is closed. */
+async function zoomControl(scope: Page | Locator, name: string) {
+  const option = scope.getByRole('button', { name, exact: true })
+  if (!(await option.isVisible())) await scope.getByRole('button', { name: 'Zoom', exact: true }).click()
+  await option.click()
+}
 
 // After each test, its pages are closed, every registry write they sent is done, and
 // the registry is as installed. A canvas save still on its way when a test ended used
@@ -110,7 +117,7 @@ test('frame.html renders one item alone', async ({ page }) => {
 // The fixture app sets `body { color }` (src/index.css), as many apps do. Text in a preview with
 // no color of its own must take it, as in the app, and not the canvas chrome's.
 const APP_TEXT = 'rgb(29, 53, 87)'
-const CHROME_TEXT = 'rgb(31, 35, 40)'
+const CHROME_TEXT = 'rgb(45, 49, 54)'
 const DARK_CHROME_TEXT = 'rgb(232, 234, 237)'
 
 test("text in a preview has the app's color, on any background and opened alone, and the chrome keeps its own", async ({ page }) => {
@@ -127,11 +134,13 @@ test("text in a preview has the app's color, on any background and opened alone,
     const phone = page.frameLocator('.canvas-item[data-canvas-item="phone"] iframe').locator('h2')
     await expect(item.locator('h2')).toHaveCSS('color', APP_TEXT)
     await expect(phone).toHaveCSS('color', APP_TEXT)
-    await expect(item.locator('.canvas-name')).toHaveCSS('color', CHROME_TEXT)
+    // The chrome's words take the chrome's color (an item's name, a step lighter), never the app's.
+    await expect(item.locator('.canvas-item-head')).toHaveCSS('color', CHROME_TEXT)
+    await expect(item.locator('.canvas-name')).not.toHaveCSS('color', APP_TEXT)
     // A dark board turns the chrome light; the previews stay as the app draws them.
-    await page.getByRole('button', { name: 'Canvas settings' }).click()
+    await page.getByRole('button', { name: 'Settings and controls' }).click()
     await page.getByRole('button', { name: 'Dark', exact: true }).click()
-    await expect(item.locator('.canvas-name')).toHaveCSS('color', DARK_CHROME_TEXT)
+    await expect(item.locator('.canvas-item-head')).toHaveCSS('color', DARK_CHROME_TEXT)
     await expect(item.locator('h2')).toHaveCSS('color', APP_TEXT)
     await expect(phone).toHaveCSS('color', APP_TEXT)
     await page.goto('/frame.html?item=example')
@@ -891,8 +900,8 @@ test('a section drawn on empty canvas lists the items inside it', async ({ page,
   await expect(page.locator('[data-board-ghost] textarea')).toBeFocused()
   await page.keyboard.type('Set aside')
   await page.keyboard.press('Enter')
-  // The tab shows the grip an item's name has, so it reads as something to pull.
-  await expect(page.locator('[data-board-ghost] .canvas-section-grip')).toBeVisible()
+  // The tab itself is the handle: no grip on it, and the open hand over it.
+  await expect(page.locator('[data-board-ghost] .canvas-section-tab')).toHaveCSS('cursor', 'grab')
   await page.getByRole('button', { name: 'Copy 1 for agent' }).click()
   const text = await page.evaluate(() => navigator.clipboard.readText())
   expect(text).toContain('Add a section “Set aside”')
@@ -1421,17 +1430,17 @@ test('the zoom buttons and keys step between fixed levels', async ({ page }) => 
   await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toBeVisible()
   await page.waitForTimeout(600)
   const zoom = page.locator('.canvas-zoom')
-  await page.getByRole('button', { name: 'Reset view (actual size)' }).click()
+  await zoomControl(page, 'Reset view (actual size)')
   await expect(zoom).toHaveText('100%')
-  await page.getByRole('button', { name: 'Zoom in' }).click()
+  await zoomControl(page, 'Zoom in')
   await expect(zoom).toHaveText('200%')
-  await page.getByRole('button', { name: 'Zoom in' }).click()
+  await zoomControl(page, 'Zoom in')
   await expect(zoom).toHaveText('300%')
   // The limit holds.
-  await page.getByRole('button', { name: 'Zoom in' }).click()
+  await zoomControl(page, 'Zoom in')
   await expect(zoom).toHaveText('300%')
   for (const level of ['200%', '100%', '50%', '25%', '10%', '5%', '2%', '2%']) {
-    await page.getByRole('button', { name: 'Zoom out' }).click()
+    await zoomControl(page, 'Zoom out')
     await expect(zoom).toHaveText(level)
   }
   // From between two levels, a press goes to the next one in its direction; the keys do the same.
@@ -1462,7 +1471,7 @@ test('Fit all takes in items far apart, below the old 10% limit', async ({ page 
     )
     const far = page.locator('.canvas-item[data-canvas-item="far"]')
     await expect(far).toHaveCount(1, { timeout: 15_000 })
-    await page.getByRole('button', { name: 'Fit all' }).click()
+    await zoomControl(page, 'Fit all')
     const view = page.viewportSize()!
     for (const id of ['example', 'far']) {
       await expect
@@ -1483,7 +1492,7 @@ test('the help opens on a press, shows the controls in groups, and stays until i
   const errors = collectErrors(page)
   await page.goto('/')
   await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toBeVisible()
-  const button = page.getByRole('button', { name: 'Canvas controls' })
+  const button = page.getByRole('button', { name: 'Settings and controls' })
   const help = page.locator('#canvas-help')
   // Closed until asked for: hovering the button only shows its hint.
   await button.hover()
@@ -1538,8 +1547,8 @@ test('after a reload the canvas is at its saved view from the first frame', asyn
   await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toBeVisible()
   await page.waitForTimeout(600)
   // A view that is not the default one.
-  await page.getByRole('button', { name: 'Reset view (actual size)' }).click()
-  await page.getByRole('button', { name: 'Zoom in' }).click()
+  await zoomControl(page, 'Reset view (actual size)')
+  await zoomControl(page, 'Zoom in')
   await expect(page.locator('.canvas-zoom')).toHaveText('200%')
   const saved = await page.locator('.canvas-world').evaluate((world) => getComputedStyle(world).transform)
   expect(saved).toMatch(/^matrix\(2, /)
@@ -1981,7 +1990,7 @@ test('holding Z zooms as in Figma, and Shift + 0 and 1 set the view', async ({ p
   await page.waitForTimeout(600)
   const zoom = page.locator('.canvas-zoom')
   const viewport = page.locator('.canvas-viewport')
-  await page.getByRole('button', { name: 'Reset view (actual size)' }).click()
+  await zoomControl(page, 'Reset view (actual size)')
   await expect(zoom).toHaveText('100%')
   await page.mouse.move(400, 300)
   await viewport.focus()
@@ -2261,7 +2270,7 @@ test('a new version lands under its original where it is now, not where the agen
     const tag = next.locator('.canvas-ghost-tag[data-state="fresh"]')
     await expect(tag).toHaveText('New')
     // Once it has been on screen for a moment, it is no longer new.
-    await page.getByRole('button', { name: 'Fit all' }).click()
+    await zoomControl(page, 'Fit all')
     await expect(tag).toHaveCount(0, { timeout: 6_000 })
     expect(errors).toEqual([])
   } finally {
@@ -2730,7 +2739,7 @@ export const Help = () => (
     await page.getByRole('button', { name: 'Restart Example · replace me' }).click()
     // A path the item does not have stays where it is, with a notice, also when another item shows
     // that path: a click in the product stays in its tab, so a click here never moves the view.
-    await page.getByRole('button', { name: 'Reset view (actual size)' }).click()
+    await zoomControl(page, 'Reset view (actual size)')
     const inView = async () => {
       const box = await help.boundingBox()
       return !!box && box.x >= 0 && box.x + box.width <= page.viewportSize()!.width
@@ -2769,7 +2778,7 @@ export const Help = () => (
     await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toHaveAttribute('data-front', 'true')
     await expect(help.getByRole('heading')).toHaveText('Help')
     // That item was moved by a link in another one, so it offers Restart though nobody touched it.
-    await page.getByRole('button', { name: 'Fit all' }).click()
+    await zoomControl(page, 'Fit all')
     await page.locator('.canvas-item[data-canvas-item="example"] .canvas-name').hover()
     await page.getByRole('button', { name: 'Restart Example · replace me' }).click()
     await expect(plain.getByRole('heading')).toHaveText('Plans')
@@ -2780,13 +2789,13 @@ export const Help = () => (
     await expect(plain.getByRole('heading')).toHaveText('Plans')
     await expect(help.getByRole('heading')).toHaveText('Help')
     // A press during the glide stops it there: the person is not held by it.
-    await page.getByRole('button', { name: 'Reset view (actual size)' }).click()
+    await zoomControl(page, 'Reset view (actual size)')
     await expect.poll(inView).toBe(false)
     await plain.getByRole('link', { name: 'Help tab' }).click()
     await page.mouse.click(640, 700)
     await page.waitForTimeout(500)
     expect(await middle(help)).toBeGreaterThan(20)
-    await page.getByRole('button', { name: 'Fit all' }).click()
+    await zoomControl(page, 'Fit all')
     // With no item for it, each says what the link would have done.
     await plain.getByRole('link', { name: 'Lost tab' }).click()
     await expect(page.locator('.canvas-toast')).toContainText('Opens in a new tab: /nowhere')
@@ -3469,7 +3478,7 @@ test('a shared file works from disk, frames included, without the agent tools', 
     await page.keyboard.press('Escape')
     await expect(page.getByRole('button', { name: 'Ask agent', exact: true })).toHaveCount(0)
     // The controls that need an agent, or save, are not in its help.
-    await page.getByRole('button', { name: 'Canvas controls' }).click()
+    await page.getByRole('button', { name: 'Settings and controls' }).click()
     await expect(page.locator('#canvas-help')).toBeVisible()
     await expect(page.locator('#canvas-help')).toContainText('Move around')
     await expect(page.locator('#canvas-help')).not.toContainText('Ask the agent')
@@ -3634,6 +3643,55 @@ test('cursors say what a press or drag will do', async ({ page }) => {
   expect(await cursor('.canvas-preview h2')).toBe('zoom-out')
 })
 
+test('a note is light paper on a light board and dark paper on a dark one', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Note', exact: true }).click()
+  await page.mouse.click(700, 500)
+  await expect(page.locator('[data-board-ghost] textarea')).toBeFocused()
+  await page.keyboard.type('Paper')
+  await page.keyboard.press('Escape')
+  const ink = () => page.locator('.canvas-note-card').first().evaluate((element) => getComputedStyle(element).color)
+  await expect.poll(ink).toBe('oklch(0.26 0.054 98)')
+  // The board's own lightness decides, so the Dark background turns the paper dark and the words light.
+  await page.locator('.canvas-root').evaluate((element) => element.setAttribute('data-background', 'dark'))
+  await expect.poll(ink).toBe('oklch(0.92 0.05 98)')
+})
+
+test('the top-right bar holds zoom, settings and controls, and Share; the tools are the only other bar', async ({ page }) => {
+  await page.goto('/')
+  const bar = page.getByRole('toolbar', { name: 'Canvas' })
+  await expect(page.getByRole('toolbar', { name: 'View' })).toHaveCount(0)
+  await expect(bar.getByRole('button', { name: 'Share as an HTML file' })).toHaveText('Share')
+  // Zoom in and out leave the menu open for another press; Fit all closes it.
+  await bar.getByRole('button', { name: 'Zoom', exact: true }).click()
+  const zoomIn = page.getByRole('button', { name: 'Zoom in', exact: true })
+  await zoomIn.click()
+  await expect(zoomIn).toBeVisible()
+  await expect(page.locator('.canvas-zoom-menu')).toContainText('Fit all1')
+  await page.getByRole('button', { name: 'Fit all', exact: true }).click()
+  await expect(zoomIn).toBeHidden()
+  // One gear: the board's background on top, then the controls.
+  await bar.getByRole('button', { name: 'Settings and controls' }).click()
+  const panel = page.locator('#canvas-help')
+  await expect(panel.getByRole('button', { name: 'Dark', exact: true })).toBeVisible()
+  await expect(panel).toContainText('Move around')
+})
+
+test("an item's grip waits in the margin and shows while the item is hovered", async ({ page }) => {
+  await page.goto('/')
+  const item = page.locator('.canvas-item[data-canvas-item="example"]')
+  const grip = item.locator('.canvas-handle')
+  await page.mouse.move(4, 400)
+  await expect(grip).toHaveCSS('opacity', '0')
+  await item.locator('.canvas-name').hover()
+  await expect(grip).toHaveCSS('opacity', '1')
+  // Left of the preview, so the name's words start at the preview's edge, with the caption under them.
+  const [handle, preview, name, note] = await Promise.all([grip, item.locator('.canvas-preview'), item.locator('.canvas-name'), item.locator('.canvas-note')].map((l) => l.boundingBox()))
+  expect(handle!.x + handle!.width).toBeLessThanOrEqual(preview!.x)
+  expect(name!.x).toBeLessThan(preview!.x)
+  expect(Math.abs(note!.x - preview!.x)).toBeLessThan(1)
+})
+
 test('an item with screens opens its flow: every screen side by side, with arrows, and a press opens one', async ({ page }) => {
   const original = readFileSync(REGISTRY, 'utf8')
   const example = readFileSync(EXAMPLE, 'utf8')
@@ -3708,7 +3766,7 @@ export const Done = () => (
     const nameHeight = (await view.locator('.canvas-flow-path').first().boundingBox())!.height
     // Zoomed in, the words and the screens' names keep their size on screen: they do not grow
     // taller than the screens' own headings. Zoomed out, they shrink with the view.
-    await view.getByRole('button', { name: 'Zoom in' }).click()
+    await zoomControl(view, 'Zoom in')
     await expect.poll(percent).toBeGreaterThan(fit)
     await page.keyboard.press('+')
     await page.keyboard.press('+')

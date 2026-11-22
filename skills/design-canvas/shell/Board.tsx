@@ -66,13 +66,6 @@ function onKey(event: KeyboardEvent<HTMLElement>, ref: BoardRef, handlers: Board
   }
 }
 
-/** The same grip an item's name has, so a section's tab reads as something to pull. */
-function Grip() {
-  return (
-    <Icon name="grip-vertical" size={12} className="canvas-section-grip" />
-  );
-}
-
 const BORDER: BoardEdge[] = ["n", "e", "s", "w", ...CORNERS];
 
 /**
@@ -159,7 +152,6 @@ export function SectionView({
         onPointerDown={(event) => interactive && handlers.move(event, ref)}
         onKeyDown={(event) => interactive && onKey(event, ref, handlers)}
       >
-        {interactive && <Grip />}
         {section.title}
       </div>
       {interactive && selected && <Handles refer={ref} handlers={handlers} />}
@@ -409,7 +401,6 @@ export function MarkView({
         onPointerDown={(event) => interactive && handlers.move(event, ref)}
         onKeyDown={(event) => interactive && onKey(event, ref, handlers)}
       >
-        {interactive && !open && <Grip />}
         {content}
       </div>
       {interactive && selected && <Handles refer={ref} handlers={handlers} />}

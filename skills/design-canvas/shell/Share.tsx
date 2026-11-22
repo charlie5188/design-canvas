@@ -107,7 +107,8 @@ export function useShare({ items, notes, sections, positions, trash, notify }: S
   return { sharing, open, setOpen, buttonRef, scopes, contents, share, close };
 }
 
-/** In the top bar. While the file builds, the icon pulses and the button takes no second click. */
+/** At the top bar's end, with its word: the one control there that is about other people, so
+    it reads first. While the file builds, the icon pulses and the button takes no second click. */
 export function ShareButton({
   buttonRef,
   busy,
@@ -123,7 +124,7 @@ export function ShareButton({
     <button
       ref={buttonRef}
       type="button"
-      className="canvas-button canvas-icon-button canvas-share-button"
+      className="canvas-button canvas-share-button"
       aria-busy={busy}
       aria-expanded={open}
       aria-label={busy ? labels.sharing : labels.share}
@@ -131,6 +132,7 @@ export function ShareButton({
       onClick={onClick}
     >
       <Icon name="share-2" />
+      {labels.shareShort}
     </button>
   );
 }

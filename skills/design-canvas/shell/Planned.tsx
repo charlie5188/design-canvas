@@ -31,7 +31,7 @@ export type Plan = {
   sketch?: ReactNode;
 };
 
-const text = "var(--canvas-text-color, #1f2328)";
+const text = "var(--canvas-text-color, #2d3136)";
 const subtle = "var(--canvas-subtle-color, #5f6b76)";
 const line = "var(--canvas-border-color, #d5d9de)";
 const surface = "var(--canvas-surface-color, #ffffff)";
@@ -255,7 +255,7 @@ const card: CSSProperties = {
   flexDirection: "column",
   gap: 14,
   // The canvas background, not a surface: the card reads as an empty place, not as a design.
-  background: "var(--canvas-bg-color, #eef0f2)",
+  background: "var(--canvas-bg-color, #f5f6f8)",
   color: text,
   fontFamily: 'var(--canvas-font, system-ui, -apple-system, "Segoe UI", sans-serif)',
   textAlign: "start",

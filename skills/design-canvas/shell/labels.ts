@@ -8,7 +8,7 @@ export const labels = {
   changesBar: "Not sent to the agent yet",
   theme: "Theme",
   background: "Background",
-  canvasSettings: "Canvas settings",
+  canvasMenu: "Settings and controls",
   backgrounds: { default: "Default", white: "White", dark: "Dark" },
   help: "Canvas controls",
   /**
@@ -273,6 +273,7 @@ export const labels = {
   /** On an item the agent changed after a note, until the person has seen it. */
   freshUpdated: "Updated",
   share: "Share as an HTML file",
+  shareShort: "Share",
   sharing: "Preparing the file…",
   shared: (file: string) => `Downloaded ${file}`,
   /** The first two files the shared file could not hold, and how many more. */

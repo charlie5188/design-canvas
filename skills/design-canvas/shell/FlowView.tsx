@@ -3,6 +3,7 @@ import { frameSource } from "./bridge";
 import { describeElement, pickElement } from "./dom";
 import { Icon } from "./icons";
 import { labels } from "./labels";
+import { ZoomMenu } from "./Zoom";
 import { namedSteps, opensNewTab, pathOf, RouteContext, type Screen, screenIndex, screensOf, stateCount } from "./routes";
 import type { CanvasItem } from "./types";
 
@@ -565,26 +566,19 @@ export function FlowView({
         </div>
       )}
       <div ref={pickRef} className="canvas-pick" hidden aria-hidden="true" />
-      <div className="canvas-toolbar" data-place="view" role="toolbar" aria-label={labels.viewBar}>
-        <button type="button" className="canvas-button canvas-icon-button" aria-label={labels.zoomOut} data-tip={labels.zoomOut} onClick={() => zoomAt(1 / ZOOM_STEP)}>
-          <Icon name="minus" />
-        </button>
-        <span className="canvas-zoom canvas-flow-zoom-level" aria-live="polite">
-          {Math.round(scale * cam.z * 100)}%
-        </span>
-        <button type="button" className="canvas-button canvas-icon-button" aria-label={labels.zoomIn} data-tip={labels.zoomIn} onClick={() => zoomAt(ZOOM_STEP)}>
-          <Icon name="plus" />
-        </button>
-        <span className="canvas-separator" aria-hidden="true" />
-        <button type="button" className="canvas-button canvas-icon-button" aria-label={labels.fitAll} data-tip={labels.fitAll} onClick={() => {
+      {/* The view's zoom at the top right, where the canvas has it. */}
+      <div className="canvas-toolbar" data-place="top" role="toolbar" aria-label={labels.viewBar}>
+        <ZoomMenu
+          level={`${Math.round(scale * cam.z * 100)}%`}
+          levelClass="canvas-flow-zoom-level"
+          onZoomIn={() => zoomAt(ZOOM_STEP)}
+          onZoomOut={() => zoomAt(1 / ZOOM_STEP)}
+          onFit={() => {
             setFocused(null);
             setCam(fitCam());
-          }}>
-          <Icon name="maximize" />
-        </button>
-        <button type="button" className="canvas-button canvas-icon-button" aria-label={labels.resetCamera} data-tip={labels.resetCamera} onClick={() => zoomAt(1 / scale / camRef.current.z)}>
-          <Icon name="zoom-reset" />
-        </button>
+          }}
+          onActual={() => zoomAt(1 / scale / camRef.current.z)}
+        />
       </div>
       <div
         ref={stageRef}
