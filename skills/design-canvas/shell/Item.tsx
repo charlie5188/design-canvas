@@ -377,9 +377,17 @@ export function CanvasItemView({
     hear(preview);
     // A frame gets a new document each time it loads.
     const frame = preview.querySelector<HTMLIFrameElement>("iframe[data-canvas-frame]");
+    let heardDoc: Document | null = null;
     const hearFrame = () => {
       try {
-        if (frame?.contentDocument) hear(frame.contentDocument, frameRoot);
+        const doc = frame?.contentDocument;
+        // Once per document. On a slow machine the frame's own document is already there when
+        // this runs, and its load event still comes after: heard twice, every press in it was a
+        // step twice in Start here (GitHub's runner; locally with the CPU slowed down 8 times).
+        if (doc && doc !== heardDoc) {
+          heardDoc = doc;
+          hear(doc, frameRoot);
+        }
       } catch {
         // Not readable: this item gets no Restart.
       }

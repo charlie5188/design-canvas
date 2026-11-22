@@ -81,7 +81,7 @@ async function main() {
       const response = await listen();
       if (!response) break;
       if (response.status === 409) {
-        log("Another session took over this canvas's notes. Stopping without reconnecting.");
+        log("A newer listener took over this canvas's notes, from this chat or another session. Stopping without reconnecting.");
         break;
       }
       if (response.status === 204) continue;
