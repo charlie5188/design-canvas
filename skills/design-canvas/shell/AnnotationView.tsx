@@ -259,14 +259,19 @@ export function AnnotationPin({
   number,
   open,
   handlers,
+  still,
 }: {
   annotation: Annotation;
   /** Its place in the next message; absent once sent or queued. */
   number?: number;
   open: boolean;
   handlers: AnnotationHandlers;
+  /** Opened by a box drawn with Ask agent, whose outline it replaces: its outline shows with no fade. */
+  still?: boolean;
 }) {
   const bubbleRef = useRef<HTMLButtonElement>(null);
+  // Decided once, when the pin appears: taking the fade off and on would replay it.
+  const [instant] = useState(!!still);
   const text = annotation.text || labels.annotationPlaceholder;
   const reply = annotation.reply;
   // An answer the person has not opened yet says its first words beside the pin, so they
@@ -292,6 +297,7 @@ export function AnnotationPin({
           style={{ left: annotation.x, top: annotation.y, width: annotation.w, height: annotation.h }}
           data-sent={number === undefined || undefined}
           data-open={open || undefined}
+          data-still={instant || undefined}
           aria-hidden="true"
         />
       ) : null}
@@ -336,6 +342,17 @@ export function AnnotationPin({
  * note draws, over all of it, so the person sees every item the note covers. The
  * pin and the note itself stay on the first item.
  */
-export function AnnotationLink({ open, sent }: { open: boolean; sent: boolean }) {
-  return <div className="canvas-area" data-linked="" data-sent={sent || undefined} data-open={open || undefined} aria-hidden="true" />;
+export function AnnotationLink({ open, sent, still }: { open: boolean; sent: boolean; still?: boolean }) {
+  // Whether it appeared under an Ask agent box is decided once: taking the fade off and on would replay it.
+  const [instant] = useState(!!still);
+  return (
+    <div
+      className="canvas-area"
+      data-linked=""
+      data-sent={sent || undefined}
+      data-open={open || undefined}
+      data-still={instant || undefined}
+      aria-hidden="true"
+    />
+  );
 }
