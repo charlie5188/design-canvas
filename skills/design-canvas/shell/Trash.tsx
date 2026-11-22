@@ -68,13 +68,17 @@ type TrashBoard = {
   notify: (text: string, action?: { label: string; run: () => void }) => void;
   /** Called as an item goes to the trash, while it is still on the canvas. */
   beforeTrash: (item: CanvasItem) => void;
+  /** Whether the item is picked as the canvas shows it now, which may be newer than the registry. */
+  pickedNow: (item: CanvasItem) => boolean;
+  /** Shows an item's pick mark at once, before the registry has it (Canvas.tsx, `picks`). */
+  showPick: (id: string, on: boolean) => void;
   viewportRef: { readonly current: HTMLElement | null };
 };
 
 /** Moving items into and out of the trash, keeping it the same as the registry, and its list in the top bar. */
 export function useTrash(list: TrashList, board: TrashBoard) {
   const { ids, idsRef, kept, times, set } = list;
-  const { items, itemsRef, saved, queueSave, placeFree, reveal, setFrontId, notify, beforeTrash, viewportRef } = board;
+  const { items, itemsRef, saved, queueSave, placeFree, reveal, setFrontId, notify, beforeTrash, pickedNow, showPick, viewportRef } = board;
   const trashedItems = useMemo(() => ids.flatMap((id) => items.find((item) => item.id === id) ?? []), [items, ids]);
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -90,12 +94,13 @@ export function useTrash(list: TrashList, board: TrashBoard) {
   /**
    * Writes `trashed` into the registry for an item the person moved into or out of
    * the trash. Until the registry has it, the canvas shows it as made; what the
-   * registry cannot take stays in this browser instead.
+   * registry cannot take stays in this browser instead. `pick`: the item's pick goes
+   * with it in the same write, off as it goes in and on again as an Undo brings it back.
    */
   const pendingWrites = useRef(new Map<string, boolean>());
   const [checks, setChecks] = useState(0);
   const saveTrashed = useCallback(
-    (item: CanvasItem, want: boolean) => {
+    (item: CanvasItem, want: boolean, pick = false) => {
       if (shared) return;
       if (!want && kept.current.delete(item.id)) queueSave();
       const registered = itemsRef.current.find((entry) => entry.id === item.id);
@@ -111,7 +116,7 @@ export function useTrash(list: TrashList, board: TrashBoard) {
         kept.current.add(item.id);
         queueSave();
       };
-      const edit: DirectEdit = { kind: "item", id: item.id, set: { trashed: want } };
+      const edit: DirectEdit = { kind: "item", id: item.id, set: { trashed: want, ...(pick ? { picked: !want } : {}) } };
       fetch(EDIT_PATH, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ edits: [edit] }) })
         .then((response) => (response.ok ? response.json() : Promise.reject(new Error(`edit ${response.status}`))))
         .then((result: { missing?: unknown }) => {
@@ -149,12 +154,14 @@ export function useTrash(list: TrashList, board: TrashBoard) {
     },
     [leave, placeFree, reveal, setFrontId],
   );
+  /** `repick`: an Undo of a trash that took the item's pick off, which puts the pick back too. */
   const putBack = useCallback(
-    (item: CanvasItem) => {
+    (item: CanvasItem, repick = false) => {
       restore(item);
-      saveTrashed(item, false);
+      if (repick) showPick(item.id, true);
+      saveTrashed(item, false, repick);
     },
-    [restore, saveTrashed],
+    [restore, saveTrashed, showPick],
   );
   /** Out of the trash, for the board to place: Set aside puts it in the "Set aside" frame (Canvas.tsx). */
   const takeOut = useCallback(
@@ -164,19 +171,28 @@ export function useTrash(list: TrashList, board: TrashBoard) {
     },
     [leave, saveTrashed],
   );
+  /**
+   * A picked version loses its pick as it goes: the trash never holds the answer, which the
+   * agent would otherwise read as the person's decision. Its notice's Undo puts both back;
+   * put back from the trash later, it comes back unpicked, as another version may have been
+   * picked meanwhile. Returns whether it took a pick off, for a group's one Undo.
+   */
   const moveToTrash = useCallback(
     // `quiet`: one of several going at once, which get one notice and one Undo between them (Canvas.tsx, deleteGroup).
-    (item: CanvasItem, quiet = false) => {
+    (item: CanvasItem, quiet = false): boolean => {
+      const unpick = !shared && pickedNow(item);
       beforeTrash(item);
       times.current[item.id] = Date.now();
       setTrash([item.id, ...idsRef.current.filter((id) => id !== item.id)]);
-      saveTrashed(item, true);
+      if (unpick) showPick(item.id, false);
+      saveTrashed(item, true, unpick);
       setFrontId((front) => (front === item.id ? null : front));
       // The button that had focus is gone with its item.
       viewportRef.current?.focus({ preventScroll: true });
-      if (!quiet) notify(labels.movedToTrash(item.name), { label: labels.undo, run: () => putBack(item) });
+      if (!quiet) notify(labels.movedToTrash(item.name), { label: labels.undo, run: () => putBack(item, unpick) });
+      return unpick;
     },
-    [beforeTrash, idsRef, notify, putBack, saveTrashed, setFrontId, setTrash, times, viewportRef],
+    [beforeTrash, idsRef, notify, pickedNow, putBack, saveTrashed, setFrontId, setTrash, showPick, times, viewportRef],
   );
 
   // A trash an older shell kept only in this browser goes into the registry, once.

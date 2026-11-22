@@ -52,22 +52,29 @@ export type Step = { from: CanvasItem; to: CanvasItem };
 /**
  * The paths from each picked version back to the item its exploration started from,
  * following `from` through every round, as steps from parent to child, each step once.
- * Only `shown` items take part: a step stops at an item in the trash or gone.
+ *
+ * `all` is every item, the trashed ones too; only `shown` ones are drawn. A version in
+ * the trash is skipped, not the end of the path: the step joins the shown versions on
+ * either side of it, and the `why` of the version after it stays on that line. So a
+ * person who tidies away a stepping stone keeps the record of how the pick was reached.
+ * A version gone from the registry altogether ends the path there, as its `from` is gone
+ * with it (the agent re-points the next version's `from` when it removes one: SKILL.md).
  */
-export function pickedPaths(shown: CanvasItem[], isPicked: (item: CanvasItem) => boolean): Step[] {
-  const byId = new Map(shown.map((item) => [item.id, item]));
+export function pickedPaths(all: CanvasItem[], isShown: (item: CanvasItem) => boolean, isPicked: (item: CanvasItem) => boolean): Step[] {
+  const byId = new Map(all.map((item) => [item.id, item]));
   const steps: Step[] = [];
   const seen = new Set<string>();
-  for (const pick of shown.filter(isPicked)) {
+  for (const pick of all.filter((item) => isShown(item) && isPicked(item))) {
     let child = pick;
     const visited = new Set([child.id]);
     for (let parent = child.from ? byId.get(child.from) : undefined; parent && !visited.has(parent.id); parent = parent.from ? byId.get(parent.from) : undefined) {
+      visited.add(parent.id);
+      if (!isShown(parent)) continue;
       const key = `${parent.id}>${child.id}`;
       if (!seen.has(key)) {
         seen.add(key);
         steps.push({ from: parent, to: child });
       }
-      visited.add(parent.id);
       child = parent;
     }
   }
