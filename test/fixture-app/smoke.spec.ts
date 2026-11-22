@@ -3644,6 +3644,8 @@ test('cursors say what a press or drag will do', async ({ page }) => {
 })
 
 test('a note is light paper on a light board and dark paper on a dark one', async ({ page }) => {
+  // The note stays a draft: it is not written into the registry, so the next test starts clean.
+  await refuseSaves(page)
   await page.goto('/')
   await page.getByRole('button', { name: 'Note', exact: true }).click()
   await page.mouse.click(700, 500)
