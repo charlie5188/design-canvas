@@ -92,7 +92,9 @@ import { type FlowStep, FlowView } from "./FlowView";
 import { opensNewTab, screenIndex, screensOf } from "./routes";
 import { labels } from "./labels";
 import { useLinks } from "./links";
-import { planAside, planPick } from "./pick";
+import { pickedPaths, versionSpot } from "./lineage";
+import { LineagePaths } from "./LineagePaths";
+import { comparedWith, planAside } from "./pick";
 import { usePinAnchors } from "./pin-anchors";
 import {
   type Bounds,
@@ -126,6 +128,8 @@ const WHEEL_ZOOM = 0.0025;
 const KEY_PAN = 48;
 const DRAG_THRESHOLD = 3;
 const ADD_GAP = 96;
+/** Canvas units above a section's frame that its title tab takes, kept clear when a new version is placed. */
+const SECTION_TAB = 40;
 const REVEAL_MARGIN = 48;
 /** The notice row that opens under the top bars, at the top centre. */
 const TOAST_ROW = 48;
@@ -1399,9 +1403,23 @@ function CanvasBoard({
     savedHistory.current = savedHistory.current.slice(0, -1);
     await undoChange(change);
   };
+  // A pick shows at once and stays until the registry has it, like a caption edit. An
+  // undo of a pick shows its marks at once the same way, so it never waits on, or loses
+  // to, a registry update still on its way from the pick.
+  const [picks, setPicks] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    setPicks((prev) => {
+      const keep = Object.entries(prev).filter(([id, on]) => !!items.find((item) => item.id === id)?.picked !== on);
+      return keep.length === Object.keys(prev).length ? prev : Object.fromEntries(keep);
+    });
+  }, [items]);
   /** Puts back what one saved change replaced. The change is already out of the history. */
   const undoChange = async (change: SavedChange) => {
     quietUntil.current = Date.now() + 2000;
+    const pickMarks = Object.fromEntries(
+      change.edits.flatMap((edit) => (edit.kind === "item" && typeof edit.set.picked === "boolean" ? [[edit.id, edit.set.picked]] : [])),
+    );
+    if (Object.keys(pickMarks).length) setPicks((prev) => ({ ...prev, ...pickMarks }));
     // A ghost still waiting for the registry to show the change this undoes would
     // wait forever once the undo writes the old values: the entry shows instead,
     // and keeps the selection.
@@ -2687,8 +2705,9 @@ function CanvasBoard({
    * Gives items a free saved position; other items never move. A new item
    * starts at its source position and an item put back from the trash where it
    * was; when that spot is taken, it goes just right of the items beside it.
-   * A new version goes right of its original, else below it, else to the end
-   * of the original's row or column, whichever is nearer.
+   * A new version goes in the row under its original, after the versions
+   * already made from it (lineage.ts), clear of notes and of sections it
+   * does not belong in.
    */
   const placeFree = useCallback(
     (targets: CanvasItem[], { besideOrigin }: { besideOrigin: boolean }) => {
@@ -2697,30 +2716,48 @@ function CanvasBoard({
       const overlaps = (a: { x: number; y: number; w: number; h: number }, b: typeof a) =>
         a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
       const placed: Record<string, Position> = {};
+      /** An item's box where it is now, or where this call just put it. */
+      const boxOf = (item: CanvasItem) => {
+        const r = rectOf(item);
+        const p = placed[item.id];
+        return r && p ? { ...r, x: p.x, y: p.y - r.lift } : r;
+      };
+      const frames = sections.filter((s) => !removed.has(`section:${s.id}`));
+      const holds = (f: CanvasSection, b: { x: number; y: number; w: number; h: number }) => {
+        const cx = b.x + b.w / 2;
+        const cy = b.y + b.h / 2;
+        return cx >= f.x && cx <= f.x + f.width && cy >= f.y && cy <= f.y + f.height;
+      };
+      // Notes, as the registry has them; a note still being typed is not in the way yet.
+      const noteBoxes = notes
+        .filter((n) => !removed.has(`note:${n.id}`))
+        .map((n) => ({ x: n.x, y: n.y, w: n.width ?? NOTE_WIDTH, h: n.height ?? 120 }));
       for (const item of targets) {
         const r = rectOf(item);
         if (!r) continue;
         const origin = besideOrigin && item.from ? shown.find((other) => other.id === item.from) : undefined;
-        const o = origin && rectOf(origin);
-        // Spots are boxes, caption included. Beside its original, a version's preview
-        // starts level with the original's, whatever either caption says.
-        const level = o ? o.y + o.lift - r.lift : r.y;
-        const spots = o
-          ? [
-              { x: o.x + o.w + ADD_GAP, y: level },
-              { x: o.x, y: o.y + o.h + ADD_GAP },
-            ]
-          : [{ x: r.x, y: r.y }];
-        let box = spots.find((spot) => !taken.some((other) => overlaps({ ...r, ...spot }, other)));
-        if (!box) {
-          const start = o ? { x: o.x, y: level } : spots[0]!;
-          const row = taken.filter((other) => other.y < start.y + r.h && start.y < other.y + other.h);
-          const right = Math.max(...(row.length ? row : taken).map((other) => other.x + other.w));
-          box = { x: right + ADD_GAP, y: start.y };
-          if (o) {
-            const column = taken.filter((other) => other.x < o.x + r.w && o.x < other.x + other.w);
-            const below = { x: o.x, y: Math.max(...column.map((other) => other.y + other.h)) + ADD_GAP };
-            if (below.y - o.y < box.x - o.x) box = below;
+        const o = origin && boxOf(origin);
+        let box: { x: number; y: number } | undefined;
+        if (origin && o) {
+          // The round so far: versions already made from the same item, wherever the
+          // person has them, except the ones a pick set aside.
+          const siblings = shown.flatMap((other) => {
+            if (other.id === item.id || other.from !== origin.id || (targetIds.has(other.id) && !placed[other.id])) return [];
+            const b = boxOf(other);
+            return b && !frames.some((f) => isSetAside(f) && holds(f, b)) ? [b] : [];
+          });
+          // A section is in the way unless it holds the original; its title tab sits above its frame.
+          const walls = frames
+            .filter((f) => isSetAside(f) || !holds(f, o))
+            .map((f) => ({ x: f.x, y: f.y - SECTION_TAB, w: f.width, h: f.height + SECTION_TAB }));
+          box = versionSpot(o, siblings, r, [...taken, ...noteBoxes, ...walls], ADD_GAP);
+        } else {
+          const spot = { x: r.x, y: r.y };
+          if (!taken.some((other) => overlaps({ ...r, ...spot }, other))) box = spot;
+          else {
+            const row = taken.filter((other) => other.y < spot.y + r.h && spot.y < other.y + other.h);
+            const right = Math.max(...(row.length ? row : taken).map((other) => other.x + other.w));
+            box = { x: right + ADD_GAP, y: spot.y };
           }
         }
         const next = sanitizePosition({ x: box.x, y: box.y + r.lift });
@@ -2731,7 +2768,7 @@ function CanvasBoard({
       setPositions(positionsRef.current);
       queueSave();
     },
-    [queueSave, rectOf, shown],
+    [notes, queueSave, rectOf, removed, sections, shown],
   );
 
   // New items, on reload or hot update, land in free space and come into view.
@@ -2858,26 +2895,17 @@ function CanvasBoard({
     return () => window.removeEventListener(PLAN_EVENT, onPlan);
   }, [moveToTrash]);
 
-  // Picking a version (the check beside an item's name) is the step that ends a
-  // comparison: this one won, and the versions it was compared with leave the row.
-  // One press does both, because a pick with the losers still beside it leaves the
-  // person the same clutter to clear by hand; one Undo takes all of it back.
-  //
-  // Which items move, and where to, is worked out in pick.ts (planPick).
-  //
-  // The canvas does all of it, at once, and writes it in one request (the mark, the
-  // moves, the section), so it is one entry in the undo history. The agent is not
-  // involved: it reads `picked` and the section from the registry afterwards.
+  // Picking a version (the check beside an item's name) says "this is the answer".
+  // It only marks the item: versions already sit in rows by the item they came from
+  // (lineage.ts), so nothing needs to move, and the path from the original to the
+  // pick (LineagePaths.tsx) shows how the exploration got there. A pick takes the mark
+  // off an earlier pick among the versions it was compared with (pick.ts), in the
+  // same write, so one ⌘/Ctrl + Z takes all of it back. Nothing is announced: the
+  // ring, the tag, and the path are the answer. The agent reads `picked` afterwards.
   const boardNow = useRef({ notes, sections, removed });
   boardNow.current = { notes, sections, removed };
-  // A pick shows at once and stays until the registry has it, like a caption edit.
-  const [picks, setPicks] = useState<Record<string, boolean>>({});
-  useEffect(() => {
-    setPicks((prev) => {
-      const keep = Object.entries(prev).filter(([id, on]) => !!items.find((item) => item.id === id)?.picked !== on);
-      return keep.length === Object.keys(prev).length ? prev : Object.fromEntries(keep);
-    });
-  }, [items]);
+  const picksRef = useRef(picks);
+  picksRef.current = picks;
   /** Items inside a set-aside section: out of the running, so they are not offered a pick. */
   const setAsideIds = useMemo(() => {
     const frames = sections.filter((s) => isSetAside(s) && !removed.has(`section:${s.id}`));
@@ -2893,82 +2921,61 @@ function CanvasBoard({
         .map((item) => item.id),
     );
   }, [positions, removed, sections, shown]);
-  /** Each pick's saved change, so Unpick can take all of it back while nothing came after it. */
-  const pickChanges = useRef(new Map<string, SavedChange>());
-  const pickVersion = useCallback(
-    async (item: CanvasItem) => {
-      if (shared) return;
-      const plan = planPick(item, {
-        ...boardNow.current,
-        items: itemsRef.current,
-        trash: trashRef.current,
-        positions: positionsRef.current,
-        marks: marksRef.current,
-      });
-      if (!plan) return;
-      const { others, placed, before, edits, inverse, adds, removes } = plan;
-
-      // Shown at once. The moves are marked as on their way, so the usual save
-      // (flushDirect) does not write them a second time as moves of their own.
-      const movedIds = Object.keys(placed);
-      const saving = Object.fromEntries(movedIds.map((id) => [id, { ...placed[id]!, state: "saving" as const }]));
-      moveStatesRef.current = { ...moveStatesRef.current, ...saving };
-      setMoveStates((prev) => ({ ...prev, ...saving }));
-      glide();
-      positionsRef.current = { ...positionsRef.current, ...placed };
-      setPositions(positionsRef.current);
-      queueSave();
-      const shownPicks = { [item.id]: true, ...Object.fromEntries(others.filter((entry) => entry.picked).map((entry) => [entry.id, false])) };
-      setPicks((prev) => ({ ...prev, ...shownPicks }));
-
+  /** Writes picks (`true`) and unpicks (`false`) as one change with one undo; shows them at once. */
+  const savePicks = useCallback(
+    async (marks: Record<string, boolean>) => {
+      const ids = Object.keys(marks);
+      const edits: DirectEdit[] = ids.map((id) => ({ kind: "item", id, set: { picked: marks[id]! } }));
+      const inverse: DirectEdit[] = ids.map((id) => ({ kind: "item", id, set: { picked: !marks[id] } }));
+      setPicks((prev) => ({ ...prev, ...marks }));
       // Tracked like any other save, so an undo pressed while the write is still on
-      // its way waits for it, and finds this pick in the history rather than the
-      // change before it (see undoSaved).
+      // its way waits for it, and finds this pick in the history (see undoSaved).
       const save = (async () => {
-        const result = await postRegistry({ edits, adds });
+        const result = await postRegistry({ edits });
         const lost = new Set(result?.missing ?? []);
-        if (!result || lost.has(item.id) || result.rejected?.length) {
-          // Nothing half done: whatever was written is taken back, and the canvas shows what it showed before.
-          if (result) await postRegistry({ edits: inverse.filter((edit) => !lost.has(edit.id)), removes: result.rejected?.length ? [] : removes });
-          positionsRef.current = { ...positionsRef.current, ...before };
-          setPositions(positionsRef.current);
-          queueSave();
-          const forget = <T,>(record: Record<string, T>, ids: string[]) => Object.fromEntries(Object.entries(record).filter(([id]) => !ids.includes(id)));
-          moveStatesRef.current = forget(moveStatesRef.current, movedIds);
-          setMoveStates((prev) => forget(prev, movedIds));
-          setPicks((prev) => forget(prev, Object.keys(shownPicks)));
+        if (!result || lost.size || result.rejected?.length) {
+          // Nothing half done: whatever was written is taken back, and the marks show as before.
+          if (result) await postRegistry({ edits: inverse.filter((edit) => !lost.has(edit.id)) });
+          setPicks((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => !ids.includes(id))));
           notify(labels.pickFailed, undefined, true);
           return;
         }
-        // A move the registry could not place (an entry generated by code) waits for the agent, like any other move.
-        if (lost.size) {
-          const failed = Object.fromEntries(movedIds.filter((id) => lost.has(id)).map((id) => [id, { ...placed[id]!, state: "failed" as const }]));
-          moveStatesRef.current = { ...moveStatesRef.current, ...failed };
-          setMoveStates((prev) => ({ ...prev, ...failed }));
-        }
-        const entry: SavedChange = { edits: inverse.filter((edit) => !lost.has(edit.id)), removes, adds: [], positions: before };
         // Straight into the history, not through remember(): that one stays quiet for two
         // seconds after an undo, so that the undo's own saves are not history. A pick is
         // the person's act, and one made right after an undo must be undoable too.
-        savedHistory.current = [...savedHistory.current, entry].slice(-HISTORY_LIMIT);
-        pickChanges.current.set(item.id, entry);
-        notify(labels.pickedToast(item.name, others.length), {
-          label: labels.undo,
-          run: async () => {
-            // This Undo and ⌘/Ctrl + Z are the same undo: whichever comes first takes the entry out of the history.
-            await flushTrackedRef.current();
-            await Promise.all([...savesInFlight.current]);
-            if (!savedHistory.current.includes(entry)) return;
-            savedHistory.current = savedHistory.current.filter((change) => change !== entry);
-            await undoChangeRef.current(entry);
-          },
-        });
+        savedHistory.current = [...savedHistory.current, { edits: inverse, removes: [], adds: [], positions: {} }].slice(-HISTORY_LIMIT);
       })();
       savesInFlight.current.add(save);
       void save.finally(() => savesInFlight.current.delete(save));
       await save;
     },
-    [notify, queueSave],
+    [notify],
+  );
+  /** The paths from the original to each picked version, drawn behind the items. */
+  const lineageSteps = useMemo(() => pickedPaths(shown, (item) => picks[item.id] ?? !!item.picked), [picks, shown]);
+  /**
+   * The first view of a canvas with no saved view, such as a shared file opened for the
+   * first time: the picked versions and the paths to them, so a reader starts at the
+   * answer and how it was reached. With nothing picked, everything.
+   */
+  const fitFirst = useCallback(() => {
+    const viewport = viewportRef.current;
+    const ids = new Set(lineageSteps.flatMap((step) => [step.from.id, step.to.id]));
+    for (const item of shown) if (picks[item.id] ?? item.picked) ids.add(item.id);
+    const bounds = ids.size ? boundsOf(shown.filter((item) => ids.has(item.id))) : null;
+    if (viewport && bounds) setCamera(fitBounds(bounds, viewport.clientWidth, viewport.clientHeight, FIT_PADDING));
+    else fitAllRef.current();
+  }, [boundsOf, lineageSteps, picks, setCamera, shown]);
+  const fitFirstRef = useRef(fitFirst);
+  fitFirstRef.current = fitFirst;
+  const pickVersion = useCallback(
+    async (item: CanvasItem) => {
+      if (shared) return;
+      const isPicked = (entry: CanvasItem) => picksRef.current[entry.id] ?? !!entry.picked;
+      const earlier = comparedWith(item, { ...boardNow.current, items: itemsRef.current, trash: trashRef.current, positions: positionsRef.current }).filter(isPicked);
+      await savePicks({ [item.id]: true, ...Object.fromEntries(earlier.map((entry) => [entry.id, false])) });
+    },
+    [savePicks],
   );
 
   // Set aside, from an item opened in the trash: out of the trash into the "Set aside" frame a
@@ -3008,43 +3015,13 @@ function CanvasBoard({
     [notify, queueSave, setTrashOpen, takeOut],
   );
 
-  // Unpick, on the Picked tag. Right after a pick (nothing saved since) it is the
-  // pick's own Undo: the mark goes and the set-aside versions come back to where
-  // they were. Later, the canvas may have changed around them, so putting them back
-  // could land them on top of newer work: only the mark goes, and the set-aside
-  // versions stay where the person can see them and drag back what they want.
+  // Unpick, on the Picked tag: the mark and the path go. ⌘/Ctrl + Z, or picking it again, brings them back.
   const unpickVersion = useCallback(
     async (item: CanvasItem) => {
       if (shared) return;
-      await flushTrackedRef.current();
-      await Promise.all([...savesInFlight.current]);
-      const entry = pickChanges.current.get(item.id);
-      pickChanges.current.delete(item.id);
-      const history = savedHistory.current;
-      if (entry && history[history.length - 1] === entry) {
-        savedHistory.current = history.slice(0, -1);
-        await undoChangeRef.current(entry);
-        return;
-      }
-      setPicks((prev) => ({ ...prev, [item.id]: false }));
-      const result = await postRegistry({ edits: [{ kind: "item", id: item.id, set: { picked: false } }] });
-      if (!result || result.missing?.length || result.rejected?.length) {
-        setPicks((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => id !== item.id)));
-        notify(labels.pickFailed, undefined, true);
-        return;
-      }
-      const change: SavedChange = { edits: [{ kind: "item", id: item.id, set: { picked: true } }], removes: [], adds: [], positions: {} };
-      savedHistory.current = [...savedHistory.current, change].slice(-HISTORY_LIMIT);
-      notify(labels.unpicked(item.name), {
-        label: labels.undo,
-        run: async () => {
-          if (!savedHistory.current.includes(change)) return;
-          savedHistory.current = savedHistory.current.filter((c) => c !== change);
-          await undoChangeRef.current(change);
-        },
-      });
+      await savePicks({ [item.id]: false });
     },
-    [notify],
+    [savePicks],
   );
 
   // Links and router calls inside items (links.ts).
@@ -3237,8 +3214,8 @@ function CanvasBoard({
     select(best?.ref ?? null);
   };
 
-  // First paint: apply the saved camera, or fit everything once layout settles
-  // and the viewport has a real size. A tab opened in the background can
+  // First paint: apply the saved camera, or fit the first view (fitFirst) once layout
+  // settles and the viewport has a real size. A tab opened in the background can
   // report a zero-size viewport, which would fit everything at minimum zoom.
   useEffect(() => {
     render();
@@ -3250,7 +3227,7 @@ function CanvasBoard({
       if (fitted || !settled || viewport.clientWidth < MIN_FIT_SIZE || viewport.clientHeight < MIN_FIT_SIZE) return;
       fitted = true;
       observer.disconnect();
-      fitAllRef.current();
+      fitFirstRef.current();
     };
     const observer = new ResizeObserver(tryFit);
     observer.observe(viewport);
@@ -4544,6 +4521,7 @@ function CanvasBoard({
               <img src={p.url} alt={labels.imageLabel} draggable={false} />
             </div>
           ))}
+          <LineagePaths steps={lineageSteps} world={worldRef} />
           {shown.map((item) => (
             <CanvasItemView
               key={item.id}

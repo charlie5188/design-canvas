@@ -2101,6 +2101,42 @@ html[data-canvas-alt] .canvas-frame-root * {
   border-color: var(--canvas-fill-color);
   box-shadow: 0 0 0 1px var(--canvas-fill-color);
 }
+/* The path from the original to a picked version (LineagePaths.tsx), in the pick's color,
+   behind the items, one width on screen at any zoom. The person's reason for a step
+   sits on its line, in the gap between the two rows, and scales with the canvas like
+   the items' names. */
+.canvas-lineage,
+.canvas-lineage-words,
+.canvas-lineage-why {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  pointer-events: none;
+}
+.canvas-lineage {
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: visible;
+}
+.canvas-lineage path {
+  fill: none;
+  stroke: var(--canvas-fill-color);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+.canvas-lineage-why > span {
+  display: block;
+  inline-size: max-content;
+  max-inline-size: 280px;
+  padding: 3px 8px;
+  border: 1px solid var(--canvas-fill-color);
+  border-radius: 6px;
+  background: var(--canvas-surface-color);
+  color: var(--canvas-text-color);
+  font: 12px/1.4 var(--canvas-font, system-ui, -apple-system, "Segoe UI", sans-serif);
+  text-align: center;
+  transform: translate(-50%, -50%);
+}
 
 /* A note the agent answered. Its pin is filled, so an answer reads as "something
    came back" against the outlined pins of notes that are only sent. Until the

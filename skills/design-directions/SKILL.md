@@ -104,7 +104,7 @@ Before you show the directions, check them. Do this silently; do not print it.
 ## 8. Show them as cards
 
 - **On a design canvas**, put each direction on the canvas as a planned card, and do not list the directions in the chat (see "Planned directions" in the `design-canvas` skill). Cards are fast, so show the whole set before anything is built.
-  - Draw one section around the whole round, titled with the screen, such as `Upgrade page · directions`. It holds the baseline where it stands, and below it one section for each spectrum, titled with the spectrum, such as `Speed ↔ certainty`, with its cards from one end to the other. Pick treats the outer section as one comparison: when the person picks a direction, the canvas sets all the others aside, each spectrum's section whole, and the baseline too.
+  - Draw one section around the whole round, titled with the screen, such as `Upgrade page · directions`. It holds the baseline where it stands, and below it one section for each spectrum, titled with the spectrum, such as `Speed ↔ certainty`, with its cards from one end to the other. Pick treats the outer section as one comparison: a pick of one direction takes the mark off a direction picked earlier in it. Nothing moves.
   - Start each card's `bet` with its position, such as `Speed end: …`.
   - Sketch the one screen that shows the bet, and mark the part that differs from the baseline as the key change.
   - Add one canvas note beside the round's section: the job, the criteria, the spectra you used, and the ones you considered and did not use, with their reasons, then "Sources", one line for each product you looked at, with its link. People who open the shared file were not in the conversation, and a later round reads it instead of searching again. For a later round, add to this note; do not write a second one.
@@ -119,7 +119,7 @@ The person decides how to finish. They can build any number of cards, take any d
 
 - To take a draft further, the person asks for what it needs: the whole flow, states, phone width, or languages. Add only what they ask for, to that draft.
 
-- On a design canvas, the person picks a version with Pick, and the canvas sets the others aside by itself. Do not move, trash, or delete those versions yourself. Write a decision note as "Decision notes" in the `design-canvas` skill says.
+- On a design canvas, the person picks a version with Pick, and the canvas marks it and draws the path to it by itself. Leave the others where they are: do not move, trash, or delete them yourself. Record the reason as "Decision notes" in the `design-canvas` skill says.
 - When the person chooses in words ("go with B", "this one"), stop making directions and refine that one.
 - When they like parts of several, make one combined version, with `from` set to the closest original. Say which part comes from which direction, and keep it beside the originals.
 - Do not delete directions nobody chose unless the person asks.

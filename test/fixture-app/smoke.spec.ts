@@ -286,18 +286,18 @@ test("a planned card's sketch draws shapes people recognize, marks the key chang
   }
 })
 
-// Three versions side by side for the pick tests: the example at 0,0 and two more beside it.
+// Three versions side by side for the pick tests: the example at 0,0 and two versions of it beside it.
 const withVersions = (source: string, extra = '') =>
   source.replace(
     /\];\s*$/,
-    `  { id: "b", name: "Version B", component: Example, x: 400, y: 0, width: 360, height: 180 },
-  { id: "c", name: "Version C", component: Example, x: 800, y: 0, width: 360, height: 220 },
+    `  { id: "b", name: "Version B", component: Example, from: "example", x: 400, y: 0, width: 360, height: 180 },
+  { id: "c", name: "Version C", component: Example, from: "example", x: 800, y: 0, width: 360, height: 220 },
 ${extra}];
 `,
   )
 const servesId = async (page: Page, id: string) =>
   expect.poll(async () => (await (await page.request.get('/registry.tsx')).text()).includes(`id: "${id}"`), { timeout: 15_000 }).toBe(true)
-// The section a pick makes, as the registry holds it. Anchored to a line of its own:
+// A section titled "Set aside", as the trash's Set aside makes it. Anchored to a line of its own:
 // the installed registry's comment shows an example entry with the same id.
 const setAsideFrames = () =>
   [...readFileSync(REGISTRY, 'utf8').matchAll(/^\s+\{ id: "set-aside", title: "Set aside", x: (-?\d+), y: (-?\d+), width: (\d+), height: (\d+) \},?$/gm)].map(
@@ -308,8 +308,10 @@ const entryOf = (id: string) => {
   const at = source.indexOf(`id: "${id}"`)
   return source.slice(source.lastIndexOf('{', at), source.indexOf('}', at) + 1)
 }
+// The registry with every `picked` mark taken out, to show that a pick wrote nothing else.
+const unmarked = (source: string) => source.replace(/picked: (true|false),\s*/g, '')
 
-test('picking a version marks it and sets the others aside in one step, and Undo takes all of it back', async ({ page }) => {
+test('picking a version only marks it, a later pick takes the mark off the earlier one, and ⌘/Ctrl + Z takes it back', async ({ page }) => {
   const original = readFileSync(REGISTRY, 'utf8')
   const three = withVersions(original)
   try {
@@ -321,11 +323,11 @@ test('picking a version marks it and sets the others aside in one step, and Undo
     await expect(item('c')).toBeVisible()
     await page.waitForTimeout(400)
     const before = (await item('example').boundingBox())!
-    await page.getByRole('button', { name: 'Pick Version B and set the others aside' }).click()
-    await expect(page.locator('.canvas-toast')).toContainText('Picked Version B. Set 2 others aside.')
-    // The mark shows at once, and the picked version stays where it was.
+    await page.getByRole('button', { name: 'Pick Version B as the answer' }).click()
+    // The mark shows at once; no notice, and nothing moves.
     await expect(item('b')).toHaveAttribute('data-picked', 'true')
-    // In the item's one status slot, a tab hanging from the card's bottom edge, with no "Saving…" beside the moved ones.
+    await expect(page.locator('.canvas-toast')).toHaveCount(0)
+    // In the item's one status slot, a tab hanging from the card's bottom edge.
     const pickedTag = item('b').locator('.canvas-item-tag[data-state="picked"]')
     await expect(pickedTag).toHaveText('Picked')
     await expect(page.locator('.canvas-item-tag')).toHaveCount(1)
@@ -334,184 +336,134 @@ test('picking a version marks it and sets the others aside in one step, and Undo
     expect(Math.abs(tab.y - (card.y + card.height))).toBeLessThan(3)
     expect(tab.x + tab.width).toBeLessThanOrEqual(card.x + card.width)
     expect(tab.x).toBeGreaterThan(card.x + card.width / 2)
-    // One write: the mark, one section for the others, and their new places in it, in reading order.
+    // The registry gets the mark and nothing else: no section, no position. (An unpick removes `picked`.)
     await expect.poll(() => entryOf('b')).toContain('picked: true')
-    expect(setAsideFrames()).toHaveLength(1)
-    const [frameX, frameY, frameW, frameH] = setAsideFrames()[0]!
-    const place = (id: string) => ({ x: Number(/\bx: (-?\d+)/.exec(entryOf(id))![1]), y: Number(/\by: (-?\d+)/.exec(entryOf(id))![1]) })
-    expect(place('b')).toEqual({ x: 400, y: 0 })
-    expect(place('example').y).toBe(place('c').y)
-    expect(place('example').x).toBeLessThan(place('c').x)
-    // Below everything that was on the canvas, and inside the frame.
-    expect(frameY).toBeGreaterThan(220 + 48)
-    for (const [id, width, height] of [['example', 360, 180], ['c', 360, 220]] as const) {
-      expect(place(id).x).toBeGreaterThanOrEqual(frameX)
-      expect(place(id).x + width).toBeLessThanOrEqual(frameX + frameW)
-      expect(place(id).y).toBeGreaterThanOrEqual(frameY)
-      expect(place(id).y + 48 + height).toBeLessThanOrEqual(frameY + frameH)
-    }
-    await expect(page.locator('.canvas-section-tab')).toHaveText('Set aside')
-    // The others glide to the section, so their place is asked until they have arrived.
-    await expect.poll(async () => (await item('example').boundingBox())!.y).toBeGreaterThan(before.y + 100)
-    // Set aside, they are out of the running: no pick is offered on them, and none on the picked one.
-    await expect(page.getByRole('button', { name: /^Pick / })).toHaveCount(0)
-    // The toast's Undo is the whole pick: the registry reads as it did before.
-    await page.locator('.canvas-toast').getByRole('button', { name: 'Undo' }).click()
-    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toBe(three)
-    await expect(item('b')).not.toHaveAttribute('data-picked', 'true')
-    await expect(page.locator('.canvas-section-tab')).toHaveCount(0)
-    await expect.poll(async () => Math.round((await item('example').boundingBox())!.y)).toBe(Math.round(before.y))
-    // Picked again, ⌘/Ctrl + Z does the same.
-    await page.getByRole('button', { name: 'Pick Version C and set the others aside' }).click()
+    expect(unmarked(readFileSync(REGISTRY, 'utf8'))).toBe(three)
+    expect(setAsideFrames()).toHaveLength(0)
+    expect((await item('example').boundingBox())!).toEqual(before)
+    // The path from the original to the pick: one line, from the bottom of the example to the top of B.
+    const lines = page.locator('.canvas-lineage path')
+    await expect(lines).toHaveCount(1)
+    await expect.poll(async () => (await lines.first().getAttribute('d')) ?? '').toMatch(/^M /)
+    // No pick is offered on the picked one; the others still can be picked.
+    await expect(page.getByRole('button', { name: 'Pick Version B as the answer' })).toHaveCount(0)
+    // C, made from the same original, takes over: B loses its mark in the same write.
+    await page.getByRole('button', { name: 'Pick Version C as the answer' }).click()
     await expect.poll(() => entryOf('c')).toContain('picked: true')
+    await expect.poll(() => entryOf('b')).not.toContain('picked')
+    await expect(item('b')).not.toHaveAttribute('data-picked', 'true')
+    await expect(item('c')).toHaveAttribute('data-picked', 'true')
+    await expect(lines).toHaveCount(1)
+    // One undo puts B back and takes C's mark off.
     await page.locator('.canvas-viewport').focus()
     await page.keyboard.press('ControlOrMeta+z')
-    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toBe(three)
+    await expect.poll(() => entryOf('b')).toContain('picked: true')
+    await expect.poll(() => entryOf('c')).not.toContain('picked')
+    await expect(item('b')).toHaveAttribute('data-picked', 'true')
+    // The × on the tag takes the mark and the path off, with no notice; ⌘/Ctrl + Z puts them back.
+    await item('b').hover()
+    await page.getByRole('button', { name: 'Unpick Version B' }).click()
+    await expect.poll(() => entryOf('b')).not.toContain('picked')
+    await expect(lines).toHaveCount(0)
+    await expect(page.locator('.canvas-toast')).toHaveCount(0)
+    await page.locator('.canvas-viewport').focus()
+    await page.keyboard.press('ControlOrMeta+z')
+    await expect.poll(() => entryOf('b')).toContain('picked: true')
+    await expect(lines).toHaveCount(1)
     expect(errors).toEqual([])
   } finally {
     await restoreRegistry(page, original)
   }
 })
 
-test('a later pick sets the earlier one aside too, in the same section', async ({ page }) => {
+test('a pick draws the path through every round, with the reasons on its lines, and a first view starts there', async ({ page }) => {
   const original = readFileSync(REGISTRY, 'utf8')
+  // Two rounds: B from the example, D from B, already picked. Far off, an item of its own.
+  const rounds = original.replace(
+    /\];\s*$/,
+    `  { id: "b", name: "Version B", component: Example, from: "example", why: "The hierarchy is clearer.", x: 0, y: 330, width: 360, height: 180 },
+  { id: "c", name: "Version C", component: Example, from: "example", x: 456, y: 330, width: 360, height: 180 },
+  { id: "d", name: "Version D", component: Example, from: "b", why: "Fits a busy week.", picked: true, x: 0, y: 660, width: 360, height: 180 },
+  { id: "far", name: "Far away", component: Example, x: 6000, y: 0, width: 360, height: 180 },
+];
+`,
+  )
   try {
     const errors = collectErrors(page)
-    writeFileSync(REGISTRY, withVersions(original))
-    await servesId(page, 'c')
+    writeFileSync(REGISTRY, rounds)
+    await servesId(page, 'far')
+    // A new page has no saved view: it opens on the pick and its path, not on everything.
     await page.goto('/')
     const item = (id: string) => page.locator(`.canvas-item[data-canvas-item="${id}"]`)
-    await expect(item('c')).toBeVisible()
-    await page.getByRole('button', { name: 'Pick Version B and set the others aside' }).click()
-    await expect.poll(() => entryOf('b')).toContain('picked: true')
-    const first = setAsideFrames()[0]!
-    // The agent adds a new version beside the picked one; the person likes it better.
-    writeFileSync(
-      REGISTRY,
-      readFileSync(REGISTRY, 'utf8').replace(/\];\s*$/, '  { id: "d", name: "Version D", from: "b", component: Example, x: 800, y: 0, width: 360, height: 180 },\n];\n'),
-    )
-    await servesId(page, 'd')
     await expect(item('d')).toBeVisible()
-    // The canvas places the new version at the right end of the row, where its header can sit
-    // under the top bar on a small screen. Pan it clear, as the person would.
-    await page.mouse.move(640, 600)
-    await page.mouse.wheel(400, -200)
-    await page.getByRole('button', { name: 'Pick Version D and set the others aside' }).click()
-    await expect(page.locator('.canvas-toast')).toContainText('Picked Version D. Set 1 other aside.')
-    await expect.poll(() => entryOf('d')).toContain('picked: true')
-    // The earlier pick loses its mark and joins the row at its right end; the frame grows, and there is still one.
-    expect(entryOf('b')).not.toContain('picked')
-    expect(setAsideFrames()).toHaveLength(1)
-    const second = setAsideFrames()[0]!
-    expect(second[0]).toBe(first[0])
-    expect(second[1]).toBe(first[1])
-    expect(second[2]).toBeGreaterThan(first[2])
-    const xOf = (id: string) => Number(/\bx: (-?\d+)/.exec(entryOf(id))![1])
-    expect(xOf('b')).toBeGreaterThan(xOf('c') + 360)
-    expect(xOf('b') + 360).toBeLessThanOrEqual(second[0] + second[2])
-    await expect(item('b')).not.toHaveAttribute('data-picked', 'true')
-    await expect(item('d')).toHaveAttribute('data-picked', 'true')
+    await expect(page.locator('.canvas-lineage path')).toHaveCount(2)
+    const inView = async (id: string) => {
+      const box = (await item(id).boundingBox())!
+      const size = page.viewportSize()!
+      return box.x + box.width > 0 && box.x < size.width && box.y + box.height > 0 && box.y < size.height
+    }
+    await expect.poll(() => inView('d')).toBe(true)
+    expect(await inView('example')).toBe(true)
+    expect(await inView('far')).toBe(false)
+    // Each step's reason sits on its line, between the two rows.
+    const words = page.locator('.canvas-lineage-why')
+    await expect(words).toHaveText(['Fits a busy week.', 'The hierarchy is clearer.'])
+    const reason = (await words.filter({ hasText: 'The hierarchy' }).boundingBox())!
+    const top = (await page.locator('[data-canvas-preview="example"]').boundingBox())!
+    const next = (await item('b').locator('.canvas-name').boundingBox())!
+    expect(reason.y).toBeGreaterThan(top.y + top.height)
+    expect(reason.y + reason.height).toBeLessThan(next.y)
+    // The lines follow an item while it is dragged.
+    const line = page.locator('.canvas-lineage path').first()
+    const resting = await line.getAttribute('d')
+    const grip = (await item('d').getByRole('button', { name: 'Move Version D', exact: true }).boundingBox())!
+    await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(grip.x + 120, grip.y + 40, { steps: 6 })
+    await expect.poll(() => line.getAttribute('d')).not.toBe(resting)
+    await page.mouse.up()
+    // A pick in another family keeps D's mark.
+    await page.getByRole('button', { name: 'Pick Far away as the answer' }).click()
+    await expect.poll(() => entryOf('far')).toContain('picked: true')
+    expect(entryOf('d')).toContain('picked: true')
     expect(errors).toEqual([])
   } finally {
     await restoreRegistry(page, original)
   }
 })
 
-test('a pick inside a section leaves the items outside it where they are', async ({ page }) => {
+test('in a section, a pick takes the mark off an earlier pick in it, and not one outside it', async ({ page }) => {
   const original = readFileSync(REGISTRY, 'utf8')
-  try {
-    const errors = collectErrors(page)
-    // The example and B share a section; C sits outside it.
-    const grouped = withVersions(original).replace(
-      'export const sections: CanvasSection[] = [];',
-      'export const sections: CanvasSection[] = [\n  { id: "cards", title: "Cards", x: -20, y: -20, width: 800, height: 300 },\n];',
-    )
-    expect(grouped).toContain('id: "cards"')
-    writeFileSync(REGISTRY, grouped)
-    await servesId(page, 'cards')
-    await page.goto('/')
-    await expect(page.locator('.canvas-item[data-canvas-item="c"]')).toBeVisible()
-    await page.getByRole('button', { name: 'Pick Example · replace me and set the others aside' }).click()
-    await expect(page.locator('.canvas-toast')).toContainText('Set 1 other aside.')
-    await expect.poll(() => entryOf('example')).toContain('picked: true')
-    expect(entryOf('c')).toContain('x: 800, y: 0')
-    expect(entryOf('b')).not.toContain('y: 0,')
-    // C was not part of that comparison, so it can still be picked among its own.
-    await expect(page.getByRole('button', { name: 'Pick Version C and set the others aside' })).toHaveCount(1)
-    expect(errors).toEqual([])
-  } finally {
-    await restoreRegistry(page, original)
-  }
-})
-
-test('a pick in a section inside a section sets the whole round aside, and the other sections go whole', async ({ page }) => {
-  const original = readFileSync(REGISTRY, 'utf8')
-  // One round of directions: a section around it, and inside it a section for each tradeoff.
-  // The example and B answer one tradeoff; C answers another and has a note beside it.
-  const round = withVersions(original)
+  // A round of directions: cards with no `from`, in one section; D sits outside it.
+  const round = original
     .replace(
-      'export const sections: CanvasSection[] = [];',
-      `export const sections: CanvasSection[] = [
-  { id: "round", title: "Round", x: -60, y: -140, width: 1280, height: 600 },
-  { id: "speed", title: "Speed", x: -30, y: -80, width: 800, height: 380 },
-  { id: "who", title: "Who", x: 780, y: -80, width: 410, height: 500 },
-];`,
+      /\];\s*$/,
+      `  { id: "b", name: "Version B", component: Example, x: 400, y: 0, width: 360, height: 180 },
+  { id: "d", name: "Version D", component: Example, picked: true, x: 0, y: 600, width: 360, height: 180 },
+];
+`,
     )
-    .replace('export const notes: CanvasNote[] = [];', 'export const notes: CanvasNote[] = [\n  { id: "why-c", text: "Why C", x: 800, y: 300, width: 200, height: 60 },\n];')
-  expect(round).toContain('id: "who"')
-  expect(round).toContain('id: "why-c"')
-  const sectionAt = (id: string) => {
-    const m = new RegExp(`^\\s+\\{ id: "${id}", title: "\\w+", x: (-?\\d+), y: (-?\\d+),`, 'm').exec(readFileSync(REGISTRY, 'utf8'))
-    return m ? { x: Number(m[1]), y: Number(m[2]) } : null
-  }
-  const placeOf = (id: string) => ({ x: Number(/\bx: (-?\d+)/.exec(entryOf(id))![1]), y: Number(/\by: (-?\d+)/.exec(entryOf(id))![1]) })
+    .replace('export const sections: CanvasSection[] = [];', 'export const sections: CanvasSection[] = [\n  { id: "round", title: "Round", x: -40, y: -80, width: 840, height: 400 },\n];')
+  expect(round).toContain('id: "round"')
   try {
     const errors = collectErrors(page)
     writeFileSync(REGISTRY, round)
-    await servesId(page, 'why-c')
+    await servesId(page, 'round')
     await page.goto('/')
-    await expect(page.locator('.canvas-item[data-canvas-item="c"]')).toBeVisible()
+    await expect(page.locator('.canvas-item[data-canvas-item="b"]')).toBeVisible()
     await page.waitForTimeout(400)
-    await page.getByRole('button', { name: 'Pick Version B and set the others aside' }).click()
-    // The example beside it and C in the other section: the whole round, not only its own section.
-    await expect(page.locator('.canvas-toast')).toContainText('Picked Version B. Set 2 others aside.')
-    await expect.poll(() => entryOf('b')).toContain('picked: true')
-    const [frameX, frameY, frameW, frameH] = setAsideFrames()[0]!
-    expect(frameY).toBeGreaterThan(460)
-    // The other section moves whole: its frame, its item, and its note by the same step, into "Set aside".
-    const who = sectionAt('who')!
-    const dx = who.x - 780
-    const dy = who.y - -80
-    expect(dy).toBeGreaterThan(400)
-    expect(placeOf('c')).toEqual({ x: 800 + dx, y: 0 + dy })
-    expect(readFileSync(REGISTRY, 'utf8')).toContain(`{ id: "why-c", text: "Why C", x: ${800 + dx}, y: ${300 + dy}`)
-    expect(who.x).toBeGreaterThanOrEqual(frameX)
-    expect(who.y).toBeGreaterThanOrEqual(frameY)
-    expect(who.x + 410).toBeLessThanOrEqual(frameX + frameW)
-    expect(who.y + 500).toBeLessThanOrEqual(frameY + frameH)
-    // The example leaves its section on its own; the picked version's section and the round stay.
-    expect(placeOf('example').y).toBeGreaterThanOrEqual(frameY)
-    expect(sectionAt('speed')).toEqual({ x: -30, y: -80 })
-    expect(sectionAt('round')).toEqual({ x: -60, y: -140 })
-    // Dragging "Set aside" takes the section inside it along.
-    await page.keyboard.press('Shift+Digit1')
-    await page.waitForTimeout(600)
-    const aside = page.locator('.canvas-section[data-board-id="set-aside"] .canvas-section-tab')
-    await expect(aside).toBeVisible()
-    const tab = (await aside.boundingBox())!
-    await page.mouse.move(tab.x + 20, tab.y + tab.height / 2)
-    await page.mouse.down()
-    await page.mouse.move(tab.x + 60, tab.y + tab.height / 2 + 30, { steps: 6 })
-    await page.mouse.up()
-    await expect.poll(() => setAsideFrames()[0]![1]).not.toBe(frameY)
-    const [movedX, movedY] = setAsideFrames()[0]!
-    await expect.poll(() => sectionAt('who')).toEqual({ x: who.x + movedX - frameX, y: who.y + movedY - frameY })
-    // One Undo for the drag, one for the pick: the registry reads as it did.
+    // The first view is on the earlier pick, D; show the round too.
     await page.locator('.canvas-viewport').focus()
-    await page.keyboard.press('ControlOrMeta+z')
-    await expect.poll(() => setAsideFrames()[0]![1]).toBe(frameY)
-    await page.keyboard.press('ControlOrMeta+z')
-    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toBe(round)
+    await page.keyboard.press('Shift+Digit1')
+    await page.waitForTimeout(400)
+    await page.getByRole('button', { name: 'Pick Example · replace me as the answer' }).click()
+    await expect.poll(() => entryOf('example')).toContain('picked: true')
+    await page.getByRole('button', { name: 'Pick Version B as the answer' }).click()
+    await expect.poll(() => entryOf('b')).toContain('picked: true')
+    await expect.poll(() => entryOf('example')).not.toContain('picked')
+    expect(entryOf('d')).toContain('picked: true')
+    // Cards with no `from` have no path.
+    await expect(page.locator('.canvas-lineage path')).toHaveCount(0)
     expect(errors).toEqual([])
   } finally {
     await restoreRegistry(page, original)
@@ -530,13 +482,11 @@ test('a pick the registry cannot take leaves nothing half done', async ({ page }
     const item = (id: string) => page.locator(`.canvas-item[data-canvas-item="${id}"]`)
     await expect(item('c')).toBeVisible()
     await page.waitForTimeout(400)
-    const before = (await item('example').boundingBox())!
-    await page.getByRole('button', { name: 'Pick Version B and set the others aside' }).click()
+    await page.getByRole('button', { name: 'Pick Version B as the answer' }).click()
     await expect(page.locator('.canvas-toast')).toContainText("Couldn't save the pick")
-    // No mark, no move, no section, and nothing waiting for the agent.
+    // No mark, no path, and nothing waiting for the agent.
     await expect(item('b')).not.toHaveAttribute('data-picked', 'true')
-    await expect.poll(async () => Math.round((await item('example').boundingBox())!.y)).toBe(Math.round(before.y))
-    await expect(page.locator('.canvas-section-tab')).toHaveCount(0)
+    await expect(page.locator('.canvas-lineage path')).toHaveCount(0)
     await expect(page.locator('.canvas-item-tag')).toHaveCount(0)
     expect(readFileSync(REGISTRY, 'utf8')).toBe(three)
     expect(errors).toEqual([])
@@ -2266,7 +2216,7 @@ test('the note field grows with its text, then scrolls', async ({ page }) => {
   expect(errors).toEqual([])
 })
 
-test('a new version lands beside its original where it is now, not where the agent last read it', async ({ page }) => {
+test('a new version lands under its original where it is now, not where the agent last read it', async ({ page }) => {
   const original = readFileSync(REGISTRY, 'utf8')
   try {
     const errors = collectErrors(page)
@@ -2297,8 +2247,9 @@ test('a new version lands beside its original where it is now, not where the age
     )
     const next = page.locator('.canvas-item[data-canvas-item="next"]')
     await expect(next).toBeVisible({ timeout: 15_000 })
-    // It goes right of the original as it is now, and that place is saved.
-    await expect.poll(() => at('next')).toEqual({ x: moved.x + 360 + 96, y: moved.y })
+    // It goes under the original as it is now, left edges lined up, and that place is saved.
+    const tall = await example.evaluate((el) => (el as HTMLElement).offsetHeight)
+    await expect.poll(() => at('next')).toEqual({ x: moved.x, y: moved.y + tall + 96 })
     expect(at('example')).toEqual(moved)
     // The view stays where the person is, and the new item says it is new.
     expect((await example.boundingBox())!).toEqual(view)
@@ -2307,6 +2258,47 @@ test('a new version lands beside its original where it is now, not where the age
     // Once it has been on screen for a moment, it is no longer new.
     await page.getByRole('button', { name: 'Fit all' }).click()
     await expect(tag).toHaveCount(0, { timeout: 6_000 })
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
+test('versions made from the same item share one row, and a version of one of them starts a row under it', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    await page.goto('/')
+    const example = page.locator('.canvas-item[data-canvas-item="example"]')
+    await expect(example).toBeVisible()
+    await page.waitForTimeout(600)
+    const at = (id: string) => {
+      const entry = readFileSync(REGISTRY, 'utf8').split('id: "' + id + '"')[1] ?? ''
+      return { x: Number(entry.match(/x: (-?\d+)/)?.[1]), y: Number(entry.match(/y: (-?\d+)/)?.[1]) }
+    }
+    const add = (lines: string) => writeFileSync(REGISTRY, readFileSync(REGISTRY, 'utf8').replace(/\];\s*$/, lines + '];\n'))
+    const start = at('example')
+    const tall = await example.evaluate((el) => (el as HTMLElement).offsetHeight)
+    // One round of two versions, written where the agent happened to put them.
+    add(
+      '  { id: "round-a", name: "Round · A", component: Example, from: "example", x: 0, y: 0, width: 360, height: 180 },\n' +
+        '  { id: "round-b", name: "Round · B", component: Example, from: "example", x: 0, y: 0, width: 360, height: 180 },\n',
+    )
+    await expect(page.locator('.canvas-item[data-canvas-item="round-b"]')).toBeVisible({ timeout: 15_000 })
+    const row = start.y + tall + 96
+    await expect.poll(() => at('round-a')).toEqual({ x: start.x, y: row })
+    await expect.poll(() => at('round-b')).toEqual({ x: start.x + 360 + 96, y: row })
+    // A version made from B starts the next row, under B.
+    const b = page.locator('.canvas-item[data-canvas-item="round-b"]')
+    const tallB = await b.evaluate((el) => (el as HTMLElement).offsetHeight)
+    add('  { id: "round-b2", name: "Round · B2", component: Example, from: "round-b", x: 0, y: 0, width: 360, height: 180 },\n')
+    await expect(page.locator('.canvas-item[data-canvas-item="round-b2"]')).toBeVisible({ timeout: 15_000 })
+    await expect.poll(() => at('round-b2')).toEqual({ x: start.x + 360 + 96, y: row + tallB + 96 })
+    // A later version from the original joins its row, after B.
+    add('  { id: "round-c", name: "Round · C", component: Example, from: "example", x: 0, y: 0, width: 360, height: 180 },\n')
+    await expect(page.locator('.canvas-item[data-canvas-item="round-c"]')).toBeVisible({ timeout: 15_000 })
+    await expect.poll(() => at('round-c')).toEqual({ x: start.x + (360 + 96) * 2, y: row })
+    expect(at('example')).toEqual(start)
     expect(errors).toEqual([])
   } finally {
     await restoreRegistry(page, original)
@@ -2508,7 +2500,7 @@ test('zoomed out, the name row and its actions take a press, and the top edge st
     await expect(page.locator('.canvas-zoom')).toHaveText('25%')
     const preview = (await page.locator('[data-canvas-preview="b"]').boundingBox())!
     await page.mouse.move(preview.x + preview.width / 2, preview.y + preview.height / 2)
-    const pick = page.getByRole('button', { name: 'Pick Version B and set the others aside' })
+    const pick = page.getByRole('button', { name: 'Pick Version B as the answer' })
     await expect(pick).toHaveCSS('opacity', '1')
     const under = (x: number, y: number) =>
       page.evaluate(([px, py]) => {
@@ -2545,7 +2537,7 @@ test("an item's actions sit at its top right: Ask with quick requests, Pick, and
     await expect(item).toBeVisible()
     await page.waitForTimeout(600)
     const ask = page.getByRole('button', { name: 'Ask agent about Version B' })
-    const pick = page.getByRole('button', { name: 'Pick Version B and set the others aside' })
+    const pick = page.getByRole('button', { name: 'Pick Version B as the answer' })
     const more = page.getByRole('button', { name: 'More actions for Version B' })
     // Quiet until the item is hovered, on its name or on its preview.
     const actions = item.locator('.canvas-item-actions')
