@@ -1672,7 +1672,7 @@ function CanvasBoard({
   );
   const copyAnnotations = useCallback(
     async (list: Annotation[], done: (n: number) => string, markList: BoardMark[] = [], moveList: MovedItem[] = []) => {
-      const text = message(list, markList, moveList);
+      const text = `${message(list, markList, moveList)}\n\n${labels.copiedTrailer(`${window.location.origin}/`)}`;
       window.clearTimeout(toastTimer.current);
       try {
         await writeClipboard(text);
@@ -4813,7 +4813,12 @@ function CanvasBoard({
                 {labels.discardShort}
               </button>
             )}
-            <button type="button" className="canvas-button canvas-button-primary" onClick={() => void sendAnnotations()}>
+            <button
+              type="button"
+              className="canvas-button canvas-button-primary"
+              data-tip={agentOn ? undefined : labels.copyTip}
+              onClick={() => void sendAnnotations()}
+            >
               {agentOn ? <SendIcon /> : <CopyIcon />}
               {agentOn ? labels.sendAnnotations(unsentCount) : labels.copyAnnotations(unsentCount)}
             </button>

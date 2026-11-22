@@ -242,12 +242,21 @@ export const labels = {
   // The toolbar button says what it does for the person: the canvas is source files, so nothing shows up until the agent applies it.
   // No noun after the number: what waits can be a request, a question, a note, a section, or a move.
   copyAnnotations: (n: number) => `Copy ${n} for agent`,
+  /** Why the bar copies, and how to get Send back: the copied message itself asks the agent to listen again. */
+  copyTip: "No agent is listening. Paste in its chat, and it listens again.",
   copiedAnnotations: (n: number) => `Copied ${n} for the agent`,
+  /**
+   * Ends every copied message, for the agent who reads the paste. Copying means no agent
+   * listened, so this is the moment to get Send back; the address tells which canvas,
+   * when several worktrees each run one.
+   */
+  copiedTrailer: (url: string) =>
+    `(Copied from the design canvas at ${url}: no agent was listening to it. After you handle these, listen to it again as the design-canvas skill says, so the person's next notes reach you without copying.)`,
   /** Shown in place of the copy button while an agent listens to the canvas. */
   sendAnnotations: (n: number) => `Send ${n} to agent`,
   sentToAgent: (n: number) => `Sent ${n} to the agent`,
   queuedForAgent: (n: number) => `Queued ${n}. The agent gets ${n === 1 ? "it" : "them"} when it's free.`,
-  agentGoneCopied: (n: number) => `The agent stopped listening. Copied ${n} instead.`,
+  agentGoneCopied: (n: number) => `The agent stopped listening. Copied ${n}: paste in its chat, and it listens again.`,
   /** The name on a reply, whichever agent it is. */
   agentName: "Agent",
   /** Beside a pin whose note the agent answered: the first words of the answer. */

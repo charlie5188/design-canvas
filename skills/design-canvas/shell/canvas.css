@@ -541,6 +541,16 @@ body,
 .canvas-toolbar[data-place="pending"] [data-tip]::after {
   inset-block: calc(100% + 8px) auto;
 }
+/* The bar sits at the top centre, so its hints open centred under their button and
+   wrap: Copy's hint is a sentence, and from the button's edge it ran off a narrow window. */
+.canvas-toolbar[data-place="pending"] [data-tip]:hover::after,
+.canvas-toolbar[data-place="pending"] [data-tip]:focus-visible::after {
+  inset-inline-start: 50%;
+  translate: -50% 0;
+  inline-size: max-content;
+  max-inline-size: min(260px, calc(100vw - 32px));
+  white-space: normal;
+}
 /* Alone, as on an item's own page, a notice sits at the top centre too. */
 .canvas-toast {
   z-index: 6;

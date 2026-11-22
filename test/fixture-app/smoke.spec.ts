@@ -642,7 +642,7 @@ test('the More menu copies the item name, so several versions can be named to th
   expect(errors).toEqual([])
 })
 
-test('copied annotations ask for a new version by default', async ({ page, context }) => {
+test('copied annotations ask for a new version by default', async ({ page, context, baseURL }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   const errors = collectErrors(page)
   await page.goto('/')
@@ -654,10 +654,15 @@ test('copied annotations ask for a new version by default', async ({ page, conte
   // Enter keeps the note and closes it; the bar at the top sends it.
   await note.getByRole('textbox').press('Enter')
   await expect(note).toHaveCount(0)
-  await page.getByRole('button', { name: 'Copy 1 for agent' }).click()
+  // With no agent listening the bar copies, and says how to get Send back.
+  const copy = page.getByRole('button', { name: 'Copy 1 for agent' })
+  await expect(copy).toHaveAttribute('data-tip', 'No agent is listening. Paste in its chat, and it listens again.')
+  await copy.click()
   await expect(page.locator('.canvas-toast')).toContainText('Copied 1 for the agent')
   const text = await page.evaluate(() => navigator.clipboard.readText())
   expect(text).toContain('Keep the original and add a new version: Example · replace me (1)')
+  // The paste asks the agent to listen again, and names this canvas, so the next notes go with Send.
+  expect(text).toMatch(new RegExp(`\\n\\n\\(Copied from the design canvas at ${new URL(baseURL!).origin}/: no agent was listening to it\\. .*listen to it again.*\\)$`))
   expect(errors).toEqual([])
 })
 
