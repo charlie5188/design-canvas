@@ -6,8 +6,7 @@
 // dragged, its preview's edges and centre catch on the edges and centres of the
 // other previews, and a guide line shows what it caught on.
 //
-// The boxes are the previews, not the whole item: an item with a caption has a
-// taller head, so aligning whole items would leave the previews uneven.
+// The boxes are the previews, not the whole item: the preview is what is compared.
 
 export type Box = { x: number; y: number; w: number; h: number };
 

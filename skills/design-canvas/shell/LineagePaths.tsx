@@ -26,14 +26,13 @@ export function LineagePaths({ steps, world }: { steps: Step[]; world: RefObject
     const root = world.current;
     if (!root) return;
     const find = (id: string) => root.querySelector<HTMLElement>(`.canvas-item[data-canvas-item="${CSS.escape(id)}"]`);
-    /** An item's box in canvas units: its centre line, its top above the caption, and the bottom of its preview. */
+    /** An item's box in canvas units: its centre line, its top above the name, and the bottom of its preview. */
     const boxOf = (element: HTMLElement | null) => {
       const at = element?.style.transform.match(TRANSLATE);
       if (!element || !at) return null;
       const x = Number(at[1]);
       const y = Number(at[2]);
-      const lift = Math.max(0, -(element.querySelector<HTMLElement>(".canvas-item-title")?.offsetTop ?? 0));
-      return { mid: x + element.offsetWidth / 2, top: y - lift, bottom: y + element.offsetHeight };
+      return { mid: x + element.offsetWidth / 2, top: y, bottom: y + element.offsetHeight };
     };
     stepsRef.current.forEach((step, i) => {
       const line = svgRef.current?.querySelector<SVGPathElement>(`[data-step="${i}"]`);
@@ -45,7 +44,7 @@ export function LineagePaths({ steps, world }: { steps: Step[]; world: RefObject
         if (words) words.hidden = true;
         return;
       }
-      // Down out of the parent's preview, into the top of the child's box (above its name and caption).
+      // Down out of the parent's preview, into the top of the child's box (above its name).
       const bend = Math.max(32, Math.abs(b.top - a.bottom) / 2);
       line?.setAttribute("d", `M ${a.mid} ${a.bottom} C ${a.mid} ${a.bottom + bend}, ${b.mid} ${b.top - bend}, ${b.mid} ${b.top}`);
       if (words) {

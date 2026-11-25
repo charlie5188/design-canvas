@@ -1,4 +1,4 @@
-// One item on the canvas: its title row and controls, caption, preview, resize handles, and pins.
+// One item on the canvas: its title row and controls, preview, resize handles, and pins.
 import { type PointerEvent as ReactPointerEvent, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { type AnnotationHandlers, AnnotationLink, AnnotationPin } from "./AnnotationView";
 import { type Annotation, fingerprintItem } from "./annotations";
@@ -134,72 +134,6 @@ function ItemMore({
   );
 }
 
-/**
- * The caption under an item's name. Double-click edits it; Enter or leaving the
- * field saves, Escape cancels. Saving is the page's job (saveCaption), not the agent's.
- */
-function ItemCaption({ text, editable, onSave }: { text: string; editable: boolean; onSave: (text: string) => void }) {
-  const [draft, setDraft] = useState<string | null>(null);
-  const fieldRef = useRef<HTMLTextAreaElement>(null);
-  // Leaving the field after Enter or Escape must not save a second time.
-  const finished = useRef(false);
-  const editing = draft !== null;
-  useEffect(() => {
-    if (!editing) return;
-    fieldRef.current?.focus({ preventScroll: true });
-    fieldRef.current?.select();
-  }, [editing]);
-  const finish = (save: boolean) => {
-    if (finished.current) return;
-    finished.current = true;
-    const next = draft?.trim();
-    setDraft(null);
-    if (save && next && next !== text) onSave(next);
-  };
-  if (editing) {
-    return (
-      <textarea
-        ref={fieldRef}
-        className="canvas-caption-field"
-        rows={1}
-        value={draft}
-        aria-label={labels.captionLabel}
-        // A caption is one line.
-        onChange={(event) => setDraft(event.currentTarget.value.replace(/\r?\n/g, " "))}
-        onKeyDown={(event) => {
-          // The canvas's own keys (A, N, S, Delete) stay out of a field.
-          event.stopPropagation();
-          if (event.key === "Enter" && !event.nativeEvent.isComposing) {
-            event.preventDefault();
-            finish(true);
-          } else if (event.key === "Escape") {
-            event.preventDefault();
-            finish(false);
-          }
-        }}
-        onBlur={() => finish(true)}
-      />
-    );
-  }
-  return (
-    <p
-      className="canvas-note canvas-subtle"
-      data-editable={editable || undefined}
-      data-tip={editable ? labels.captionHint : undefined}
-      onDoubleClick={
-        editable
-          ? () => {
-              finished.current = false;
-              setDraft(text);
-            }
-          : undefined
-      }
-    >
-      {text}
-    </p>
-  );
-}
-
 /** The eight places an item can be grabbed to resize it, like the border of an OS window. */
 export type ResizeEdge = BoardEdge;
 const RESIZE_EDGES: ResizeEdge[] = ["n", "s", "e", "w", "nw", "ne", "sw", "se"];
@@ -230,9 +164,6 @@ export function CanvasItemView({
   picked,
   move,
   onUndoMove,
-  caption,
-  editable,
-  onCaption,
   working,
   agentWorking,
   fresh,
@@ -280,11 +211,6 @@ export function CanvasItemView({
   /** Set while the item sits somewhere the registry does not have it. */
   move?: MoveSent["state"] | "new";
   onUndoMove: (item: CanvasItem) => void;
-  /** The caption as shown: the person's edit until the registry has it. */
-  caption: string | undefined;
-  /** False in a shared file, where nothing can be saved. */
-  editable: boolean;
-  onCaption: (item: CanvasItem, text: string) => void;
   /** The agent is working on notes sent about this item: a tag and a light around it. */
   working: boolean;
   /** The agent is handling a message: a sent move is part of it. */
@@ -568,7 +494,6 @@ export function CanvasItemView({
             <ItemMore item={item} onTrash={onTrash} onCopyName={onCopyName} onStartHere={(used || !!route) && onStartHere ? startHere : undefined} />
           </span>
         </span>
-        {caption && <ItemCaption text={caption} editable={editable} onSave={(text) => onCaption(item, text)} />}
       </div>
       <div className="canvas-preview-wrap">
         <div

@@ -31,7 +31,6 @@ export const registry: CanvasItem[] = [
   {
     id: "example",
     name: "Example · replace me",
-    note: "Delete this item once the first real one is in.",
     component: Example,
     x: 0,
     y: 0,
