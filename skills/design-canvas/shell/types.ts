@@ -5,7 +5,10 @@ export type CanvasItem = {
   id: string;
   /** Readable, unique name shown above the preview and copied on click. */
   name: string;
-  /** Optional one line on what this version decides. */
+  /**
+   * Not shown. Older canvases put a caption here; it stays valid so their registries
+   * still load, and the canvas ignores it. Notes go on the board instead (`notes`).
+   */
   note?: string;
   component: ComponentType;
   x: number;

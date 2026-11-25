@@ -217,16 +217,14 @@ body,
 .canvas-item[data-front] {
   z-index: 1;
 }
-/* Only the name row takes room above the preview, so every preview starts the same
-   distance below its item's position, and versions side by side line up whatever
-   their captions say. A caption grows upward instead: it stays just above the
-   preview, and the name rises above it (the overflow of a fixed box aligned to its
-   end). Canvas.tsx measures that rise (`liftOf`) where it needs the item's full box. */
+/* Only the one-line name row sits above the preview, at a fixed height, so every
+   preview starts the same distance below its item's position and the grip is always
+   in the same place: items placed in a row line up. An item has no caption; what
+   needs saying about it goes in a note on the board, or in the agent's reply. */
 .canvas-item-head {
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-  gap: 2px;
   block-size: 24px;
 }
 /* The grip and the name both drag the item, with mouse or touch. */
@@ -434,9 +432,6 @@ body,
   font-weight: 400;
   white-space: nowrap;
   pointer-events: none;
-}
-.canvas-note {
-  margin: 0;
 }
 .canvas-copy-fallback {
   display: inline-flex;
@@ -2171,30 +2166,10 @@ html[data-canvas-alt] .canvas-frame-root * {
   background: #5f6b76;
 }
 
-/* The caption under an item's name while it is being edited: one line, in the
-   place of the text, lined up with the name. */
-.canvas-caption-field {
-  box-sizing: border-box;
-  inline-size: calc(100% - 30px);
-  min-inline-size: 12ch;
-  margin: 0 0 0 30px;
-  padding: 0 4px;
-  border: 1px solid var(--canvas-focus-color);
-  border-radius: var(--canvas-radius-s);
-  outline: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  resize: none;
-  field-sizing: content;
-  user-select: text;
-}
-
 /* An item's state sits on its card: just under the preview's bottom-right corner,
-   a few pixels from the frame it is about. Above the item, a tag had the name and
-   the caption between it and the card, and read as a note about the title. Under
-   the card nothing is in the way, at any caption length, and the eye finds the
-   state where it finds the frame. (Notes and sections keep their tag above the
+   a few pixels from the frame it is about. Above the item, a tag had the name
+   between it and the card, and read as a note about the title. Under the card
+   nothing is in the way, and the eye finds the state where it finds the frame. (Notes and sections keep their tag above the
    top-right corner: they have no header, so it already touches them.)
    The tag lets presses through, so the resize edge under it still works; only a
    button inside it takes one. */

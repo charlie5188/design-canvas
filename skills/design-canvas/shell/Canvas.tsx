@@ -149,20 +149,6 @@ const SECTION_TITLE_ROOM = 32;
 const MAX_NOTE_QUOTE = 120;
 
 /**
- * How far an item's name and caption rise above its position, in canvas units. A caption
- * grows upward so that previews side by side line up (canvas.css, `.canvas-item-head`),
- * and that part lies outside the item element's own box.
- */
-const liftOf = (element: HTMLElement) => Math.max(0, -(element.querySelector<HTMLElement>(".canvas-item-title")?.offsetTop ?? 0));
-
-/** An item's box on screen, with the name and caption above it. */
-const itemScreenRect = (element: HTMLElement) => {
-  const rect = element.getBoundingClientRect();
-  const top = Math.min(rect.top, element.querySelector(".canvas-item-title")?.getBoundingClientRect().top ?? rect.top);
-  return new DOMRect(rect.left, top, rect.width, rect.bottom - top);
-};
-
-/**
  * A click that adds to the selection, or takes out of it: Shift, as in design tools, or
  * ⌘/Ctrl, as in a file list, so neither habit fails. Alt stays for copying a reference.
  */
@@ -1295,30 +1281,6 @@ function CanvasBoard({
       return undefined;
     }
   };
-  // A caption edit shows at once and stays until the registry has the text.
-  const [captions, setCaptions] = useState<Record<string, string>>({});
-  useEffect(() => {
-    setCaptions((prev) => {
-      const keep = Object.entries(prev).filter(([id, text]) => items.find((item) => item.id === id)?.note !== text);
-      return keep.length === Object.keys(prev).length ? prev : Object.fromEntries(keep);
-    });
-  }, [items]);
-  const saveCaption = async (item: CanvasItem, text: string) => {
-    if (shared) return;
-    setCaptions((prev) => ({ ...prev, [item.id]: text }));
-    const result = await postRegistry({ edits: [{ kind: "item", id: item.id, set: { note: text } }] });
-    if (result && !result.missing?.length) {
-      if (item.note !== undefined) remember({ edits: [{ kind: "item", id: item.id, set: { note: item.note } }], removes: [], adds: [], positions: {} });
-      return;
-    }
-    // Not written: show what is in the registry again.
-    setCaptions((prev) => {
-      const next = { ...prev };
-      delete next[item.id];
-      return next;
-    });
-    notify(result ? labels.saveCouldntPlace(item.name) : labels.captionNotSaved, undefined, true);
-  };
   const deleteBoard = async (kind: BoardKind, id: string) => {
     const note = kind === "note" ? notes.find((n) => n.id === id) : undefined;
     const section = kind === "section" ? sections.find((s) => s.id === id) : undefined;
@@ -1925,17 +1887,13 @@ function CanvasBoard({
     else elements.current.delete(id);
   }, []);
 
-  /**
-   * Canvas-unit box of an item: caption, title, handle, and preview. A caption puts the
-   * box's top `lift` above the item's position, which is `y + lift`.
-   */
+  /** Canvas-unit box of an item: its name row and preview. */
   const rectOf = useCallback((item: CanvasItem) => {
     const element = elements.current.get(item.id);
     if (!element) return null;
     const p = positionsRef.current[item.id] ?? { x: item.x, y: item.y };
     // Layout sizes ignore the camera transform, so they are canvas units.
-    const lift = liftOf(element);
-    return { x: p.x, y: p.y - lift, w: element.offsetWidth, h: element.offsetHeight + lift, lift };
+    return { x: p.x, y: p.y, w: element.offsetWidth, h: element.offsetHeight };
   }, []);
 
   // Items whose centre is inside a section, at the positions they have now,
@@ -1947,7 +1905,7 @@ function CanvasBoard({
       const cx = r.x + r.w / 2;
       const cy = r.y + r.h / 2;
       return cx >= bounds.x && cx <= bounds.x + bounds.w && cy >= bounds.y && cy <= bounds.y + bounds.h
-        ? [{ id: item.id, name: item.name, x: r.x, y: r.y + r.lift }]
+        ? [{ id: item.id, name: item.name, x: r.x, y: r.y }]
         : [];
     });
   insideRef.current = itemsInside;
@@ -2231,7 +2189,7 @@ function CanvasBoard({
     const touches = (r: DOMRect) => r.left < box.right && r.right > box.left && r.top < box.bottom && r.bottom > box.top;
     const holds = (r: DOMRect) => r.left >= box.left && r.right <= box.right && r.top >= box.top && r.bottom <= box.bottom;
     const keys: string[] = [];
-    for (const [id, element] of elements.current) if (touches(itemScreenRect(element))) keys.push(`item:${id}`);
+    for (const [id, element] of elements.current) if (touches(element.getBoundingClientRect())) keys.push(`item:${id}`);
     for (const element of worldRef.current?.querySelectorAll<HTMLElement>("[data-board-id], [data-board-ghost], [data-canvas-image]") ?? []) {
       if (element.dataset.canvasImage) {
         if (touches(element.getBoundingClientRect())) keys.push(`image:${element.dataset.canvasImage}`);
@@ -2823,7 +2781,7 @@ function CanvasBoard({
       const boxOf = (item: CanvasItem) => {
         const r = rectOf(item);
         const p = placed[item.id];
-        return r && p ? { ...r, x: p.x, y: p.y - r.lift } : r;
+        return r && p ? { ...r, ...p } : r;
       };
       const frames = sections.filter((s) => !removed.has(`section:${s.id}`));
       const holds = (f: CanvasSection, b: { x: number; y: number; w: number; h: number }) => {
@@ -2863,9 +2821,9 @@ function CanvasBoard({
             box = { x: right + ADD_GAP, y: spot.y };
           }
         }
-        const next = sanitizePosition({ x: box.x, y: box.y + r.lift });
+        const next = sanitizePosition(box);
         placed[item.id] = next;
-        taken.push({ ...r, x: next.x, y: next.y - r.lift });
+        taken.push({ ...r, ...next });
       }
       positionsRef.current = { ...positionsRef.current, ...placed };
       setPositions(positionsRef.current);
@@ -3262,7 +3220,7 @@ function CanvasBoard({
             : entry.startsWith("image:")
               ? worldRef.current?.querySelector<HTMLElement>(`[data-canvas-image="${id}"]`)
               : ref && worldRef.current?.querySelector<HTMLElement>(`[${ref.ghost ? "data-board-ghost" : "data-board-id"}="${CSS.escape(ref.id)}"]`);
-          return element ? [entry.startsWith("item:") ? itemScreenRect(element) : element.getBoundingClientRect()] : [];
+          return element ? [element.getBoundingClientRect()] : [];
         });
         if (!rects.length) return;
         setCamera(
@@ -4683,9 +4641,6 @@ function CanvasBoard({
                 return moved ? moveStateOf(moved) : undefined;
               })()}
               onUndoMove={undoMove}
-              caption={captions[item.id] ?? item.note}
-              editable={!shared}
-              onCaption={saveCaption}
               working={working.has(item.id)}
               agentWorking={agentHandling}
               fresh={fresh[item.id]}

@@ -18,7 +18,7 @@ const ARRAY: Record<DirectKind, string> = { note: "notes", section: "sections", 
 const FIELDS: Record<DirectKind, Record<string, "number" | "string" | "flag">> = {
   note: { x: "number", y: "number", width: "number", height: "number", text: "string" },
   section: { x: "number", y: "number", width: "number", height: "number", title: "string" },
-  item: { x: "number", y: "number", width: "number", height: "number", note: "string", trashed: "flag", picked: "flag" },
+  item: { x: "number", y: "number", width: "number", height: "number", trashed: "flag", picked: "flag" },
   image: { x: "number", y: "number", width: "number", height: "number" },
 };
 const COORD_LIMIT = 100_000;

@@ -1311,44 +1311,24 @@ test('Backspace in a note being edited edits it, and does not delete the note', 
   }
 })
 
-test('a caption is edited in place and saved to the registry', async ({ page }) => {
+test('an item shows no caption, also when its registry entry has a note from an older canvas', async ({ page }) => {
   const original = readFileSync(REGISTRY, 'utf8')
   try {
     const errors = collectErrors(page)
     await page.goto('/')
-    const caption = page.locator('.canvas-item[data-canvas-item="example"] .canvas-note')
-    await expect(caption).toBeVisible()
-    await page.waitForTimeout(600)
-    await caption.dblclick()
-    const field = page.locator('.canvas-caption-field')
-    await expect(field).toBeFocused()
-    await field.fill('A caption written on the canvas')
-    // Backspace and other keys stay in the field.
-    await page.keyboard.press('Enter')
-    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toContain('note: "A caption written on the canvas"')
-    await expect(caption).toHaveText('A caption written on the canvas')
+    const item = page.locator('.canvas-item[data-canvas-item="example"]')
+    await expect(item).toBeVisible()
+    // In layout units, so the camera's zoom does not count.
+    const offset = () => item.evaluate((element) => element.querySelector<HTMLElement>('.canvas-preview-wrap')!.offsetTop)
+    const before = await offset()
+    const name = 'name: "Example · replace me",'
+    expect(original).toContain(name)
+    writeFileSync(REGISTRY, original.replace(name, `${name}\n    note: "A caption from an older canvas",`))
+    await page.reload()
+    await expect(item).toBeVisible()
+    await expect(item).not.toContainText('A caption from an older canvas')
+    expect(await offset()).toBe(before)
     expect(errors).toEqual([])
-  } finally {
-    await restoreRegistry(page, original)
-  }
-})
-
-test('Escape cancels a caption edit and saves nothing', async ({ page }) => {
-  const original = readFileSync(REGISTRY, 'utf8')
-  try {
-    await page.goto('/')
-    const caption = page.locator('.canvas-item[data-canvas-item="example"] .canvas-note')
-    await expect(caption).toBeVisible()
-    await page.waitForTimeout(600)
-    const before = await caption.textContent()
-    await caption.dblclick()
-    await page.locator('.canvas-caption-field').fill('Not this')
-    await page.keyboard.press('Escape')
-    await expect(page.locator('.canvas-caption-field')).toHaveCount(0)
-    await expect(caption).toHaveText(before!)
-    // Longer than the pause before a save.
-    await page.waitForTimeout(900)
-    expect(readFileSync(REGISTRY, 'utf8')).toBe(original)
   } finally {
     await restoreRegistry(page, original)
   }
@@ -3972,11 +3952,10 @@ test("an item's grip waits in the margin and shows while the item is hovered", a
   await expect(grip).toHaveCSS('opacity', '0')
   await item.locator('.canvas-name').hover()
   await expect(grip).toHaveCSS('opacity', '1')
-  // Left of the preview, so the name's words start at the preview's edge, with the caption under them.
-  const [handle, preview, name, note] = await Promise.all([grip, item.locator('.canvas-preview'), item.locator('.canvas-name'), item.locator('.canvas-note')].map((l) => l.boundingBox()))
+  // Left of the preview, so the name's words start at the preview's edge.
+  const [handle, preview, name] = await Promise.all([grip, item.locator('.canvas-preview'), item.locator('.canvas-name')].map((l) => l.boundingBox()))
   expect(handle!.x + handle!.width).toBeLessThanOrEqual(preview!.x)
   expect(name!.x).toBeLessThan(preview!.x)
-  expect(Math.abs(note!.x - preview!.x)).toBeLessThan(1)
 })
 
 test('an item with screens opens its flow: every screen side by side, with arrows, and a press opens one', async ({ page }) => {
