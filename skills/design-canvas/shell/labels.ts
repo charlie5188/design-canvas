@@ -68,6 +68,7 @@ export const labels = {
         { what: "Add a note", how: "`N`, then click" },
         { what: "Add a section", how: "`S`, then drag" },
         { what: "Edit a caption or a note", how: "Double-click it" },
+        { what: "Indent a list item", how: "`Tab`, `Shift` `Tab`" },
         { what: "Remove the selected one", how: "`Delete`" },
         { what: "Back to Interact", how: "`V` or `Esc`" },
       ],

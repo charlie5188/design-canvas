@@ -1955,6 +1955,61 @@ test('a note draws **bold** and lists, and is edited as the text it is', async (
   }
 })
 
+test('a note writes its lists: Enter goes on, Tab nests, and an empty item ends the list', async ({ page }) => {
+  const original = readFileSync(REGISTRY, 'utf8')
+  try {
+    const errors = collectErrors(page)
+    await page.goto('/')
+    await expect(page.locator('.canvas-item[data-canvas-item="example"]')).toBeVisible()
+    await page.waitForTimeout(600)
+    await page.getByRole('button', { name: 'Note', exact: true }).click()
+    await page.mouse.click(700, 400)
+    const field = page.locator('[data-board-ghost] textarea')
+    await expect(field).toBeFocused()
+    await page.keyboard.type('- one')
+    await page.keyboard.press('Enter')
+    await expect(field).toHaveValue('- one\n- ')
+    // The browser's own Undo takes the new item back, and Redo puts it in again.
+    await page.keyboard.press('ControlOrMeta+z')
+    await expect(field).toHaveValue('- one')
+    await page.keyboard.press('ControlOrMeta+Shift+z')
+    await expect(field).toHaveValue('- one\n- ')
+    await page.keyboard.type('two')
+    await page.keyboard.press('Enter')
+    // Tab nests the new item under "two" and keeps the note open.
+    await page.keyboard.press('Tab')
+    await expect(field).toBeFocused()
+    await expect(field).toHaveValue('- one\n- two\n  - ')
+    await page.keyboard.type('nested')
+    await page.keyboard.press('Enter')
+    // An empty item steps out a level, then out of the list.
+    await page.keyboard.press('Enter')
+    await expect(field).toHaveValue('- one\n- two\n  - nested\n- ')
+    await page.keyboard.press('Enter')
+    await expect(field).toHaveValue('- one\n- two\n  - nested\n')
+    await page.keyboard.type('1. first')
+    await page.keyboard.press('Enter')
+    await page.keyboard.type('second')
+    await expect(field).toHaveValue('- one\n- two\n  - nested\n1. first\n2. second')
+    // Shift + Tab on an item that is not nested does nothing, and Backspace just after a mark takes the mark away.
+    await page.keyboard.press('Shift+Tab')
+    await page.keyboard.press('Enter')
+    await page.keyboard.press('Backspace')
+    await page.keyboard.type('Done')
+    const text = '- one\n- two\n  - nested\n1. first\n2. second\nDone'
+    await expect(field).toHaveValue(text)
+    await page.keyboard.press('Escape')
+    await expect.poll(() => readFileSync(REGISTRY, 'utf8')).toContain(`text: ${JSON.stringify(text)}`)
+    const note = page.locator('.canvas-note-card', { hasText: 'nested' })
+    await expect(note.locator('ul > li > ul > li')).toHaveText(['nested'])
+    await expect(note.locator('ul ul')).toHaveCSS('list-style-type', 'circle')
+    await expect(note.locator('ol > li')).toHaveText(['first', 'second'])
+    expect(errors).toEqual([])
+  } finally {
+    await restoreRegistry(page, original)
+  }
+})
+
 test('a note draws links and `code`; a click opens a link, and a drag from it moves the note', async ({ page }) => {
   const original = readFileSync(REGISTRY, 'utf8')
   try {

@@ -6,13 +6,47 @@
 //   `name`               code: a component, prop, or token name
 //   - item               a list (also "* item" and "• item")
 //   1. item              a numbered list (also "1) item")
+//     - item             indented under an item: a list inside that item
 //
 // Everything else shows as typed, line breaks included. The marks are only drawn here:
 // the note is edited as the text it is, and the agent reads and writes that same text.
+// note-edit.ts gives the field the keys that write these marks (Enter, Tab, Backspace).
 import type { ReactNode } from "react";
 
-const BULLET = /^\s*[-*•]\s+(.*)$/;
-const NUMBERED = /^\s*(\d{1,3})[.)]\s+(.*)$/;
+/** A line that is a list item, read the same way where it is drawn and where it is edited. */
+export type ListLine = {
+  /** The spaces or tabs before the mark, as typed. */
+  lead: string;
+  /** How far the mark is indented, a tab counting to the next multiple of 4 as in Markdown. */
+  indent: number;
+  /** "-", "*", "•", or a number with its "." or ")", as typed. */
+  mark: string;
+  ordered: boolean;
+  number: number;
+  /** Where the item's own words start in the line, after the mark and its space. */
+  head: number;
+  body: string;
+};
+
+// A number has at most three digits, so a line that starts "2026. " is a year, not item 2026.
+const ITEM = /^(\s*)([-*•]|(\d{1,3})[.)])\s+/;
+
+export function listLine(line: string): ListLine | null {
+  const match = ITEM.exec(line);
+  if (!match) return null;
+  const [whole, lead, mark, digits] = match as unknown as [string, string, string, string | undefined];
+  let indent = 0;
+  for (const char of lead) indent = char === "\t" ? indent + 4 - (indent % 4) : indent + 1;
+  return {
+    lead,
+    indent,
+    mark,
+    ordered: digits !== undefined,
+    number: digits === undefined ? 0 : Number(digits),
+    head: whole.length,
+    body: line.slice(whole.length),
+  };
+}
 // One pass, left to right: the mark that starts first wins, so stars or brackets inside
 // `code` or inside an address are never read as marks of their own.
 const INLINE = new RegExp(
@@ -106,35 +140,62 @@ function inline(text: string, inBold = false): ReactNode[] {
   return parts;
 }
 
-type Block = { kind: "text"; lines: string[] } | { kind: "list"; ordered: boolean; start: number; items: string[] };
+type List = { ordered: boolean; start: number; indent: number; items: { text: string; lists: List[] }[] };
+type Block = { kind: "text"; lines: string[] } | { kind: "list"; list: List };
+
+function ListView({ list }: { list: List }) {
+  const items = list.items.map((item, at) => (
+    <li key={at}>
+      {inline(item.text)}
+      {item.lists.map((inner, index) => (
+        <ListView key={index} list={inner} />
+      ))}
+    </li>
+  ));
+  return list.ordered ? <ol start={list.start}>{items}</ol> : <ul>{items}</ul>;
+}
 
 export function NoteText({ text }: { text: string }) {
   const blocks: Block[] = [];
+  // The lists open at the current line, outermost first. Any line that is not an item ends them all.
+  let open: List[] = [];
   for (const line of text.split("\n")) {
-    const numbered = NUMBERED.exec(line);
-    const bullet = numbered ? null : BULLET.exec(line);
+    const item = listLine(line);
     const last = blocks[blocks.length - 1];
-    if (numbered || bullet) {
-      const ordered = !!numbered;
-      const item = (numbered?.[2] ?? bullet?.[1])!;
-      if (last?.kind === "list" && last.ordered === ordered) last.items.push(item);
-      else blocks.push({ kind: "list", ordered, start: numbered ? Number(numbered[1]) : 1, items: [item] });
-    } else if (last?.kind === "text") last.lines.push(line);
-    else blocks.push({ kind: "text", lines: [line] });
+    if (!item) {
+      open = [];
+      if (last?.kind === "text") last.lines.push(line);
+      else blocks.push({ kind: "text", lines: [line] });
+      continue;
+    }
+    const list = (): List => ({ ordered: item.ordered, start: item.ordered ? item.number : 1, indent: item.indent, items: [] });
+    // Back out to the list this item's indent belongs to. The outermost list stays, so a list
+    // that starts indented and goes on less indented is still one list.
+    while (open.length > 1 && open[open.length - 1]!.indent > item.indent) open.pop();
+    const top = open[open.length - 1];
+    if (!top) {
+      open = [list()];
+      blocks.push({ kind: "list", list: open[0]! });
+    } else if (item.indent > top.indent) {
+      // Indented further than its list: a list inside the item before it.
+      const inner = list();
+      top.items[top.items.length - 1]!.lists.push(inner);
+      open.push(inner);
+    } else if (top.ordered !== item.ordered) {
+      // Bullets after numbers, or the other way, at the same level: a new list beside the last.
+      const next = list();
+      open[open.length - 1] = next;
+      const parent = open[open.length - 2];
+      if (parent) parent.items[parent.items.length - 1]!.lists.push(next);
+      else blocks.push({ kind: "list", list: next });
+    }
+    open[open.length - 1]!.items.push({ text: item.body, lists: [] });
   }
   return (
     <>
-      {blocks.map((block, index) => {
-        if (block.kind === "text") return <div key={index}>{inline(block.lines.join("\n"))}</div>;
-        const items = block.items.map((item, at) => <li key={at}>{inline(item)}</li>);
-        return block.ordered ? (
-          <ol key={index} start={block.start}>
-            {items}
-          </ol>
-        ) : (
-          <ul key={index}>{items}</ul>
-        );
-      })}
+      {blocks.map((block, index) =>
+        block.kind === "text" ? <div key={index}>{inline(block.lines.join("\n"))}</div> : <ListView key={index} list={block.list} />,
+      )}
     </>
   );
 }

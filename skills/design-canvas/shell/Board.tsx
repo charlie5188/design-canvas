@@ -10,6 +10,7 @@ import { type KeyboardEvent, type PointerEvent as ReactPointerEvent, useEffect, 
 import { type BoardKind, type BoardMark, NOTE_WIDTH } from "./marks";
 import { Icon } from "./icons";
 import { labels } from "./labels";
+import { onNoteKey } from "./note-edit";
 import { NoteText } from "./note-text";
 import type { CanvasNote, CanvasSection } from "./types";
 
@@ -327,10 +328,11 @@ export function MarkView({
       onKeyDown={(event) => {
         event.stopPropagation();
         // Enter ends a section title; a note keeps its lines, and Escape closes either.
+        // In a note, Enter, Tab, and Backspace also write its lists (note-edit.ts).
         if (event.key === "Escape" || (!isNote && event.key === "Enter")) {
           event.preventDefault();
           onClose();
-        }
+        } else if (isNote) onNoteKey(event);
       }}
       onBlur={onClose}
     />

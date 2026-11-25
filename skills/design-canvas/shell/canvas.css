@@ -3432,6 +3432,14 @@ html[data-canvas-alt] .canvas-frame-root * {
 .canvas-note-body ol {
   list-style: decimal outside;
 }
+/* A list inside an item: the bullet changes with each level, as in any document. Numbers stay
+   numbers, the same as the text the agent reads. */
+.canvas-note-body ul ul {
+  list-style-type: circle;
+}
+.canvas-note-body ul ul ul {
+  list-style-type: square;
+}
 .canvas-note-body li {
   display: list-item;
   margin: 0;
